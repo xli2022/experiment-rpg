@@ -1,0 +1,36 @@
+.person-monogram, #speaker-monogram {
+  width: 88px;
+  height: 110px;
+  overflow: hidden;
+  clip-path: polygon(0 0,100% 0,100% 90%,88% 100%,0 100%);
+}
+.person-monogram img, #speaker-monogram img { display: block; width: 100%; height: 100%; object-fit: cover; }
+#speaker-monogram.speaking { border-color: var(--contact); box-shadow: 0 0 16px color-mix(in srgb,var(--contact),transparent 70%); }
+#speaker-personality { color: #abc0bd; font-size: 10px; line-height: 1.6; margin-top: 8px; }
+.person-pronouns { display: inline-block; color: #86a6ac; font: 10px 'Barlow',sans-serif; white-space: nowrap; }
+.person-traits { color: #d2d7ad; font-size: 11px; line-height: 1.6; }
+.person-card .person-appearance { color: #8da9b1; font-size: 11px; }
+.dialogue-voice { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: -9px 0 18px; }
+.dialogue-voice > span { flex: 1 1 210px; color: #8eabae; font-size: 10px; line-height: 1.6; }
+.dialogue-voice button { min-height: 36px; padding: 8px 11px; border: 1px solid #668d8c55; background: #07151d66; color: #cee1d9; font-size: 10px; }
+.dialogue-voice button:hover, .dialogue-voice button:focus-visible { border-color: var(--acid); color: var(--acid); }
+.dialogue-voice button:disabled { opacity: .45; cursor: default; }
+#voice-toggle[aria-pressed="true"] { color: var(--acid); }
+#voice-enabled { width: 18px; height: 18px; accent-color: var(--acid); }
+.voice-volume-row output { display: inline-block; min-width: 30px; margin-left: 7px; color: var(--acid); }
+#voice-volume { width: 120px; }
+#voice-settings-note { line-height: 1.7; }
+@media(max-width:600px) {
+  .person-monogram { width: 68px; height: 85px; }
+  #speaker-monogram { width: 64px; height: 80px; }
+  #speaker-personality { font-size: 9px; }
+  .person-card { min-width: 0; }
+  .person-card > div:last-child { min-width: 0; }
+  .dialogue-voice { gap: 7px; }
+  .dialogue-voice > span { flex-basis: 100%; }
+}
+@media(max-height:560px) and (orientation:landscape) {
+  #speaker-monogram { width: 52px; height: 65px; }
+  #speaker-personality { font-size: 9px; margin-top: 4px; }
+  .dialogue-voice { margin-bottom: 12px; }
+}

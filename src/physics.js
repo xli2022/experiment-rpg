@@ -1,4 +1,4 @@
-export const WORLD_LIMIT = 147;
+export const WORLD_LIMIT = 280;
 export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export const damp = (a, b, speed, dt) => a + (b - a) * (1 - Math.exp(-speed * dt));
 export const angleDelta = (a, b) => Math.atan2(Math.sin(b - a), Math.cos(b - a));

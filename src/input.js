@@ -14,6 +14,8 @@ export class Input {
       if (code === 'KeyR') callbacks.reload();
       if (code === 'Space') callbacks.jump();
       if (code === 'KeyM') callbacks.map();
+      if (code === 'KeyJ') callbacks.journal();
+      if (code === 'KeyQ') callbacks.medkit();
     };
     window.addEventListener('keydown', e => {
       if (e.code === 'Escape') { e.preventDefault(); callbacks.pause(); return; }

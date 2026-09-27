@@ -10,7 +10,7 @@ const range = (a, b) => a + rand() * (b - a);
 const box = new THREE.BoxGeometry(1, 1, 1);
 const temp = new THREE.Object3D();
 
-class Batches {
+export class Batches {
   constructor(scene) { this.scene = scene; this.groups = new Map(); }
   add(mat, x, y, z, w, h, d, yaw = 0, tint) {
     if (!this.groups.has(mat)) this.groups.set(mat, []);
@@ -60,7 +60,7 @@ function noiseTexture() {
   return tex;
 }
 
-function signTexture(title, subtitle, color, vertical = false) {
+export function signTexture(title, subtitle, color, vertical = false) {
   const canvas = document.createElement('canvas'); canvas.width = vertical ? 256 : 1024; canvas.height = vertical ? 1024 : 384;
   const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
   ctx.fillStyle = '#09131c'; ctx.fillRect(0, 0, w, h);
@@ -151,7 +151,7 @@ export function createCity(scene) {
   }
   // Horizon architecture is cheap instanced geometry, beyond the playable streets.
   for (let i = 0; i < 94; i++) {
-    const angle = i / 94 * Math.PI * 2; const radius = range(190, 340);
+    const angle = i / 94 * Math.PI * 2; const radius = range(365, 465);
     const x = Math.sin(angle) * radius, z = Math.cos(angle) * radius, h = range(45, 145);
     const w = range(15, 34), d = range(14, 31);
     batches.add(pick(facadeMats), x, h / 2, z, w, h, d);
@@ -278,7 +278,7 @@ export function createCity(scene) {
 }
 
 export function addSky(scene) {
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(480, 32, 16), new THREE.ShaderMaterial({
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(700, 32, 16), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
     vertexShader: 'varying vec3 vWorld; void main(){vWorld=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
     fragmentShader: `varying vec3 vWorld; void main(){float h=normalize(vWorld).y; vec3 col=mix(vec3(.087,.13,.20),vec3(.016,.023,.055),smoothstep(0.,.72,h)); float glow=pow(max(0.,1.-abs(h-.07)),15.); col+=vec3(.065,.018,.07)*glow; gl_FragColor=vec4(col,1.);}`,

@@ -1,6 +1,6 @@
-# AFTERLIGHT
+# AFTERLIGHT: THE LAST SIGNAL
 
-A playable, original cyberpunk city prototype for desktop and mobile browsers. Built with Three.js and Vite, with a procedural city, characters using CC0 MakeHuman assets, and downloaded CC0 Quaternius animations retargeted in Blender. There are no proprietary game assets or paid runtime services. See [character sources](assets/characters/SOURCES.md) and [animation sources and licensing](assets/animations/quaternius/SOURCES.md).
+A playable cyberpunk open-world RPG for desktop and mobile browsers. Investigate a blackout that erased thousands of residents from Vesper’s civic network, meet the people keeping the city alive, and decide who controls its future. Built with Three.js and Vite, with a procedural city, characters using CC0 MakeHuman assets, and downloaded CC0 Quaternius animations retargeted in Blender. There are no proprietary game assets or paid runtime services. See [character sources](assets/characters/SOURCES.md), [animation sources](assets/animations/quaternius/SOURCES.md), and the [story and world guide](docs/STORY.md).
 
 ## Run
 
@@ -16,7 +16,7 @@ Open **http://localhost:5173**. Click **Enter the city**.
 To play on a phone, connect it to the same Wi-Fi as the computer and open the **Network** URL printed by Vite. The server listens on all interfaces. The computer's firewall must allow the development server on the private network. Landscape is recommended; portrait also works. A public deployment requires serving the `dist` directory over HTTPS.
 
 ```sh
-npm test           # Simulation and exported character asset checks
+npm test          # Campaign, economy, saves, simulation and character checks
 npm run build     # Production files in dist/
 npm run preview   # Serve the production build locally
 ```
@@ -44,7 +44,15 @@ Remove-Item Env:PAGES_BASE_PATH
 
 ## Play
 
-Explore a 300 × 300 metre district with 16 city blocks, 64 main buildings, a surrounding skyline, pedestrians, neon shopfronts, rain, and street reflections. Eight Archer GT cars can be driven. Take the nearby car to the North Exchange, exit, and disable three rogue drones to complete the first contract. Continue exploring afterward.
+Explore a continuous **560 × 560 metre world across eight districts**, with the original downtown streets connected to greenhouses, container yards, waterfront piers and a broadcast array. Twelve Archer GT cars can be driven. Start by talking to **Mara outside Kōji**, just to the left of your starting position.
+
+- **Six campaign chapters, two evidence paths, and three playable endings.** Meet eight named contacts, ask about their lives, accept local work, and make the final broadcast.
+- **A varied, voiced cast.** Women, men and a nonbinary gardener have individual facial shapes, builds, skin tones, hairstyles, outfits, portraits and personalities. Twenty-six pedestrians draw from twelve visual archetypes. Every named contact has personal conversation topics, characteristic job replies and individual reactions to all three endings.
+- **Seven side stories and a repeatable delivery contract.** Recover medical supplies, repair irrigation, reunite a family, rebuild radios, reclaim stolen freight, collect memories, and survey the city. Multiple quests can be active together; track one in the journal.
+- **Exploration with rewards.** Discover districts, recover eight written memory fragments, search twelve salvage caches, and clear five drone patrol groups. Cleared patrols stay cleared, including after loading a save.
+- **Equipment and supplies.** Buy medkits from Imani, Orrin or Rook. Rook installs three tiers each of weapon damage, armor and sprint upgrades in exchange for credits and salvage. Neighborhood trust earns discounts; the final choice changes patrol behavior or community prices.
+- **Six transit stops and two refuges.** Discover a stop on foot, then select it on the map to take the tram. Travel requires leaving your car and escaping combat. Refuges restore health, armor and ammo and set your return point.
+- **Automatic browser saves.** Quests, choices, inventory, upgrades, reputation, discoveries, patrol clears and position persist. Health and ammo refill on loading; cars return to their parking spaces. A blocked or full browser store produces a visible warning. Start over through the pause menu’s explicit new-story confirmation.
 
 | Desktop | Action |
 | --- | --- |
@@ -54,29 +62,45 @@ Explore a 300 × 300 metre district with 16 city blocks, 64 main buildings, a su
 | Right mouse | Aim; can be held together with left mouse |
 | Shift | Sprint |
 | Space | Jump; handbrake in a car |
-| E | Enter the nearest car within 4.5 m; exit when moving slowly |
+| E | Talk, use terminals, collect items, rest, or enter/exit a nearby car |
 | R | Reload the 24-round magazine; unlimited reserve ammo |
+| J | Open/close the field journal: quests, inventory, contacts and memories |
+| Q | Use a field medkit (+60 health) |
 | M | Open/close city map |
 | Escape | Pause/resume and release the mouse |
 
-On mobile, move with the left stick, drag the right side to look, and use the on-screen fire, reload, jump/brake, and E buttons. Pushing the stick fully sprints. Touch aiming has a small aim assist. Tap the minimap to open the city map and the top-right settings icon for pause/options.
+On mobile, move with the left stick, drag the right side to look, and use the on-screen fire, reload, jump/brake, and E buttons. Pushing the stick fully sprints. Touch aiming has a small aim assist. Tap the minimap for the map, the notebook icon for the journal, or the medkit count to heal. Dialogue choices and all journal/shop actions support touch.
 
-Sound starts muted; enable it with the speaker button. High quality adds neon bloom; Performance mode reduces render resolution and rain. Mobile selects Performance mode automatically. Health and armor slowly recover out of combat. Defeat returns you to the starting area, and the pause menu has a manual return option.
+Sound effects start muted; enable them with the speaker button. **Spoken NPC dialogue starts enabled**, using the browser’s available English voices with per-character voice selection, pitch and pacing. Conversations have Replay and Voice on/off controls, and settings include a separate voice volume slider. Voice preferences persist independently of your story. Subtitles always remain visible. Selecting another response, leaving a conversation or hiding the page cancels playback. A missing or blocked speech service shows a message and leaves every dialogue choice usable. Device voices and quality vary; this is synthesized speech, not recorded voice acting. The game uses the [Web Speech synthesis API](https://webaudio.github.io/web-speech-api/#tts-section), needs no microphone or API key, and the browser may use local or network speech services.
+
+High quality adds neon bloom; Performance mode reduces render resolution and rain. Mobile selects Performance mode automatically. Health and armor slowly recover out of combat. Defeat returns you to your last refuge without erasing quest progress. Menus and conversations pause the world. Map destination lines indicate a bearing, not an obstacle-avoiding driving route.
 
 ## Project layout
 
-- `src/main.js` — simulation, camera, combat, vehicles, and mission flow
+- `src/main.js` — simulation, camera, combat, vehicles, interactions and persistence integration
+- `src/content.js` — authored districts, contacts, quests, items, encounters and endings
+- `src/campaign.js` — renderer-independent quest/economy engine and validated versioned saves
+- `src/dialogue.js` — branching conversations, quest replies and final decisions
+- `src/world.js` — outer districts, landmarks, interactable objects and named NPCs
+- `src/rpg-ui.js` / `src/rpg.css` — journal, conversations, shops, transit map and ending panels
 - `src/city.js` — procedural city, signs, roads, skyline, weather
 - `src/models.js` — procedural cars, drones, and shared mesh helpers
 - `src/characters.js` — GLB loading, skeletal animation blending, weapon attachment
 - `src/crowd.js` — full skeletal pedestrians with authored walk cycles
+- `src/npc-profiles.js` / `src/npc-appearance.js` — cast and crowd designs, fitted geometry, bone-attached wardrobe, individual idle poses and rendered portraits
+- `src/npc-materials.js` — animated-surface clothing finishes, necklines, makeup and scars
+- `src/npc-shape.js` / `src/npc-head-shape.js` — shared CC0 facial deformation field and fitting of eyes/accessories
+- `src/voice.js` — speech synthesis, automatic cast, cancellation, recovery and saved voice preferences
+- `src/npc.css` — portrait and voice-control layouts
 - `src/input.js` — keyboard/mouse and multi-touch controls
 - `src/jump.js` — shared jump arc and authored-animation timing
 - `src/physics.js` — collision, vehicle handling, and ray tests
 - `src/ui.js` / `src/style.css` — responsive HUD, minimap, and menus
 - `src/audio.js` — locally synthesized weapon, vehicle, and interface audio
 - `tests/physics.test.js` — simulation regression tests
+- `tests/campaign.test.js` — all campaign branches, side quests, economy, persistence and content integrity
 - `tests/characters.test.js` — exported skinning, authored motion, loop continuity, and runtime blending checks
+- `tests/npc.test.js` / `tests/voice.test.js` — character diversity, source/rig integrity, accessory fitting, personalities and speech lifecycle checks
 - `assets/characters/afterlight-characters.blend` — editable character source with packed textures
 - `scripts/build_characters.py` — reproducible Blender authoring and export pipeline
 - `scripts/retarget_animations.py` — transfers the downloaded animations to the character rig
@@ -87,12 +111,18 @@ Vex has anatomical proportions, a textured face, eyes and hair, a utility jacket
 
 Jumping synchronizes takeoff with leg extension and prepares the feet before contact. Outgoing clips hold their sampled pose while fading, and blended boot contact prevents the feet from sinking into the road. Standing landings retain the full recovery; moving characters step back into their gait after impact. Another jump is available after the initial landing recovery.
 
-The 26 pedestrians use the same detailed geometry and complete skeletal walk animations, with varied proportions, colors, timing, and two walk styles. Their faces and clothing silhouette currently share the same base model. Mesh reduction and the old eight-pose crowd animation have been removed in favor of animation quality. Blender is only needed to edit or regenerate the assets; it is not required to run the game.
+The 26 pedestrians use the detailed source rig and complete skeletal walk animations, with twelve variants of faces, builds, clothing and hair, varied timing, and two walk styles. Named contacts have seven bespoke combinations of those features. Runtime geometry fitting changes the face, waist, hips, shoulders and garment volume while preserving skin weights. Original hair, beards, glasses, hats and occupational accessories follow the head/chest/hip bones. Cached shapes and merged wardrobe parts limit duplicated work. The player’s original model is unchanged. Blender is only needed to edit or regenerate the base assets; it is not required to run the game. Run `node scripts/build_npc_shapes.mjs` to regenerate the facial field from bundled source data.
+
+The adult women have fitted leather, tailoring and cropped jackets, with individual makeup, jewelry and poses. Rook’s optical implant, arm brace and brass bird and Orrin’s braided beard, long coat and compass connect to new optional stories about their pasts. Their local quests unlock personal follow-ups. The People journal shows the updated portraits, descriptions and biographies.
 
 ## Scope and verification
 
-This is the first playable city slice, with arcade vehicle physics and drone combat. It does not yet include building interiors, dialogue trees, inventory, a full RPG campaign, multiplayer, or saved progress. Reloading the page starts a new session. UI fonts use Google Fonts with local system fallbacks; game assets require no external downloads once the application has loaded.
+This remains a browser-scale RPG: exterior exploration, arcade vehicles, voiced text dialogue and drone combat. Buildings are scenery. Characters use variants of a common animated rig; speech has no lip synchronization or prerecorded performances. There is no multiplayer. Saves are local to this browser and origin, not synchronized across devices. UI fonts use Google Fonts with system fallbacks; game assets load locally.
 
-Verified in Chromium with a full desktop mission playthrough, simultaneous aim/fire, reloads, vehicle entry/exit, braking, jumping, map toggling, audio controls, quality switching, and pause. Touch movement, aiming, shooting, reloading, vehicle entry, driving, braking, and exit were checked with real browser touch events; layouts were inspected at 844 × 390 and 390 × 844. Mobile checks are browser emulation, not physical-device performance certification. The production build also passed a separate browser smoke check without runtime errors or development diagnostics. Eight automated simulation tests cover wall tunnelling, sliding, boundaries, blocked exits, forward/reverse/braking, bullet occlusion, and angle wrapping.
+The automated suite contains 45 tests. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment and consumables. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines. The original physics and authored-animation checks remain in place.
 
-Seven additional automated character tests verify embedded textures, skin weights, all 16 exported animation clips, changing joint tracks, seamless locomotion loops, normalized upper/lower body layers, outgoing jump poses, and jump timing at 30/60/120 fps (15 automated tests total). The authored animation update was checked in desktop Chromium and touch emulation for movement, jumps, firing, and reloads; desktop vehicle entry, driving, braking, and exit also passed. The full animation source download is retained locally, so asset rebuilding does not depend on an external animation service.
+Browser verification covers the first chapter from Mara through driving, relay recovery and turn-in, save continuation, collision-free authored destinations, and journal/map layouts at desktop and phone sizes. Separate isolated test saves exercise workshop purchases, fast travel, the protected-evidence branch and the neighborhood-control finale through the actual UI. The touch interaction button and landscape dialogue layout were also checked. Mobile verification uses browser emulation, not a physical-device performance certification. Production compilation can use `npm run build -- --configLoader runner` in Windows environments that restrict esbuild’s ancestor-directory access.
+
+NPC/voice verification inspected all seven cast models and their portraits, opened Mara and Rook conversations, accepted a job, exercised replay/mute/exit, reloaded saved voice preferences, and checked portrait (390 × 844) and landscape (844 × 390) layouts. The production build loaded without console errors and omitted development diagnostics. The test browser initially reported speech playback starting, then its native service returned `synthesis-failed`, including for standalone default-voice utterances outside the game. Error fallback was verified; reliable audible playback and voice quality still require checking on the target device.
+
+The fashion and personal-story update was inspected in an animated cast gallery and the production game. Rook’s nested topic menu and brass-bird reply were checked at desktop and 390 × 844 phone sizes, with no horizontal overflow, quest advancement or console warnings/errors. Browser audio was muted for that separate visual check.
