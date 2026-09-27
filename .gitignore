@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.cache/
+test-results/
+*.log
+.playwright-mcp/
+*.blend1
+*.blend[0-9]
+__pycache__/
+*.py[cod]
+.vscode/settings.json
