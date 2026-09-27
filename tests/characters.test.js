@@ -205,3 +205,26 @@ test('jump arc and landing timing remain consistent across frame rates', () => {
     assert.ok(beginJump(player), 'another jump is available after recovery');
   }
 });
+
+test('climbing animates alternating hands and boots on the actual rig, hides the gun and blends back to running', () => {
+  const model = createCharacter(actorAsset()), positions = [];
+  for (let i = 0; i < 120; i++) {
+    animateCharacter(model, false, 1 / 60, { climb: { mode: 'climb', phase: i / 60, speed: 3.4, roofY: 30 } });
+    const hands = ['HandL', 'HandR'].map(name => model.bones.get(name).getWorldPosition(new THREE.Vector3()));
+    if (i > 60) positions.push(hands.map(p => p.y));
+    for (const bone of model.bones.values()) assert.ok(bone.quaternion.toArray().every(Number.isFinite));
+    if (i > 30) {
+      assert.equal(model.gun.visible, false);
+      for (const hand of hands) assert.ok(hand.z < -.2, 'Hands reach toward the wall');
+    }
+  }
+  assert.ok(positions.some(([left, right]) => left > right + .1));
+  assert.ok(positions.some(([left, right]) => right > left + .1));
+  assert.equal(model.animation, 'Climb');
+  animateCharacter(model, false, 1 / 60, { climb: { mode: 'climb', phase: 1, speed: 0, roofY: 30 } });
+  assert.equal(model.animation, 'ClimbHang');
+  for (let i = 0; i < 45; i++) animateCharacter(model, false, 1 / 60, { climb: { mode: 'mantle', phase: 1, speed: 0, roofY: 1.15, progress: i / 44 } });
+  assert.equal(model.animation, 'Mantle');
+  for (let i = 0; i < 120; i++) animateCharacter(model, false, 1 / 60, { speed: 10.8 });
+  assert.equal(model.animation, 'Run'); assert.equal(model.gun.visible, true);
+});

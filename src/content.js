@@ -1,3 +1,5 @@
+import { OUTER_DISTRICTS, outerDistrictAt } from './world-config.js';
+import { streetPoint } from './metropolis.js';
 // Authored world content. Coordinates are shared by the simulation, journal and map.
 export const DISTRICTS = [
   { id: 'neon', name: 'Neon Quarter', x: 0, z: 32, color: '#deff7a', description: 'Street kitchens, pirate radio and the people the network forgot.' },
@@ -8,9 +10,11 @@ export const DISTRICTS = [
   { id: 'freight', name: 'Freightworks', x: 210, z: 0, color: '#ffc077', description: 'Cargo yards and repair shops. Nothing stays broken here for very long.' },
   { id: 'docks', name: 'Rustwater Docks', x: 0, z: 210, color: '#76e0e8', description: 'The last boats out. Smugglers trade in memories as often as machinery.' },
   { id: 'ridge', name: 'Relay Ridge', x: 0, z: -215, color: '#f393c9', description: 'A forgotten broadcast array, still listening for someone to answer.' },
+  ...OUTER_DISTRICTS,
 ];
 
 export function districtAt(x, z) {
+  if (Math.max(Math.abs(x), Math.abs(z)) > 285) return outerDistrictAt(x, z);
   const id = z < -150 ? 'ridge' : z > 150 ? 'docks' : x < -150 ? 'gardens' : x > 150 ? 'freight' : z < -54 ? 'exchange' : x > 50 ? 'chrome' : x < -50 ? 'lower' : 'neon';
   return DISTRICTS.find(d => d.id === id);
 }
@@ -65,7 +69,13 @@ export const MEMORIES = [
 ].map(([id, name, x, z, author, text]) => object(id, name, 'memory', x, z, text, { author }));
 
 export const CACHES = [[8, 91], [-8, -47], [-64, -92], [64, 104], [-118, 65], [122, -113], [-239, 12], [-180, -42], [190, 42], [238, -43], [-32, 185], [42, -192]].map(([x, z], i) => object(`cache-${i}`, 'Salvage cache', 'cache', x, z, 'Abandoned supplies: credits, components and a chance to keep going.'));
-export const WORLD_OBJECTS = [...PLACES, ...MEMORIES, ...CACHES];
+export const REGIONAL_STOPS = [-4608, -3072, -1536, 0, 1536, 3072, 4608].flatMap((x, ix) =>
+  [-4608, -3072, -1536, 0, 1536, 3072, 4608].flatMap((z, iz) => {
+    if (x === 0 && z === 0 || (ix + iz) % 2 !== 0) return [];
+    const p = streetPoint(x, z), district = outerDistrictAt(p.x, p.z);
+    return [object(`metro-region-${ix}-${iz}`, `${district.name} / ${ix + 1}${iz + 1}`, 'transit', p.x + 16, p.z + 16, 'Regional night tram. Discover this stop on foot to add it to your transit network.', { roadX: x, roadZ: z })];
+  }));
+export const WORLD_OBJECTS = [...PLACES, ...MEMORIES, ...CACHES, ...REGIONAL_STOPS];
 export const placeById = id => WORLD_OBJECTS.find(p => p.id === id);
 
 const step = (type, target, text, count = 1) => ({ type, target, text, count });
@@ -82,7 +92,7 @@ export const QUESTS = [
   { id: 'letters', kind: 'side', title: 'No return address', giver: 'cass', description: 'Cass has a letter for Orrin from someone the registry says is dead. Some messages deserve a human courier.', reward: 280, xp: 160, faction: 'community', steps: [step('talk', 'orrin', 'Hand Orrin the sealed letter'), step('talk', 'cass', 'Tell Cass the letter arrived')] },
   { id: 'voices', kind: 'side', title: 'The things we keep', giver: 'mara', description: 'Find three memory fragments around Vesper. Mara will weave them into a broadcast for the missing.', reward: 420, xp: 220, faction: 'community', steps: [step('memories', 'memories', 'Collect 3 memory fragments', 3), step('talk', 'mara', 'Share the voices with Mara')] },
   { id: 'freight', kind: 'side', title: 'Unclaimed cargo', giver: 'rook', description: 'Security drones have sealed the freight yard. Clear them out and recover the manifest for Rook.', reward: 600, xp: 280, faction: 'community', steps: [step('kill', 'freight', 'Disable the freight yard patrol', 3), step('interact', 'freight-manifest', 'Recover the shipment manifest'), step('talk', 'rook', 'Return the manifest to Rook')] },
-  { id: 'survey', kind: 'side', title: 'Every corner of the city', giver: 'sable', description: 'Sable wants to map the city as it actually exists. Visit all eight districts, then report what you found.', reward: 700, xp: 350, faction: 'community', steps: [step('districts', 'districts', 'Discover all 8 districts', 8), step('talk', 'sable', 'Share your field notes with Sable')] },
+  { id: 'survey', kind: 'side', title: 'Every corner of the city', giver: 'sable', description: 'Sable wants to map the city as it actually exists. Visit all sixteen districts, then report what you found.', reward: 700, xp: 350, faction: 'community', steps: [step('districts', 'districts', `Discover all ${DISTRICTS.length} districts`, DISTRICTS.length), step('talk', 'sable', 'Share your field notes with Sable')] },
   { id: 'night-run', kind: 'contract', title: 'The night mail', giver: 'board', description: 'Carry a neighborhood dispatch to the east-side dropbox, then return to the job board. Available again after each completed route.', reward: 180, xp: 70, repeatable: true, steps: [step('interact', 'parcel', 'Deliver the dispatch to the courier dropbox'), step('interact', 'board', 'Collect payment at the job board')] },
 ];
 export const questById = id => QUESTS.find(q => q.id === id);

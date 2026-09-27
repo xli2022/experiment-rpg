@@ -1,4 +1,6 @@
 import { QUESTS, WORLD_OBJECTS, DISTRICTS, UPGRADES, ENCOUNTERS, ENDINGS, questById, placeById } from './content.js';
+import { WORLD_LIMIT } from './world-config.js';
+import { MOVEMENT } from './locomotion.js';
 
 export const SAVE_KEY = 'afterlight.last-signal.v1';
 export const SAVE_VERSION = 1;
@@ -50,7 +52,7 @@ export function readSave(storage) {
     const save = JSON.parse(text);
     if (save.version !== SAVE_VERSION || !save.progress || typeof save.progress !== 'object') throw new Error('Unsupported save');
     const p = save.position;
-    const position = p && Number.isFinite(p.x) && Number.isFinite(p.z) && Math.abs(p.x) < 280 && Math.abs(p.z) < 280 ? { x: p.x, z: p.z } : null;
+    const position = p && Number.isFinite(p.x) && Number.isFinite(p.z) && Math.abs(p.x) < WORLD_LIMIT && Math.abs(p.z) < WORLD_LIMIT ? { x: p.x, z: p.z, ...(Number.isFinite(p.y) && p.y >= 0 && p.y < 200 ? { y: p.y } : {}) } : null;
     return { progress: restoreProgress(save.progress), position, loaded: true };
   } catch {
     return { progress: freshProgress(), position: null, loaded: false, warning: 'Saved progress could not be loaded. This session starts fresh.' };
@@ -59,7 +61,7 @@ export function readSave(storage) {
 
 export function writeSave(storage, progress, position) {
   try {
-    storage.setItem(SAVE_KEY, JSON.stringify({ version: SAVE_VERSION, progress, position: { x: position.x, z: position.z } }));
+    storage.setItem(SAVE_KEY, JSON.stringify({ version: SAVE_VERSION, progress, position: { x: position.x, z: position.z, ...(Number.isFinite(position.y) ? { y: position.y } : {}) } }));
     return true;
   } catch { return false; }
 }
@@ -183,7 +185,7 @@ export class Campaign {
   }
   get maxArmor() { return 50 + this.data.upgrades.armor * 25; }
   get damage() { return 34 + this.data.upgrades.damage * 10; }
-  get sprintSpeed() { return 6.6 + this.data.upgrades.sprint * .8; }
+  get sprintSpeed() { return MOVEMENT.sprint + this.data.upgrades.sprint * .8; }
   get completed() { return QUESTS.filter(q => this.status(q.id) === 'complete').length; }
   objective(player = { x: 0, z: 0 }) {
     if (this.pin) { const p = placeById(this.pin); if (p) return { ...p, label: p.name, text: 'Custom destination', pinned: true }; }

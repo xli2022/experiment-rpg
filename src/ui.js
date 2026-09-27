@@ -22,15 +22,25 @@ export class HUD {
     n['reload-hint'].innerHTML = state.reloading > 0 ? 'RELOADING...' : '<kbd>R</kbd> RELOAD';
     n.credits.textContent = data.credits.toLocaleString(); n['cred-value'].textContent = data.xp; n.level.textContent = String(1 + Math.floor(data.xp / 500)).padStart(2, '0');
     n.fps.textContent = Math.round(fps);
-    if (this.lastDriving !== !!driving) {
-      n['weapon-panel'].classList.toggle('hidden', !!driving); n['driving-panel'].classList.toggle('hidden', !driving);
-      document.getElementById('crosshair').style.display = driving ? 'none' : '';
-      document.getElementById('touch-fire').style.display = driving ? 'none' : '';
-      document.getElementById('touch-reload').style.display = driving ? 'none' : '';
-      this.lastDriving = !!driving;
+    const climbing = !!player.climb;
+    if (this.lastDriving !== !!driving || this.lastClimbing !== climbing) {
+      n['weapon-panel'].classList.toggle('hidden', !!driving || climbing); n['driving-panel'].classList.toggle('hidden', !driving);
+      for (const id of ['crosshair', 'touch-fire', 'touch-reload']) $(id).style.display = driving || climbing ? 'none' : '';
+      $('touch-interact').style.display = climbing ? 'none' : '';
+      this.lastDriving = !!driving; this.lastClimbing = climbing;
+    }
+    const face = player.climb ?? player.climbCandidate, touch = document.body.classList.contains('touch');
+    const showClimb = !!face && !driving && state.started && !state.paused;
+    $('climb-panel').classList.toggle('hidden', !showClimb); $('climb-panel').classList.toggle('near-wall', !climbing);
+    $('touch-climb').classList.toggle('hidden', !showClimb); $('touch-climb').textContent = climbing ? 'LET GO' : 'CLIMB';
+    if (showClimb) {
+      $('climb-title').textContent = !climbing ? 'WALL WITHIN REACH' : face.mode === 'mantle' ? 'PULLING UP' : face.blocked ? 'MOVE ALONG THE WALL' : 'CLIMBING';
+      $('climb-height').textContent = `${Math.round(climbing ? player.y : face.roofY)} M`;
+      $('climb-progress').style.width = `${Math.min(100, Math.max(0, (player.y - face.baseY) / Math.max(1, face.roofY - face.baseY) * 100))}%`;
+      $('climb-controls').textContent = touch ? climbing ? 'Stick: climb & move sideways. ↑ jump off. LET GO to drop.' : 'Tap CLIMB to grab this wall.' : climbing ? 'W/S up & down · A/D sideways\nShift climb faster · Space jump off · C release' : 'C to climb · Space to grab a wall ahead';
     }
     if (driving) { const speed = Math.round(Math.abs(driving.speed) * 3.6); n.speed.textContent = speed; n['speed-bar'].style.width = `${Math.min(speed / 151 * 100, 100)}%`; }
-    const canInteract = !driving && (nearby || nearest) && state.started && !state.paused;
+    const canInteract = !driving && !climbing && (nearby || nearest) && state.started && !state.paused;
     n.interaction.classList.toggle('hidden', !canInteract);
     if (canInteract) {
       n['interact-caption'].textContent = nearby ? nearby.name.toUpperCase() : 'ARCHER GT / AVAILABLE';
@@ -56,24 +66,11 @@ export class HUD {
   }
   drawMap(player, yaw, drones, objective, expanded = false) {
     const ctx = expanded ? this.full : this.map, w = ctx.canvas.width, h = ctx.canvas.height;
-    const scale = expanded ? Math.min(w, h) / MAP_SPAN : 2.1;
-    const cx = expanded ? 0 : player.x, cz = expanded ? 0 : player.z;
+    const view = this.city.mapView;
+    const scale = expanded ? Math.min(w, h) / view.span : 2.1;
+    const cx = expanded ? view.x : player.x, cz = expanded ? view.z : player.z;
     const point = (x, z) => [w / 2 + (x - cx) * scale, h / 2 + (z - cz) * scale];
-    ctx.fillStyle = '#0a1822'; ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = '#92b4b50c'; ctx.lineWidth = 1;
-    for (let x = 0; x < w; x += 30) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
-    for (let y = 0; y < h; y += 30) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); }
-    ctx.strokeStyle = '#314955'; ctx.lineWidth = 16 * scale;
-    for (const s of [...STREETS, -192, 192]) {
-      const extent = [-192, 0, 192].includes(s) ? 275 : 145;
-      ctx.beginPath(); ctx.moveTo(...point(s, -extent)); ctx.lineTo(...point(s, extent)); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(...point(-extent, s)); ctx.lineTo(...point(extent, s)); ctx.stroke();
-    }
-    for (const b of this.city.mapInfo) {
-      const [x, y] = point(b.x, b.z), rw = b.w * scale, rh = b.d * scale;
-      ctx.fillStyle = '#152b37'; ctx.strokeStyle = '#45616a'; ctx.lineWidth = expanded ? 1.4 : 1;
-      ctx.fillRect(x - rw / 2, y - rh / 2, rw, rh); ctx.strokeRect(x - rw / 2, y - rh / 2, rw, rh);
-    }
+    this.drawBaseMap(ctx, w, h, cx, cz, scale, expanded);
     if (!objective.hidden) {
       const [px, py] = point(player.x, player.z); let [ox, oy] = point(objective.x, objective.z);
       if (!expanded) { const ratio = Math.min(1, (w / 2 - 14) / Math.max(1, Math.abs(ox - w / 2)), (h / 2 - 14) / Math.max(1, Math.abs(oy - h / 2))); ox = w / 2 + (ox - w / 2) * ratio; oy = h / 2 + (oy - h / 2) * ratio; }
@@ -105,8 +102,53 @@ export class HUD {
     ctx.fillStyle = '#dfff85'; ctx.strokeStyle = '#263d2b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(6.5, 7); ctx.lineTo(0, 3); ctx.lineTo(-6.5, 7); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
     if (expanded) {
       ctx.font = '600 10px Barlow, Arial'; ctx.fillStyle = '#b5cbcc'; ctx.textAlign = 'center';
-      DISTRICTS.forEach(d => { ctx.fillStyle = this.campaign.data.discovered.includes(d.id) ? '#bed5cc' : '#6f8a95'; ctx.fillText(d.name.toUpperCase(), ...point(d.x, d.z + (d.id === 'ridge' ? -65 : 40))); });
-      ctx.textAlign = 'left'; ctx.font = '10px Barlow, Arial'; ctx.fillStyle = '#7a999d'; ctx.fillText('N ↑', 20, 27); ctx.fillText('560 M × 560 M / 8 CONNECTED DISTRICTS', 20, h - 20);
+      DISTRICTS.forEach((d, i) => { if (view.span > 2400 && i < 8) return; ctx.fillStyle = this.campaign.data.discovered.includes(d.id) ? '#bed5cc' : '#6f8a95'; ctx.fillText(d.name.toUpperCase(), ...point(d.x, d.z + (d.id === 'ridge' ? -65 : 40))); });
+      ctx.textAlign = 'left'; ctx.font = '10px Barlow, Arial'; ctx.fillStyle = '#7a999d'; ctx.fillText('N ↑', 20, 27); ctx.fillText(`${view.span >= MAP_SPAN ? '11 KM × 11 KM' : `${Math.round(view.span)} M VIEW`} / 16 DISTRICTS`, 20, h - 20);
     }
+  }
+  drawBaseMap(ctx, w, h, cx, cz, scale, expanded) {
+    this.mapCaches ??= [];
+    const x = Math.round(cx / 48) * 48, z = Math.round(cz / 48) * 48;
+    const key = `${x},${z},${scale},${w},${h}`, slot = expanded ? 1 : 0;
+    let cache = this.mapCaches[slot];
+    if (!cache || cache.key !== key) {
+      const canvas = cache?.canvas ?? document.createElement('canvas'); canvas.width = w + 256; canvas.height = h + 256;
+      const c = canvas.getContext('2d'), point = (px, pz) => [canvas.width / 2 + (px - x) * scale, canvas.height / 2 + (pz - z) * scale];
+      const rx = canvas.width / 2 / scale, rz = canvas.height / 2 / scale;
+      c.fillStyle = '#0a1822'; c.fillRect(0, 0, canvas.width, canvas.height);
+      c.strokeStyle = '#314955'; c.lineWidth = 16 * scale; c.beginPath();
+      for (const s of [...STREETS, -192, 192]) {
+        const extent = [-192, 0, 192].includes(s) ? 275 : 145;
+        c.moveTo(...point(s, s === 0 ? -230 : -extent)); c.lineTo(...point(s, extent)); c.moveTo(...point(-extent, s)); c.lineTo(...point(s === 0 ? 210 : extent, s));
+      }
+      c.stroke();
+      const segments = this.city.roadIndex.query(x - rx, z - rz, x + rx, z + rz).concat(this.city.metropolis.roadIndex.query(x - rx, z - rz, x + rx, z + rz));
+      for (const arterial of [false, true]) {
+        c.beginPath(); c.lineWidth = Math.max(.65, (arterial ? 18 : 11) * scale); c.strokeStyle = arterial ? '#506773' : '#263e4b';
+        for (const s of segments) {
+          if ((s.width >= 16) !== arterial || scale < .12 && !arterial) continue;
+          c.moveTo(...point(s.a.x, s.a.z)); c.lineTo(...point(s.b.x, s.b.z));
+        }
+        c.stroke();
+      }
+      if (rx < 1500 && rz < 1500) {
+        const blocks = this.city.metropolis.area(x - rx, z - rz, x + rx, z + rz);
+        for (const f of [...this.city.plan.features, ...blocks.flatMap(b => b.features)]) {
+          const [px, py] = point(f.x, f.z);
+          c.fillStyle = f.type === 'garden' ? '#376455' : f.type === 'court' ? '#38626b' : '#685d50';
+          c.fillRect(px - 20 * scale, py - 20 * scale, 40 * scale, 40 * scale);
+        }
+        const buildings = this.city.mapInfo.concat(blocks.flatMap(b => b.buildings));
+        c.fillStyle = '#1f3944'; c.strokeStyle = '#3e5861'; c.lineWidth = .7;
+        for (const b of buildings) {
+          if (Math.abs(b.x - x) > rx + 40 || Math.abs(b.z - z) > rz + 40) continue;
+          const [px, py] = point(b.x, b.z); c.save(); c.translate(px, py); c.rotate(-(b.yaw ?? 0));
+          c.fillRect(-b.w * scale / 2, -b.d * scale / 2, b.w * scale, b.d * scale);
+          if (scale > .5) c.strokeRect(-b.w * scale / 2, -b.d * scale / 2, b.w * scale, b.d * scale); c.restore();
+        }
+      }
+      cache = { key, canvas, x, z }; this.mapCaches[slot] = cache;
+    }
+    ctx.drawImage(cache.canvas, -128 + (cache.x - cx) * scale, -128 + (cache.z - cz) * scale);
   }
 }

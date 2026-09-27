@@ -44,14 +44,16 @@ Remove-Item Env:PAGES_BASE_PATH
 
 ## Play
 
-Explore a continuous **560 × 560 metre world across eight districts**, with the original downtown streets connected to greenhouses, container yards, waterfront piers and a broadcast array. Twelve Archer GT cars can be driven. Start by talking to **Mara outside Kōji**, just to the left of your starting position.
+Explore a continuous **11 × 11 kilometre world across sixteen districts**: 121 km², just below San Francisco's land area. Over 34,000 buildings, 54,000 trees, 11,000 street props and 1,500 public spaces extend downtown into terraces, parks, civic campuses, apartment neighborhoods and industrial districts. Curved avenues and regional streets connect the city, with 36 driveable Archer GT cars. Start by talking to **Mara outside Kōji**, just to the left of your starting position.
 
 - **Six campaign chapters, two evidence paths, and three playable endings.** Meet eight named contacts, ask about their lives, accept local work, and make the final broadcast.
 - **A varied, voiced cast.** Women, men and a nonbinary gardener have individual facial shapes, builds, skin tones, hairstyles, outfits, portraits and personalities. Twenty-six pedestrians draw from twelve visual archetypes. Every named contact has personal conversation topics, characteristic job replies and individual reactions to all three endings.
 - **Seven side stories and a repeatable delivery contract.** Recover medical supplies, repair irrigation, reunite a family, rebuild radios, reclaim stolen freight, collect memories, and survey the city. Multiple quests can be active together; track one in the journal.
+- **Vertical exploration.** Most building walls can be climbed, including rotated facades and the original story landmarks. Ascend, descend, shimmy, jump away and pull onto clear rooftops. Roof gardens, equipment and taller penthouses form another layer of the city.
+- **Neighborhood variety.** Downtown shares the wider city’s eight building families, facade materials and real-world window scale. Pocket gardens, basketball courts, produce markets, fountains and sculpture plazas break up blocks; their locations appear on the local map.
 - **Exploration with rewards.** Discover districts, recover eight written memory fragments, search twelve salvage caches, and clear five drone patrol groups. Cleared patrols stay cleared, including after loading a save.
 - **Equipment and supplies.** Buy medkits from Imani, Orrin or Rook. Rook installs three tiers each of weapon damage, armor and sprint upgrades in exchange for credits and salvage. Neighborhood trust earns discounts; the final choice changes patrol behavior or community prices.
-- **Six transit stops and two refuges.** Discover a stop on foot, then select it on the map to take the tram. Travel requires leaving your car and escaping combat. Refuges restore health, armor and ammo and set your return point.
+- **Thirty transit stops and two refuges.** Discover a stop on foot, then select it on the map to take the tram. Travel requires leaving your car and escaping combat. Refuges restore health, armor and ammo and set your return point.
 - **Automatic browser saves.** Quests, choices, inventory, upgrades, reputation, discoveries, patrol clears and position persist. Health and ammo refill on loading; cars return to their parking spaces. A blocked or full browser store produces a visible warning. Start over through the pause menu’s explicit new-story confirmation.
 
 | Desktop | Action |
@@ -60,8 +62,9 @@ Explore a continuous **560 × 560 metre world across eight districts**, with the
 | Mouse | Look while captured; click and drag if pointer capture is unavailable |
 | Left mouse | Fire; hold for automatic fire |
 | Right mouse | Aim; can be held together with left mouse |
-| Shift | Sprint |
-| Space | Jump; handbrake in a car |
+| Shift / Alt | Sprint / walk; default movement is a brisk jog |
+| C | Grab or release a nearby wall; WASD climbs up/down and sideways |
+| Space | Jump; grab a wall ahead; jump away while climbing; handbrake in a car |
 | E | Talk, use terminals, collect items, rest, or enter/exit a nearby car |
 | R | Reload the 24-round magazine; unlimited reserve ammo |
 | J | Open/close the field journal: quests, inventory, contacts and memories |
@@ -69,11 +72,15 @@ Explore a continuous **560 × 560 metre world across eight districts**, with the
 | M | Open/close city map |
 | Escape | Pause/resume and release the mouse |
 
-On mobile, move with the left stick, drag the right side to look, and use the on-screen fire, reload, jump/brake, and E buttons. Pushing the stick fully sprints. Touch aiming has a small aim assist. Tap the minimap for the map, the notebook icon for the journal, or the medkit count to heal. Dialogue choices and all journal/shop actions support touch.
+Jogging is 5.8 m/s, sprinting starts at 10.8 m/s, deliberate walking is 2.4 m/s, and aiming moves at 2.6 m/s. Acceleration, braking and animation playback follow actual movement. Climbing is 3.4 m/s, or 5.1 m/s with Shift, with no stamina limit; keep moving up to pull onto an unobstructed roof. Rooftop position persists in saves. Loading a save made while hanging on a wall resumes falling.
+
+On mobile, move with the left stick, drag the right side to look, and use the on-screen fire, reload, jump/brake, and E buttons. Pushing the stick fully sprints. A CLIMB button appears beside reachable walls and becomes LET GO while hanging; the stick controls ascent, descent and sideways movement, and the jump button pushes away. The climb panel shows height and progress to the roof. Touch aiming has a small aim assist. Tap the minimap for the map, the notebook icon for the journal, or the medkit count to heal. Dialogue choices and all journal/shop actions support touch.
 
 Sound effects start muted; enable them with the speaker button. **Spoken NPC dialogue starts enabled**, using the browser’s available English voices with per-character voice selection, pitch and pacing. Conversations have Replay and Voice on/off controls, and settings include a separate voice volume slider. Voice preferences persist independently of your story. Subtitles always remain visible. Selecting another response, leaving a conversation or hiding the page cancels playback. A missing or blocked speech service shows a message and leaves every dialogue choice usable. Device voices and quality vary; this is synthesized speech, not recorded voice acting. The game uses the [Web Speech synthesis API](https://webaudio.github.io/web-speech-api/#tts-section), needs no microphone or API key, and the browser may use local or network speech services.
 
-High quality adds neon bloom; Performance mode reduces render resolution and rain. Mobile selects Performance mode automatically. Health and armor slowly recover out of combat. Defeat returns you to your last refuge without erasing quest progress. Menus and conversations pause the world. Map destination lines indicate a bearing, not an obstacle-avoiding driving route.
+High quality adds neon bloom; Performance mode uses shorter scenery/detail distances, fewer animated actors and rain particles, and a lower resolution cap. Mobile selects Performance mode automatically, and resolution adapts to sustained frame pressure. Scenery loads in nearby and visible cells, with distant instance buffers released as you travel. The map supports drag-to-pan, zoom buttons, and neighborhood/city views. See [city scale, rendering research and measured results](docs/CITY-RENDERING.md).
+
+Health and armor slowly recover out of combat. Defeat returns you to your last refuge without erasing quest progress. Menus and conversations pause the world. Map destination lines indicate a bearing, not an obstacle-avoiding driving route.
 
 ## Project layout
 
@@ -83,7 +90,10 @@ High quality adds neon bloom; Performance mode reduces render resolution and rai
 - `src/dialogue.js` — branching conversations, quest replies and final decisions
 - `src/world.js` — outer districts, landmarks, interactable objects and named NPCs
 - `src/rpg-ui.js` / `src/rpg.css` — journal, conversations, shops, transit map and ending panels
-- `src/city.js` — procedural city, signs, roads, skyline, weather
+- `src/city.js` — original downtown, signs, roads and weather
+- `src/city-plan.js` / `src/metropolis.js` — inner streets and deterministic regional neighborhoods
+- `src/city-scenery.js` / `src/world-stream.js` — instanced scenery, spatial streaming, detail levels and quality budgets
+- `src/spatial-grid.js` / `src/world-config.js` — collision broad phase and metropolitan scale
 - `src/models.js` — procedural cars, drones, and shared mesh helpers
 - `src/characters.js` — GLB loading, skeletal animation blending, weapon attachment
 - `src/crowd.js` — full skeletal pedestrians with authored walk cycles
@@ -94,7 +104,9 @@ High quality adds neon bloom; Performance mode reduces render resolution and rai
 - `src/npc.css` — portrait and voice-control layouts
 - `src/input.js` — keyboard/mouse and multi-touch controls
 - `src/jump.js` — shared jump arc and authored-animation timing
-- `src/physics.js` — collision, vehicle handling, and ray tests
+- `src/physics.js` — oriented collision, height-aware movement, vehicle handling, and ray tests
+- `src/locomotion.js` / `src/climbing.js` / `src/climb-animation.js` — responsive movement, wall traversal and procedural hand/foot IK
+- `src/architecture.js` / `src/public-spaces.js` — shared structural geometry for rendering and collision, and neighborhood public spaces
 - `src/ui.js` / `src/style.css` — responsive HUD, minimap, and menus
 - `src/audio.js` — locally synthesized weapon, vehicle, and interface audio
 - `tests/physics.test.js` — simulation regression tests
@@ -119,7 +131,7 @@ The adult women have fitted leather, tailoring and cropped jackets, with individ
 
 This remains a browser-scale RPG: exterior exploration, arcade vehicles, voiced text dialogue and drone combat. Buildings are scenery. Characters use variants of a common animated rig; speech has no lip synchronization or prerecorded performances. There is no multiplayer. Saves are local to this browser and origin, not synchronized across devices. UI fonts use Google Fonts with system fallbacks; game assets load locally.
 
-The automated suite contains 45 tests. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment and consumables. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines. The original physics and authored-animation checks remain in place.
+The automated suite contains 78 tests. Traversal coverage includes prompt acceleration/braking, rotated wall and roof collision, climbing and mantling at 30/60/120 FPS, blocked ledges, cancelling a mantle without getting stuck, raised-surface landings, jump-off/roof falls, the actual skeletal climbing pose, and rooftop saves. City tests cover deterministic generation, building/road clearance throughout the metropolitan area, street-furniture clearance at intersections, bounded caches, streaming disposal, collision before mesh loading, and large-world saves. Input and physics regressions cover popup focus restoration, held menu keys, cancelled touch gestures, vehicle exits at every heading, and cars blocking weapon fire. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment and consumables. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines. The original physics and authored-animation checks remain in place.
 
 Browser verification covers the first chapter from Mara through driving, relay recovery and turn-in, save continuation, collision-free authored destinations, and journal/map layouts at desktop and phone sizes. Separate isolated test saves exercise workshop purchases, fast travel, the protected-evidence branch and the neighborhood-control finale through the actual UI. The touch interaction button and landscape dialogue layout were also checked. Mobile verification uses browser emulation, not a physical-device performance certification. Production compilation can use `npm run build -- --configLoader runner` in Windows environments that restrict esbuild’s ancestor-directory access.
 

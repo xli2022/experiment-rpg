@@ -5,10 +5,10 @@ export class Input {
     this.keys = new Set(); this.lookX = 0; this.lookY = 0; this.firing = false; this.aiming = false;
     this.joyX = 0; this.joyY = 0; this.sensitivity = 1; this.dragging = false;
     this.enabled = false; this.canvas = canvas; this.callbacks = callbacks;
+    canvas.tabIndex = 0;
     this.touch = matchMedia('(pointer: coarse)').matches;
     document.body.classList.toggle('touch', this.touch);
     const action = code => {
-      if (code === 'Escape') { callbacks.pause(); return; }
       if (!this.enabled) return;
       if (code === 'KeyE') callbacks.interact();
       if (code === 'KeyR') callbacks.reload();
@@ -16,9 +16,10 @@ export class Input {
       if (code === 'KeyM') callbacks.map();
       if (code === 'KeyJ') callbacks.journal();
       if (code === 'KeyQ') callbacks.medkit();
+      if (code === 'KeyC') callbacks.climb();
     };
     window.addEventListener('keydown', e => {
-      if (e.code === 'Escape') { e.preventDefault(); callbacks.pause(); return; }
+      if (e.code === 'Escape') { e.preventDefault(); if (!e.repeat) callbacks.pause(); return; }
       if (['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].includes(e.target.tagName)) return;
       if (this.enabled && ['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.code)) e.preventDefault();
       if (!e.repeat) action(e.code);
@@ -60,14 +61,15 @@ export class Input {
       const length = Math.hypot(x, y); if (length > radius) { x *= radius / length; y *= radius / length; }
       this.joyX = x / radius; this.joyY = -y / radius; thumb.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
     };
-    stick.addEventListener('pointerdown', e => { if (!this.enabled) return; e.preventDefault(); stickId = e.pointerId; stick.setPointerCapture(e.pointerId); updateStick(e); callbacks.audio(); });
-    stick.addEventListener('pointermove', e => { if (e.pointerId === stickId) updateStick(e); });
-    const endStick = () => { stickId = null; this.joyX = this.joyY = 0; thumb.style.transform = 'translate(-50%,-50%)'; };
+    stick.addEventListener('pointerdown', e => { if (!this.enabled || stickId !== null) return; e.preventDefault(); stickId = e.pointerId; stick.setPointerCapture(e.pointerId); updateStick(e); callbacks.audio(); });
+    stick.addEventListener('pointermove', e => { if (this.enabled && e.pointerId === stickId) updateStick(e); });
+    const endStick = e => { if (e && e.pointerId !== stickId) return; stickId = null; this.joyX = this.joyY = 0; thumb.style.transform = 'translate(-50%,-50%)'; };
     stick.addEventListener('pointerup', endStick); stick.addEventListener('pointercancel', endStick); stick.addEventListener('lostpointercapture', endStick);
     const look = document.getElementById('look-zone'); let lookId = null, lx = 0, ly = 0;
-    look.addEventListener('pointerdown', e => { if (!this.enabled) return; lookId = e.pointerId; lx = e.clientX; ly = e.clientY; look.setPointerCapture(e.pointerId); });
-    look.addEventListener('pointermove', e => { if (e.pointerId !== lookId) return; this.lookX += (e.clientX - lx) * 1.8; this.lookY += (e.clientY - ly) * 1.8; lx = e.clientX; ly = e.clientY; });
-    const endLook = () => { lookId = null; }; look.addEventListener('pointerup', endLook); look.addEventListener('pointercancel', endLook); look.addEventListener('lostpointercapture', endLook);
+    look.addEventListener('pointerdown', e => { if (!this.enabled || lookId !== null) return; lookId = e.pointerId; lx = e.clientX; ly = e.clientY; look.setPointerCapture(e.pointerId); });
+    look.addEventListener('pointermove', e => { if (!this.enabled || e.pointerId !== lookId) return; this.lookX += (e.clientX - lx) * 1.8; this.lookY += (e.clientY - ly) * 1.8; lx = e.clientX; ly = e.clientY; });
+    const endLook = e => { if (!e || e.pointerId === lookId) lookId = null; }; look.addEventListener('pointerup', endLook); look.addEventListener('pointercancel', endLook); look.addEventListener('lostpointercapture', endLook);
+    this.resetTouch = () => { endStick(); endLook(); };
     function button(id, onDown, onUp = () => {}) {
       const el = document.getElementById(id);
       el.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); el.setPointerCapture(e.pointerId); onDown(); });
@@ -75,20 +77,22 @@ export class Input {
     }
     button('touch-fire', () => { if (this.enabled) { this.firing = true; callbacks.audio(); callbacks.fire(); } }, () => { this.firing = false; });
     button('touch-interact', () => { if (this.enabled) callbacks.interact(); });
+    button('touch-climb', () => { if (this.enabled) callbacks.climb(); });
     button('touch-reload', () => { if (this.enabled) callbacks.reload(); });
     button('touch-jump', () => { if (this.enabled) { this.keys.add('Space'); callbacks.jump(); } }, () => this.keys.delete('Space'));
   }
   lock() {
-    if (this.touch || !this.enabled || !this.canvas.requestPointerLock) return;
+    if (this.touch || !this.enabled || document.pointerLockElement === this.canvas || !this.canvas.requestPointerLock) return;
     try { const pending = this.canvas.requestPointerLock(); pending?.catch(() => {}); } catch { /* Drag-look remains available when pointer lock is blocked. */ }
   }
   clear() {
     this.keys.clear(); this.firing = this.aiming = this.dragging = false; this.joyX = this.joyY = this.lookX = this.lookY = 0;
-    document.getElementById('joystick-thumb').style.transform = 'translate(-50%,-50%)';
+    this.resetTouch();
   }
   setEnabled(enabled) {
     this.enabled = enabled; this.clear();
     document.getElementById('touch-controls').classList.toggle('hidden', !enabled || !this.touch);
+    if (enabled) { this.canvas.focus({ preventScroll: true }); this.lock(); }
     if (!enabled && document.pointerLockElement) document.exitPointerLock();
   }
   axes() {

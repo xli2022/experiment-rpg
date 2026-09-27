@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { material, createCar } from './models.js';
-import { seededRandom } from './physics.js';
+import { seededRandom, WORLD_LIMIT, orientedBox } from './physics.js';
+import { buildingColliders } from './architecture.js';
 
 export const BLOCKS = [-96, -32, 32, 96];
 export const STREETS = [-128, -64, 0, 64, 128];
@@ -11,8 +12,9 @@ const box = new THREE.BoxGeometry(1, 1, 1);
 const temp = new THREE.Object3D();
 
 export class Batches {
-  constructor(scene) { this.scene = scene; this.groups = new Map(); }
-  add(mat, x, y, z, w, h, d, yaw = 0, tint) {
+  constructor(scene) { this.scene = scene; this.groups = new Map(); this.stream = scene.userData.worldStream; }
+  add(mat, x, y, z, w, h, d, yaw = 0, tint, detail = h < 4 && Math.max(w, d) < 14) {
+    if (this.stream) { this.stream.add(mat, x, y, z, w, h, d, yaw, tint, detail); return; }
     if (!this.groups.has(mat)) this.groups.set(mat, []);
     this.groups.get(mat).push({ x, y, z, w, h, d, yaw, tint });
   }
@@ -30,23 +32,6 @@ export class Batches {
       this.scene.add(mesh);
     }
   }
-}
-
-function windowTexture(style) {
-  const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 512;
-  const ctx = canvas.getContext('2d'); ctx.fillStyle = ['#19212c', '#18252e', '#252333'][style]; ctx.fillRect(0, 0, 256, 512);
-  for (let y = 5; y < 512; y += 22) for (let x = 7; x < 256; x += 24) {
-    const lit = rand() > .44;
-    ctx.fillStyle = lit ? pick(style === 1 ? ['#79a6ac', '#526e7e', '#91b9b6', '#667c89'] : ['#c3a16d', '#7e8fa0', '#b49770', '#465767', '#687890']) : '#0c1420';
-    ctx.globalAlpha = lit ? range(.45, .95) : 1;
-    ctx.fillRect(x, y, 13, 11);
-    ctx.globalAlpha = 1;
-    ctx.fillStyle = '#0c1320'; ctx.fillRect(x + 6, y, 1, 11);
-  }
-  for (let y = 20; y < 512; y += 22) { ctx.fillStyle = '#090f1744'; ctx.fillRect(0, y, 256, 2); }
-  const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace;
-  texture.anisotropy = 4;
-  return texture;
 }
 
 function noiseTexture() {
@@ -90,10 +75,6 @@ function glowTexture() {
 
 export function createCity(scene) {
   const batches = new Batches(scene), colliders = [], buildings = [], cars = [], signs = [];
-  const facadeMats = [0, 1, 2].map(i => {
-    const tex = windowTexture(i);
-    return new THREE.MeshStandardMaterial({ map: tex, emissiveMap: tex, emissive: new THREE.Color(0xbacbdb), emissiveIntensity: .67, roughness: .8, metalness: .2 });
-  });
   const concrete = material(0x202c3b, 0x070d18, .15);
   const roofMat = material(0x192331);
   const metal = material(0x334453, 0, 0, .45, .7);
@@ -104,7 +85,9 @@ export function createCity(scene) {
   const yellow = material(0xf4db89, 0xdfb65b, .7);
   const white = material(0x9baaa3, 0x667c7e, .15);
   const noise = noiseTexture();
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), new THREE.MeshStandardMaterial({ color: 0x202e3d, roughness: .34, metalness: .58, roughnessMap: noise, bumpMap: noise, bumpScale: .035 }));
+  noise.repeat.set(WORLD_LIMIT / 4, WORLD_LIMIT / 4);
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LIMIT * 2 + 400, WORLD_LIMIT * 2 + 400), new THREE.MeshStandardMaterial({ color: 0x202e3d, roughness: .55, metalness: .25, roughnessMap: noise, bumpMap: noise, bumpScale: .035 }));
+  ground.userData.resident = true;
   ground.rotation.x = -Math.PI / 2; ground.position.y = -.02; ground.receiveShadow = true; scene.add(ground);
   const glow = glowTexture();
   function reflection(x, z, color, sx = 9, sz = 19, opacity = .23) {
@@ -125,39 +108,16 @@ export function createCity(scene) {
     }
     for (const ox of [-10.5, 10.5]) for (const oz of [-10.5, 10.5]) {
       const x = bx + ox, z = bz + oz;
-      const w = range(16, 19), d = range(16, 19), h = range(23, 69) + (rand() > .84 ? 32 : 0);
-      const facade = pick(facadeMats);
-      batches.add(facade, x, h / 2, z, w, h, d);
-      batches.add(concrete, x, 2.6, z, w + .4, 5.2, d + .4);
-      batches.add(roofMat, x, h + .25, z, w + .5, .5, d + .5);
-      batches.add(concrete, x, h + 2, z, w * .63, 3.5, d * .7);
-      batches.add(metal, x + w * .2, h + 4.3, z, 2.4, 2.2, 3.6);
-      if (rand() > .55) { batches.add(metal, x, h + 7, z, .23, 14, .23); batches.add(pink, x, h + 14, z, .3, .3, .3); }
-      for (const s of [-1, 1]) {
-        for (const s2 of [-1, 1]) batches.add(concrete, x + s * (w / 2 + .045), h / 2, z + s2 * (d / 2 + .045), .28, h, .28);
-        // Facade buttresses and exposed conduits give the towers a strong silhouette.
-        batches.add(metal, x + s * w * .34, h / 2, z + d / 2 + .14, .24, h, .32);
-        batches.add(metal, x + w / 2 + .14, h / 2, z + s * d * .34, .32, h, .24);
-      }
-      if (rand() > .52) {
-        const neon = rand() > .5 ? cyan : pink;
-        batches.add(neon, x + w / 2 + .19, h * .63, z - d * .4, .05, h * .7, .13);
-        batches.add(neon, x - w * .4, h * .63, z + d / 2 + .19, .13, h * .7, .05);
-      }
-      for (let floor = 8; floor < h - 3; floor += 10) batches.add(concrete, x, floor, z, w + .24, .3, d + .24);
-      const collider = { minX: x - w / 2 - .3, maxX: x + w / 2 + .3, minZ: z - d / 2 - .3, maxZ: z + d / 2 + .3, maxY: h + 4 };
-      colliders.push(collider); buildings.push(collider); mapInfo.push({ x, z, w, d, h });
+      const w = range(16, 19), d = range(16, 19), central = Math.abs(bx) === 32;
+      const district = bx < 0 ? bz > 0 ? 'lantern' : 'signal' : bz > 0 ? 'southbank' : 'civic';
+      const type = central ? pick(['office', 'apartment', 'apartment']) : pick(['terrace', 'apartment', 'market', 'civic']);
+      const h = central ? range(48, 76) : type === 'terrace' ? range(14, 21) : type === 'market' ? range(9, 15) : range(23, 48);
+      const building = { id: `core:${buildings.length}`, x, z, w, d, h, yaw: 0, type, district, variation: rand() };
+      const physical = buildingColliders(building); building.box = physical[0];
+      colliders.push(...physical); buildings.push(building); mapInfo.push(building);
     }
   }
-  // Horizon architecture is cheap instanced geometry, beyond the playable streets.
-  for (let i = 0; i < 94; i++) {
-    const angle = i / 94 * Math.PI * 2; const radius = range(365, 465);
-    const x = Math.sin(angle) * radius, z = Math.cos(angle) * radius, h = range(45, 145);
-    const w = range(15, 34), d = range(14, 31);
-    batches.add(pick(facadeMats), x, h / 2, z, w, h, d);
-    batches.add(roofMat, x, h + 3, z, w * .6, 6, d * .6);
-    if (i % 5 === 0) batches.add(pink, x, h + 6.1, z, w * .6, .1, .3);
-  }
+  // The former decorative skyline is now actual explorable city, supplied by spatial chunks.
   // Road paint, crossings, parking bays, manholes, and repeated street furniture.
   for (const street of STREETS) {
     for (let t = -145; t <= 145; t += 5.8) {
@@ -228,9 +188,10 @@ export function createCity(scene) {
   sign('NO SIGNAL', 'TUNE OUT. DROP IN.', '#fa9c83', 27, 9, -12.1, 12, 4, 0);
   // An elevated service bridge and cables break up the skyline.
   batches.add(metal, 0, 24, -48, 28, 1.15, 4);
-  batches.add(facadeMats[1], 0, 26, -48, 26, 3.2, 3.5);
+  batches.add(metal, 0, 26, -48, 26, 3.2, 3.5);
   batches.add(cyan, 0, 23.48, -46.1, 26, .065, .1);
   batches.add(metal, 0, 28, -48, 28, .4, 4.5);
+  colliders.push(orientedBox(0, -48, 28, 4, 0, 28.2, 23.425));
   for (const z of [-10, 58]) {
     const pts = [];
     for (let i = 0; i <= 20; i++) pts.push(new THREE.Vector3(-16 + i * 1.6, 13 - Math.sin(i / 20 * Math.PI) * 2.5, z));
@@ -239,10 +200,10 @@ export function createCity(scene) {
   // Street kiosks, cargo and utility boxes.
   for (const z of [-94, -37, 39, 84]) for (const side of [-1, 1]) {
     const x = side * 10.8;
-    batches.add(metal, x, 1.25, z, 1, 2.5, .7);
+    batches.add(metal, x, 1.25, z, 1, 2.5, .7, 0, undefined, false);
     batches.add(cyan, x - side * .52, 1.7, z, .03, .7, .47);
     batches.add(roofMat, x - side * .53, .9, z, .03, .15, .4);
-    colliders.push({ minX: x - .55, maxX: x + .55, minZ: z - .4, maxZ: z + .4, maxY: 2.5 });
+    colliders.push(orientedBox(x, z, 1, .7, 0, 2.5));
   }
   for (let i = 0; i < 34; i++) {
     const x = pick([-11, 11, -53, 53]), z = range(-115, 115);
@@ -278,9 +239,9 @@ export function createCity(scene) {
 }
 
 export function addSky(scene) {
-  const sky = new THREE.Mesh(new THREE.SphereGeometry(700, 32, 16), new THREE.ShaderMaterial({
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(650, 24, 12), new THREE.ShaderMaterial({
     side: THREE.BackSide, depthWrite: false,
-    vertexShader: 'varying vec3 vWorld; void main(){vWorld=(modelMatrix*vec4(position,1.0)).xyz; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+    vertexShader: 'varying vec3 vWorld; void main(){vWorld=position; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
     fragmentShader: `varying vec3 vWorld; void main(){float h=normalize(vWorld).y; vec3 col=mix(vec3(.087,.13,.20),vec3(.016,.023,.055),smoothstep(0.,.72,h)); float glow=pow(max(0.,1.-abs(h-.07)),15.); col+=vec3(.065,.018,.07)*glow; gl_FragColor=vec4(col,1.);}`,
-  })); scene.add(sky);
+  })); scene.add(sky); return sky;
 }

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Campaign, freshProgress, restoreProgress, readSave, writeSave, SAVE_KEY } from '../src/campaign.js';
 import { QUESTS, WORLD_OBJECTS, MEMORIES, CACHES, CONTACTS, DISTRICTS, ENCOUNTERS, UPGRADES, ENDINGS, placeById, districtAt } from '../src/content.js';
+import { WORLD_LIMIT } from '../src/world-config.js';
 import { dialogueFor, endingScene } from '../src/dialogue.js';
 
 function completeStep(game, questId, ending = 'free', records = 'public') {
@@ -92,7 +93,7 @@ test('upgrades consume currency and salvage, respect tier limits and alter gamep
     assert.equal(game.buyUpgrade(u.id), true); assert.equal(game.data.credits, credits - price.credits); assert.equal(game.data.salvage, parts - price.salvage);
     assert.equal(game.buyUpgrade(u.id), true); assert.equal(game.buyUpgrade(u.id), true); assert.equal(game.buyUpgrade(u.id), false);
   }
-  assert.equal(game.damage, 64); assert.equal(game.maxArmor, 125); assert.equal(game.sprintSpeed, 9);
+  assert.equal(game.damage, 64); assert.equal(game.maxArmor, 125); assert.ok(Math.abs(game.sprintSpeed - 13.2) < 1e-8);
   const price = game.upgradePrice('damage').credits; game.data.reputation.community = 30;
   assert.ok(game.upgradePrice('damage').credits < price);
   assert.equal(game.buyUpgrade('fake'), false);
@@ -125,8 +126,8 @@ test('save validation rejects unknown IDs and sanitizes nonfinite values and imp
 
 test('all quest destinations, contacts and map pins resolve inside the playable world', () => {
   assert.equal(new Set(WORLD_OBJECTS.map(p => p.id)).size, WORLD_OBJECTS.length);
-  assert.equal(new Set(MEMORIES.map(m => districtAt(m.x, m.z).id)).size, 8, 'every district has a memory to discover');
-  for (const p of WORLD_OBJECTS) { assert.ok(Math.abs(p.x) < 275 && Math.abs(p.z) < 275); assert.ok(p.name && p.type); }
+  assert.equal(new Set(MEMORIES.map(m => districtAt(m.x, m.z).id)).size, 8, 'each original story district retains a memory');
+  for (const p of WORLD_OBJECTS) { assert.ok(Math.abs(p.x) < WORLD_LIMIT && Math.abs(p.z) < WORLD_LIMIT); assert.ok(p.name && p.type); }
   for (const q of QUESTS) {
     assert.ok(placeById(q.giver));
     for (const step of q.steps) if (['talk', 'interact'].includes(step.type)) assert.ok(placeById(step.target));

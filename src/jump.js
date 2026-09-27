@@ -16,28 +16,41 @@ export const JUMP = Object.freeze({
 
 export function beginJump(player) {
   const recovered = player.jumpPhase === 'land' && player.jumpTime >= .36;
-  if (player.y > .01 || (player.jumpPhase && !recovered)) return false;
+  if (player.y > (player.groundY ?? 0) + .03 || player.climb || (player.jumpPhase && !recovered)) return false;
+  player.jumpOriginY = player.y;
   player.jumpPhase = 'start'; player.jumpTime = player.jumpElapsed = 0;
   player.velocityY = 0; player.launched = false;
   return true;
 }
 
-export function stepJump(player, dt) {
-  if (!player.jumpPhase) return;
+export function stepJump(player, dt, groundY = 0) {
+  player.groundY = groundY;
+  if (!player.jumpPhase && player.y > groundY + .04) { player.jumpPhase = 'fall'; player.jumpTime = 0; player.velocityY = 0; }
+  if (!player.jumpPhase) { player.y = groundY; return; }
+  if (player.jumpPhase === 'fall') {
+    player.jumpTime += dt;
+    player.y += player.velocityY * dt - .5 * JUMP.gravity * dt * dt;
+    player.velocityY -= JUMP.gravity * dt;
+    if (player.y <= groundY) { player.y = groundY; player.velocityY = 0; player.jumpPhase = 'land'; player.jumpTime = 0; }
+    return;
+  }
   if (player.jumpPhase === 'land') {
+    if (player.y > groundY + .04) { player.jumpPhase = 'fall'; player.jumpTime = 0; player.velocityY = 0; return; }
+    player.y = groundY;
     player.jumpTime += dt;
     if (player.jumpTime >= JUMP.landing) { player.jumpPhase = ''; player.jumpTime = 0; }
     return;
   }
   player.jumpElapsed += dt;
   const airTime = Math.max(0, player.jumpElapsed - JUMP.takeoff);
-  const flightDuration = 2 * JUMP.velocity / JUMP.gravity;
+  const origin = player.jumpOriginY ?? 0;
+  const flightDuration = (JUMP.velocity + Math.sqrt(Math.max(0, JUMP.velocity ** 2 + 2 * JUMP.gravity * (origin - groundY)))) / JUMP.gravity;
   player.launched = player.jumpElapsed >= JUMP.takeoff;
-  player.y = Math.max(0, JUMP.velocity * airTime - .5 * JUMP.gravity * airTime * airTime);
+  player.y = origin + JUMP.velocity * airTime - .5 * JUMP.gravity * airTime * airTime;
   player.velocityY = player.launched ? JUMP.velocity - JUMP.gravity * airTime : 0;
-  if (airTime >= flightDuration) {
-    player.y = player.velocityY = 0; player.launched = false;
-    player.jumpPhase = 'land'; player.jumpTime = airTime - flightDuration;
+  if (airTime >= flightDuration || player.launched && player.velocityY < 0 && player.y <= groundY) {
+    player.y = groundY; player.velocityY = 0; player.launched = false;
+    player.jumpPhase = 'land'; player.jumpTime = Math.max(0, airTime - flightDuration);
   } else {
     player.jumpPhase = player.jumpElapsed < JUMP.airbornePose ? 'start' : 'air';
     player.jumpTime = player.jumpElapsed - (player.jumpPhase === 'air' ? JUMP.airbornePose : 0);

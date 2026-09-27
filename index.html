@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#090d18" />
-    <meta name="description" content="Afterlight: The Last Signal. An open-world cyberpunk RPG with eight districts, a branching story, local quests, and a city worth saving." />
+    <meta name="description" content="Afterlight: The Last Signal. An open-world cyberpunk RPG with sixteen districts, a branching story, local quests, and a city worth saving." />
     <title>AFTERLIGHT — The Last Signal</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/src/style.css" />
@@ -12,7 +12,7 @@
   </head>
   <body>
     <main id="game" aria-label="Afterlight third-person city game">
-      <canvas id="world" aria-label="Interactive 3D city. Use WASD to move, mouse to look, click to fire, and E to enter cars."></canvas>
+      <canvas id="world" aria-label="Interactive 3D city. Use WASD to move, mouse to look, Shift to sprint, C to climb walls, Space to jump, click to fire, and E to interact."></canvas>
       <div class="vignette" aria-hidden="true"></div>
       <div id="damage-flash" aria-hidden="true"></div>
       <div id="hud">
@@ -50,7 +50,7 @@
           <div class="credits"><span>€$</span> <b id="credits">1,250</b><span class="cred-meter">STREET CRED <b id="cred-value">0</b></span></div>
           <button id="medkit-button" class="medkit-hud" aria-label="Use field medkit"><kbd>Q</kbd> MEDKIT <b id="medkit-count">2</b><span id="salvage-count">0 COMPONENTS</span></button>
         </section>
-        <div class="desktop-controls"><span><kbd>W A S D</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>E</kbd> INTERACT</span><span><kbd>J</kbd> JOURNAL</span><span><kbd>M</kbd> MAP</span><button id="all-controls">CONTROLS <span>↗</span></button></div>
+        <div class="desktop-controls"><span><kbd>W A S D</kbd> MOVE</span><span><kbd>SHIFT</kbd> SPRINT</span><span><kbd>C</kbd> CLIMB</span><span><kbd>E</kbd> INTERACT</span><span><kbd>J</kbd> JOURNAL</span><span><kbd>M</kbd> MAP</span><button id="all-controls">CONTROLS <span>↗</span></button></div>
         <section id="weapon-panel" class="weapon-panel">
           <div class="weapon-class">01 <span>/</span> EQUIPPED</div>
           <div class="weapon-main"><svg class="gun-icon" viewBox="0 0 170 64"><path d="M28 9h107v18H87l-8 14H63l-6 17H35l10-31H28Z"/><path d="M41 15h78M65 29h14l-4 7H63m-20 9h14m-15 7h12"/></svg><div><strong id="ammo">24</strong><span>/ <b id="reserve">∞</b></span></div></div>
@@ -58,32 +58,37 @@
           <div class="ammo-bars" id="ammo-bars"></div>
         </section>
         <section id="driving-panel" class="driving-panel hidden"><small>ARCHER <b>GT</b><span>ELECTRIC // RWD</span></small><div><strong id="speed">0</strong><span>KM/H</span></div><div class="speed-track"><i id="speed-bar"></i></div><p><kbd>SPACE</kbd> HANDBRAKE <span><kbd>E</kbd> EXIT</span></p></section>
+        <section id="climb-panel" class="climb-panel hidden" aria-label="Climbing status">
+          <div><span id="climb-title">WALL WITHIN REACH</span><strong id="climb-height"></strong></div>
+          <div class="climb-track"><i id="climb-progress"></i></div>
+          <p id="climb-controls"></p>
+        </section>
         <div class="build-label">LIVE WORLD <span>●</span> <b id="fps">60</b> FPS</div>
       </div>
       <div id="welcome" class="welcome">
         <div class="welcome-tag"><span class="live-dot"></span> CONNECTION ESTABLISHED</div>
         <p class="welcome-kicker">THE LAST SIGNAL</p>
         <h2>A city forgot.<br>You remember<span>.</span></h2>
-        <p class="welcome-copy">Eight districts. Thousands of missing names.<br>Find the people behind the static.<br>Decide who gets to write the morning.</p>
+        <p class="welcome-copy">Sixteen districts. Thousands of missing names.<br>Find the people behind the static.<br>Decide who gets to write the morning.</p>
         <button id="start-button" class="primary-button">ENTER THE CITY <span>↗</span></button>
         <p class="start-hint"><span class="desktop-only">WASD to move · Mouse to look</span><span class="touch-only">Move with the left stick · Drag to look</span><span>THIRD PERSON / OPEN WORLD</span></p>
       </div>
       <div id="touch-controls" class="touch-controls hidden">
         <div id="look-zone" aria-label="Drag to look around"></div>
         <div id="joystick" aria-label="Movement joystick"><div id="joystick-thumb"></div></div>
-        <div class="touch-actions"><button id="touch-interact" aria-label="Talk, use, or enter and exit vehicle">E<span>USE</span></button><button id="touch-reload" aria-label="Reload weapon">↻</button><button id="touch-jump" aria-label="Jump or handbrake">↑</button><button id="touch-fire" aria-label="Shoot"><svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="8"/><path d="M16 2v8m0 12v8M2 16h8m12 0h8"/></svg></button></div>
+        <div class="touch-actions"><button id="touch-interact" aria-label="Talk, use, or enter and exit vehicle">E<span>USE</span></button><button id="touch-climb" class="hidden" aria-label="Climb wall or release">CLIMB</button><button id="touch-reload" aria-label="Reload weapon">↻</button><button id="touch-jump" aria-label="Jump or handbrake">↑</button><button id="touch-fire" aria-label="Shoot"><svg viewBox="0 0 32 32"><circle cx="16" cy="16" r="8"/><path d="M16 2v8m0 12v8M2 16h8m12 0h8"/></svg></button></div>
         <span class="touch-look-hint">DRAG TO LOOK</span>
       </div>
       <div id="pause" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="pause-title">
         <section class="menu-card">
           <div class="eyebrow">AFTERLIGHT <span>//</span> SYSTEM</div><h2 id="pause-title">Catch your breath.</h2><p class="menu-subtitle">The city will be here.</p>
-          <div class="control-grid"><span>Move / drive</span><kbd>W A S D / ↑ ↓ ← →</kbd><span>Look around</span><kbd>MOUSE / DRAG</kbd><span>Fire weapon</span><kbd>LEFT CLICK</kbd><span>Aim</span><kbd>RIGHT CLICK</kbd><span>Sprint</span><kbd>SHIFT</kbd><span>Jump / handbrake</span><kbd>SPACE</kbd><span>Enter / exit vehicle</span><kbd>E</kbd><span>Reload</span><kbd>R</kbd><span>City map</span><kbd>M</kbd><span>Pause / release mouse</span><kbd>ESC</kbd></div>
+          <div class="control-grid"><span>Move / drive</span><kbd>W A S D / ↑ ↓ ← →</kbd><span>Look around</span><kbd>MOUSE / DRAG</kbd><span>Fire weapon</span><kbd>LEFT CLICK</kbd><span>Aim</span><kbd>RIGHT CLICK</kbd><span>Sprint / walk</span><kbd>SHIFT / ALT</kbd><span>Climb / release wall</span><kbd>C</kbd><span>Jump / handbrake</span><kbd>SPACE</kbd><span>Enter / exit vehicle</span><kbd>E</kbd><span>Reload</span><kbd>R</kbd><span>City map</span><kbd>M</kbd><span>Pause / release mouse</span><kbd>ESC</kbd></div>
           <div class="setting-row"><label for="quality">Visual quality</label><select id="quality"><option value="high">High · neon bloom</option><option value="low">Performance · mobile</option></select></div>
           <div class="setting-row"><label for="sensitivity">Look sensitivity</label><input id="sensitivity" type="range" min="0.4" max="2" step="0.1" value="1" /></div>
           <div class="setting-row"><label for="voice-enabled">Spoken NPC dialogue</label><input id="voice-enabled" type="checkbox" checked /></div>
           <div class="setting-row voice-volume-row"><label for="voice-volume">Voice volume <output id="voice-volume-value" for="voice-volume">80%</output></label><input id="voice-volume" type="range" min="0" max="100" step="5" value="80" /></div>
           <p id="voice-settings-note" class="menu-note"></p>
-          <p class="menu-note">J — field journal · Q — use medkit · E — talk, use, drive.<br>Progress saves automatically in this browser. Touch controls appear on mobile; landscape gives you the best view.</p>
+          <p class="menu-note">W/S — climb up/down · A/D — move along wall.<br>Space — jump, grab a wall, or jump away. Keep climbing to pull onto a clear roof.<br>J — journal · Q — medkit · E — talk, use, drive.<br>Progress saves automatically in this browser. Touch controls appear on mobile; landscape gives you the best view.</p>
           <button id="resume-button" class="primary-button">BACK TO THE STREETS <span>↗</span></button>
           <button id="respawn-button" class="text-button">Return to your last refuge</button>
           <button id="new-game-button" class="text-button">Start a new story…</button>

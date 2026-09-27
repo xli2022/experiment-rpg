@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { JUMP } from './jump.js';
+import { animateClimb } from './climb-animation.js';
 
 let assets;
 export function loadCharacterAssets() {
@@ -141,12 +142,12 @@ export function animateCharacter(model, aiming, dt, options = {}) {
   if (reloading && !model.wasReloading) model.reloadAge = 0;
   if (reloading) { model.reloadAge += dt; model.combatTimer = 2.2; }
   model.wasReloading = reloading;
-  const speed = options.speed ?? 0;
+  const speed = options.climb ? 0 : options.speed ?? 0;
   const moving = speed > .08;
-  const combat = aiming || reloading || model.combatTimer > 0;
+  const combat = !options.climb && (aiming || reloading || model.combatTimer > 0);
   model.combatWeight = THREE.MathUtils.damp(model.combatWeight, combat ? 1 : 0, combat ? 18 : 7, dt);
   const armed = model.combatWeight;
-  const jump = options.jumpPhase;
+  const jump = options.jumpPhase === 'fall' ? 'air' : options.jumpPhase;
   const jumpTime = options.jumpTime || 0;
   // Each outgoing clip keeps its last sample during the crossfade. Reusing the
   // new phase's clock here used to rewind the old pose to frame zero mid-blend.
@@ -160,7 +161,7 @@ export function animateCharacter(model, aiming, dt, options = {}) {
   }
   if (jump === 'land') model.jumpTimes.JumpLand = Math.min(jumpTime, JUMP.impactDuration) * JUMP.landingPlayback + Math.max(0, jumpTime - JUMP.impactDuration) * JUMP.recoveryPlayback;
   model.previousJump = jump;
-  const gait = moving ? speed > 5.7 ? 'Run' : speed > 2.4 ? 'Jog' : 'Walk' : 'Idle';
+  const gait = moving ? speed > 6.3 ? 'Run' : speed > 2.5 ? 'Jog' : 'Walk' : 'Idle';
   const target = jump === 'start' ? 'JumpStart' : jump === 'air' ? 'JumpLoop' : jump === 'land' ? 'JumpLand' : gait;
   model.animation = reloading ? 'Reload' : jump ? target : combat ? (moving ? 'Armed' + gait : 'ArmedIdle') : target;
   const targetWeights = { [target]: 1 };
@@ -212,11 +213,12 @@ export function animateCharacter(model, aiming, dt, options = {}) {
   model.aim.Down.setEffectiveWeight(Math.max(0, pitch) * armed * (1 - reloadWeight));
   model.mixer.update(dt);
   model.body.position.y = model.baseBodyY;
+  animateClimb(model, options.climb, dt);
   model.root.updateMatrixWorld(true);
   // Rotational crossfades can put a boot below the pavement even when both
   // source clips are grounded. Correct the blended body using the actual boot
   // vertices; retain airborne poses and release the correction smoothly.
-  if (model.contacts.length) {
+  if (model.contacts.length && !options.climb) {
     let minimum = Infinity;
     for (const { bone, point } of model.contacts) {
       minimum = Math.min(minimum, model.contactPoint.copy(point).applyMatrix4(bone.matrixWorld).y);

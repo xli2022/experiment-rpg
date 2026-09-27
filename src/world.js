@@ -4,8 +4,9 @@ import { NPC_PROFILES } from './npc-profiles.js';
 import { Batches, signTexture } from './city.js';
 import { material, createCar } from './models.js';
 import { WORLD_OBJECTS, DISTRICTS, districtAt } from './content.js';
+import { orientedBox } from './physics.js';
 
-export const MAP_SPAN = 590;
+export { MAP_SPAN } from './world-config.js';
 export const SYMBOLS = { contact: '●', terminal: '◇', transit: 'T', rest: '+', board: '≡', memory: '◈', cache: '□' };
 export const COLORS = { contact: '#deff7a', terminal: '#e8cd95', transit: '#7ee6e3', rest: '#7de5ad', board: '#e9ecbc', memory: '#c5a3ff', cache: '#a8bec9' };
 
@@ -16,8 +17,8 @@ export function expandCity(scene, city) {
   const green = material(0x365b43, 0x153d29, .2), glass = material(0x477974, 0x19443e, .5, .3, .5);
   const paint = material(0x849598), road = material(0x1e2d38, 0, 0, .48, .4);
   function solid(mat, x, z, w, h, d, y = h / 2) {
-    b.add(mat, x, y, z, w, h, d);
-    city.colliders.push({ minX: x - w / 2, maxX: x + w / 2, minZ: z - d / 2, maxZ: z + d / 2, maxY: y + h / 2 });
+    b.add(mat, x, y, z, w, h, d, 0, undefined, false);
+    city.colliders.push(orientedBox(x, z, w, d, 0, y + h / 2, y - h / 2, { climbable: h >= 4 && w >= 4 && d >= 4 }));
     city.mapInfo.push({ x, z, w, d, h });
   }
   function sign(title, subtitle, color, x, y, z, width = 17, yaw = 0) {
@@ -26,12 +27,14 @@ export function expandCity(scene, city) {
   }
   // Continuous radial avenues and a perimeter road connect the four new districts.
   for (const s of [-192, 0, 192]) {
-    b.add(road, s, .006, 0, 15, .01, 550);
-    b.add(road, 0, .007, s, 550, .01, 15);
+    // The central roads meet the new curved bypasses before the broadcast base
+    // and freight office, instead of painting a driveable lane through them.
+    b.add(road, s, .006, s === 0 ? 22.5 : 0, 15, .01, s === 0 ? 505 : 550);
+    b.add(road, s === 0 ? -32.5 : 0, .007, s, s === 0 ? 485 : 550, .01, 15);
     for (let t = -270; t < 275; t += 9) {
       if (Math.abs(s) < 1 && Math.abs(t) < 142) continue;
-      b.add(paint, s, .023, t, .12, .02, 4);
-      b.add(paint, t, .024, s, 4, .02, .12);
+      if (s !== 0 || t > -230) b.add(paint, s, .023, t, .12, .02, 4);
+      if (s !== 0 || t < 210) b.add(paint, t, .024, s, 4, .02, .12);
     }
   }
   for (const [x, z] of [[0, 154], [0, -154], [154, 0], [-154, 0]]) {
@@ -81,7 +84,8 @@ export function expandCity(scene, city) {
   }
   for (const x of [-68, 67]) solid(steel, x, 216, 19, 8, 36);
   for (const x of [-39, 35]) solid(containerMats[1], x, 181, 13, 4, 10);
-  solid(steel, 0, 274, 150, 1, .5);
+  // Leave an opening for the regional waterfront road.
+  for (const x of [-48, 48]) solid(steel, x, 274, 54, 1, .5);
   // A low ferry silhouette, beyond the accessible pier.
   b.add(dark, 90, 1, 267, 20, 2.6, 36); b.add(concrete, 90, 4, 261, 14, 4, 16); b.add(teal, 90, 4.7, 252.8, 12, 1.4, .1);
   sign('RUSTWATER', 'EVERYONE DESERVES A WAY HOME', '#76e0e8', 0, 8, 186, 24);
@@ -110,10 +114,7 @@ export function expandCity(scene, city) {
       b.add(steel, x, 3.7, z, .18, 7.4, .18); b.add(teal, x, 7.4, z, 2.8, .15, .5);
     }
   }
-  // Visible perimeter markers make the edge of the explorable world legible.
-  for (let t = -270; t <= 270; t += 18) for (const [x, z] of [[t, -279], [t, 279], [-279, t], [279, t]]) {
-    b.add(steel, x, .6, z, .4, 1.2, .4); b.add(amber, x, 1.3, z, .5, .15, .5);
-  }
+  // Perimeter furniture is now streamed at the metropolitan boundary.
   for (const [x, z, yaw, color] of [[6, 155, Math.PI, 0x727d9a], [-155, -5, -Math.PI / 2, 0x659783], [156, -5, Math.PI / 2, 0xc28c64], [6, -160, 0, 0x98728d]]) {
     const car = createCar(color); car.root.position.set(x, .04, z); car.root.rotation.y = yaw; scene.add(car.root);
     city.cars.push({ ...car, x, z, yaw, speed: 0, spawn: { x, z, yaw } });
@@ -123,6 +124,7 @@ export function expandCity(scene, city) {
 
 export function createWorldLife(scene, asset, game) {
   const objects = [], people = [], avatars = {};
+  const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), bounds = new THREE.Sphere(new THREE.Vector3(), 3.5);
   const ringGeometry = new THREE.TorusGeometry(.66, .025, 5, 28);
   const cacheGeometry = new THREE.BoxGeometry(.72, .48, .56);
   const chipGeometry = new THREE.OctahedronGeometry(.24);
@@ -161,20 +163,27 @@ export function createWorldLife(scene, asset, game) {
   return {
     objects, avatars,
     nearest(player) {
-      return objects.filter(p => p.root.visible && Math.hypot(player.x - p.x, player.z - p.z) < (p.type === 'contact' ? 3.7 : 2.8)).sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0] ?? null;
+      if (player.y > 2.5 || player.climb) return null;
+      return objects.filter(p => !game.data.collected.includes(p.id) && Math.hypot(player.x - p.x, player.z - p.z) < (p.type === 'contact' ? 3.7 : 2.8)).sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0] ?? null;
     },
-    update(dt, time, player) {
+    update(dt, time, player, radius = 65, camera) {
       const goal = game.objective(player);
+      projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection);
       for (const p of objects) {
-        p.root.visible = !game.data.collected.includes(p.id);
         const distance = Math.hypot(player.x - p.x, player.z - p.z);
+        bounds.center.set(p.x, 1.5, p.z);
+        p.root.visible = !game.data.collected.includes(p.id) && distance < radius + 25 && frustum.intersectsSphere(bounds);
+        if (!p.root.visible) { if (p.root.parent) scene.remove(p.root); continue; }
+        if (!p.root.parent) scene.add(p.root);
         p.label.visible = distance < (p.id === goal.id ? 40 : 20);
         p.ring.material.opacity = .45 + Math.sin(time * 2 + p.x) * .15;
         if (p.type === 'memory') { p.body.rotation.y += dt; p.body.position.y = 1 + Math.sin(time * 2 + p.x) * .16; }
       }
       for (const p of people) {
-        if (Math.hypot(player.x - p.place.x, player.z - p.place.z) > 65) { p.body.visible = false; continue; }
-        p.body.visible = true; p.mixer.update(dt);
+        const distance = Math.hypot(player.x - p.place.x, player.z - p.place.z);
+        if (distance > radius || !p.body.parent?.visible) { p.body.visible = false; continue; }
+        p.body.visible = true; p.elapsed = (p.elapsed ?? 0) + dt;
+        if (distance < 20 || p.elapsed >= .1) { p.mixer.update(p.elapsed); p.elapsed = 0; }
         if (Math.hypot(player.x - p.place.x, player.z - p.place.z) < 5) p.body.rotation.y = Math.atan2(-(player.x - p.place.x), -(player.z - p.place.z));
       }
     },

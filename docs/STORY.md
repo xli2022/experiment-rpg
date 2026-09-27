@@ -33,14 +33,16 @@ Free exploration and unfinished jobs continue after every ending. The ending can
 | --- | --- | --- |
 | Mara Vale | Neon Quarter / outside Kōji | Vex’s oldest friend; pirate broadcaster. Recover people’s memories for her radio show. |
 | Dr. Imani Sol | Lower East / HALO clinic | Doctor who treats deleted residents. Recover antibiotics; buy medkits. |
-| Sable Chen | Chrome Heights | Archivist confronting her part in the deletion system. Choose how to expose the ledger; survey eight districts. |
+| Sable Chen | Chrome Heights | Archivist confronting her part in the deletion system. Choose how to expose the ledger; survey sixteen districts. |
 | Jun Park | Glass Gardens | Community farmer. Preserve the growing lights and repair the irrigation. |
 | Rook | Freightworks | Former security technician. Salvage radios, reclaim freight, upgrade equipment. |
 | Captain Orrin | Rustwater Docks | Ferryman for deleted people. Save ECHO and deliver a letter from his missing sister. |
 | Cass Vega | Neon Quarter / south boulevard | Paper courier. Reunite a family through a letter. |
 | ECHO / 09 | Relay Ridge | Civic intelligence with contradictory instructions. Ask what it wants before choosing its future. |
 
-The North Exchange is the eighth district, an occupied financial zone between the quarter and the ridge. The four outer regions have distinct silhouettes: greenhouses, container stacks and a gantry crane, public piers and a ferry, and a tall broadcast mast.
+The North Exchange completes the eight original story districts, an occupied financial zone between the quarter and the ridge. Glass Gardens, Freightworks, Rustwater and Relay Ridge have distinct silhouettes: greenhouses, container stacks and a gantry crane, public piers and a ferry, and a tall broadcast mast.
+
+The metropolitan expansion adds Sunset Terraces, Cypress Commons, Signal Heights, Civic Campus, Foundry Bay, Southbank, Bay Promenade and Lantern Ward. Their terraces, park planting, apartment towers, public buildings and industrial streets extend the playable city to 11 × 11 km. Sable's survey includes all sixteen districts; the six-chapter campaign and its contacts remain in the original center. Regional tram stops and parked cars support travel through the larger neighborhoods. See [city scale and streaming](CITY-RENDERING.md).
 
 ## Cast and performance
 
