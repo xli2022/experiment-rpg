@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { WORLD_OBJECTS, CONTACTS, MEMORIES, DISTRICTS, QUESTS, placeById } from '../src/content.js';
 import { createMasterPlan, terrainHeight, SHOWCASE } from '../src/master-plan.js';
+import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world-scale.js';
 import { VerticalMetropolis } from '../src/vertical-city.js';
 import { Campaign, SAVE_KEY, WORLD_REVISION, readSave, writeSave } from '../src/campaign.js';
 import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt, moveWithCollisions, stepVehicle, orientedBox, rayBoxDistance } from '../src/physics.js';
@@ -60,10 +61,22 @@ test('the thirteen-district story layout keeps eight distinct memory destination
     if (['talk', 'interact'].includes(step.type)) assert.ok(placeById(step.target), `${quest.id} points at missing ${step.target}`);
   }
   assert.equal(QUESTS.find(q => q.id === 'survey').steps[0].count, 13);
-  assert.ok(placeById('mara').y - terrainHeight(placeById('mara').x, placeById('mara').z) > 7);
+  assert.ok(placeById('mara').y - terrainHeight(placeById('mara').x, placeById('mara').z) > 7 * CITY_SCALE);
   assert.ok(placeById('trace').x > SHOWCASE.x, 'The opening objective crosses Eastpoint skybridge');
   assert.equal(placeById('mara').approach.id, 'eastpoint-west-walk-ramp');
   assert.equal(placeById('trace').approach.id, 'eastpoint-east-walk-ramp');
+});
+
+test('story positions use the compact city transform exactly once', () => {
+  for (const [id, expected] of [
+    ['mara', atEastpoint(2498, 680)], ['trace', atEastpoint(2615, 697)],
+    ['sable', authoredToWorld(1265, -1050)], ['jun', authoredToWorld(-380, -3740)],
+    ['metro-north', authoredToWorld(1134, -934)], ['metro-garden', authoredToWorld(-456, -3624)],
+    ['home', SHOWCASE.spawn], ['metro-neon', SHOWCASE.transit],
+  ]) {
+    const actual = placeById(id);
+    assert.deepEqual({ x: actual.x, z: actual.z }, { x: expected.x, z: expected.z }, id);
+  }
 });
 
 test('new-world saves record the current map revision and older saves preserve campaign progress', () => {
@@ -87,12 +100,14 @@ test('new-world saves record the current map revision and older saves preserve c
   for (const key of ['credits', 'xp', 'salvage', 'rest', 'tracked', 'collected', 'met', 'transit', 'quests']) assert.deepEqual(legacy.progress[key], current.progress[key]);
   assert.ok(legacy.progress.discovered.every(id => DISTRICTS.some(d => d.id === id)));
   assert.ok(legacy.progress.discovered.includes(placeById('home').district));
-  // A session saved in the preceding vertical layout must retain its campaign
+  // A session saved in the preceding full-size layout must retain its campaign
   // even though main relocates that revision's stale coordinates to a refuge.
   serialized.worldRevision = WORLD_REVISION - 1;
+  serialized.position = { x: 4000, y: 85, z: -4000 };
   storage.setItem(SAVE_KEY, JSON.stringify(serialized));
   const previousMap = readSave(storage);
   assert.equal(previousMap.worldRevision, WORLD_REVISION - 1);
+  assert.equal(previousMap.position, null, 'The former city boundary is outside the compact world');
   assert.deepEqual(previousMap.progress, legacy.progress);
 });
 

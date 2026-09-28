@@ -1,8 +1,10 @@
 import { QUESTS, CONTACTS, MEMORIES, WORLD_OBJECTS, DISTRICTS, UPGRADES, ENDINGS, questById, placeById } from './content.js';
 import { dialogueFor, replyScene, offerScene, endingScene, acceptanceReply } from './dialogue.js';
 import { NPC_PROFILES, VOICE_PROFILES } from './npc-profiles.js';
-import { COLORS, SYMBOLS, MAP_SPAN } from './world.js';
+import { COLORS, SYMBOLS } from './world.js';
 import { formatCurrency } from './currency.js';
+import { CITY_SCALE } from './world-scale.js';
+import { bindMapDrag, constrainMapView, zoomMapView, MAP_WORLD_SPAN } from './map-viewport.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -44,37 +46,31 @@ export class RPGUI {
     navigation.innerHTML = `${button('−', 'zoom-out')}${button('+', 'zoom-in')}${button('Your area', 'map-home')}${button('Entire city', 'map-city')}<span>Drag to pan · scroll to zoom</span>`;
     document.querySelector('.city-map-card .map-heading').after(navigation);
     navigation.addEventListener('click', e => { const target = e.target.closest('[data-action]'); if (target) this.action(target.dataset.action); });
-    let drag = null, moved = false;
-    mapCanvas.addEventListener('pointerdown', e => { drag = { x: e.clientX, y: e.clientY }; moved = false; mapCanvas.setPointerCapture(e.pointerId); });
-    mapCanvas.addEventListener('pointermove', e => {
-      if (!drag) return;
-      const dx = e.clientX - drag.x, dy = e.clientY - drag.y; if (Math.abs(dx) + Math.abs(dy) < 2) return;
-      const rect = mapCanvas.getBoundingClientRect(), scale = Math.min(mapCanvas.width, mapCanvas.height) / this.cb.mapView.span;
-      this.cb.mapView.x -= dx * mapCanvas.width / rect.width / scale;
-      this.cb.mapView.z -= dy * mapCanvas.height / rect.height / scale;
-      drag = { x: e.clientX, y: e.clientY }; moved = true; this.boundMap();
-    });
-    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) mapCanvas.addEventListener(event, () => { drag = null; });
-    mapCanvas.addEventListener('wheel', e => { e.preventDefault(); this.zoomMap(e.deltaY > 0 ? 1.4 : 1 / 1.4); }, { passive: false });
+    mapCanvas.addEventListener('wheel', e => { e.preventDefault(); if (e.deltaY) this.zoomMap(e.deltaY > 0 ? 1.4 : 1 / 1.4); }, { passive: false });
     document.querySelector('.map-legend').insertAdjacentHTML('beforeend', '<span>● CONTACT</span><span>T TRANSIT</span><span>◈ MEMORY</span>');
     const layout = document.createElement('div'); layout.className = 'map-layout'; mapCanvas.before(layout); layout.append(mapCanvas);
     const sidebar = document.createElement('aside'); sidebar.className = 'map-sidebar'; sidebar.innerHTML = `<div class="map-filters">${['all', 'contacts', 'transit'].map(f => button(f, `filter:${f}`)).join('')}</div><div id="map-locations" class="map-locations"></div><div id="map-selection" class="map-selection"></div>`; layout.append(sidebar);
     sidebar.addEventListener('click', e => { const target = e.target.closest('[data-action]'); if (target && !target.disabled) this.action(target.dataset.action); });
-    mapCanvas.addEventListener('click', e => {
-      if (moved) return;
+    bindMapDrag(mapCanvas, this.cb.mapView, e => {
+      this.boundMap();
       const rect = mapCanvas.getBoundingClientRect();
+      if (!(rect.width > 0 && rect.height > 0)) return;
       const x = (e.clientX - rect.left) * mapCanvas.width / rect.width;
       const y = (e.clientY - rect.top) * mapCanvas.height / rect.height;
       const view = this.cb.mapView, scale = Math.min(mapCanvas.width, mapCanvas.height) / view.span;
       const places = this.mapPlaces().map(p => ({ p, distance: Math.hypot(mapCanvas.width / 2 + (p.x - view.x) * scale - x, mapCanvas.height / 2 + (p.z - view.z) * scale - y) })).sort((a, b) => a.distance - b.distance);
       if (places[0]?.distance < 25) { this.selectedPlace = places[0].p.id; this.renderMap(); }
     });
+    if (typeof ResizeObserver !== 'undefined') {
+      this.mapResize = new ResizeObserver(() => this.boundMap()); this.mapResize.observe(mapCanvas);
+    }
+    this.boundMap();
   }
   action(action) {
     const focused = document.activeElement, focusAction = focused?.dataset.action;
     if (action === 'zoom-in' || action === 'zoom-out') { this.zoomMap(action === 'zoom-in' ? .5 : 2); return; }
-    if (action === 'map-home') { Object.assign(this.cb.mapView, { x: this.cb.position().x, z: this.cb.position().z, span: 1200 }); return; }
-    if (action === 'map-city') { Object.assign(this.cb.mapView, { x: 0, z: 0, span: MAP_SPAN }); return; }
+    if (action === 'map-home') { Object.assign(this.cb.mapView, { x: this.cb.position().x, z: this.cb.position().z, span: 1200 * CITY_SCALE }); this.boundMap(); return; }
+    if (action === 'map-city') { Object.assign(this.cb.mapView, { x: 0, z: 0, span: MAP_WORLD_SPAN }); this.boundMap(); return; }
     const [kind, id] = action.split(':');
     if (kind === 'close') this.cb.close();
     if (kind === 'voice-replay') this.cb.voice.replay();
@@ -102,8 +98,8 @@ export class RPGUI {
       (buttons.find(b => b.dataset.action === focusAction) ?? buttons[0])?.focus();
     }
   }
-  boundMap() { this.cb.mapView.x = Math.max(-MAP_SPAN / 2, Math.min(MAP_SPAN / 2, this.cb.mapView.x)); this.cb.mapView.z = Math.max(-MAP_SPAN / 2, Math.min(MAP_SPAN / 2, this.cb.mapView.z)); }
-  zoomMap(factor) { this.cb.mapView.span = Math.max(300, Math.min(MAP_SPAN, this.cb.mapView.span * factor)); this.boundMap(); }
+  boundMap() { constrainMapView(this.cb.mapView, $('full-map')); }
+  zoomMap(factor) { zoomMapView(this.cb.mapView, $('full-map'), factor); }
   openJournal() { this.cb.open('journal'); this.selectedQuest = this.game.data.tracked ?? this.selectedQuest ?? 'dead-air'; this.renderJournal(); }
   confirmNewStory() {
     this.cb.open('service'); $('service-kicker').textContent = 'SYSTEM / NEW STORY'; $('service-title').textContent = 'Begin again?';
@@ -187,6 +183,7 @@ export class RPGUI {
     return WORLD_OBJECTS.filter(p => !['cache', 'memory', 'terminal'].includes(p.type) && (this.mapFilter === 'all' || p.type === (this.mapFilter === 'contacts' ? 'contact' : 'transit')));
   }
   renderMap() {
+    this.boundMap();
     document.querySelectorAll('.map-filters button').forEach(b => b.classList.toggle('selected', b.dataset.action === `filter:${this.mapFilter}`));
     $('map-locations').innerHTML = this.mapPlaces().map(p => `<button class="map-location ${p.id === this.selectedPlace ? 'selected' : ''}" data-action="place:${p.id}"><span style="color:${COLORS[p.type]}">${SYMBOLS[p.type]}</span><span>${esc(p.name)}${p.type === 'transit' ? `<small>${this.game.data.transit.includes(p.id) ? 'CONNECTED' : 'UNDISCOVERED'}</small>` : ''}</span></button>`).join('');
     const place = placeById(this.selectedPlace) ?? placeById('mara');

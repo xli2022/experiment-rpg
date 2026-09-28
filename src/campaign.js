@@ -6,7 +6,7 @@ import { terrainHeight } from './master-plan.js';
 
 export const SAVE_KEY = 'afterlight.last-signal.v1';
 export const SAVE_VERSION = 1;
-export const WORLD_REVISION = 5;
+export const WORLD_REVISION = 6;
 const integer = (value, fallback = 0, max = 1000000) => Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : fallback;
 const uniqueKnown = (value, allowed) => Array.isArray(value) ? [...new Set(value.filter(v => allowed.includes(v)))] : [];
 const droneIds = ENCOUNTERS.flatMap(e => e.positions.map((_, i) => `${e.id}-${i}`));

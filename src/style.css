@@ -1,4 +1,5 @@
 @import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=Barlow:wght@400;500;600;700;800&family=Rajdhani:wght@500;600;700&display=swap');
+.climb-panel p{white-space:pre-line}
 
 :root{font-family:'Barlow',Arial,sans-serif;color:#eaf1ed;background:#090d18;font-synthesis:none;--acid:#deff7a;--muted:#82969c;--cyan:#7ee6e3;--panel:rgba(7,15,23,.76)}
 body{-webkit-user-select:none;user-select:none}

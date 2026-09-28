@@ -1,0 +1,170 @@
+/* Touch controls use screen-space sizes: no transforms shrinking hit targets. */
+#fullscreen-button:disabled{opacity:.4;cursor:default}
+body.touch{
+  --touch-left:calc(env(safe-area-inset-left, 0px) + 16px);
+  --touch-right:calc(env(safe-area-inset-right, 0px) + 16px);
+  --touch-bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
+  --move-size:128px;
+  --look-size:116px;
+  --actions-bottom:calc(var(--touch-bottom) + var(--look-size) + 18px);
+  --status-bottom:calc(var(--actions-bottom) + 120px);
+}
+body.touch .top-actions{top:calc(env(safe-area-inset-top, 0px) + 12px);right:var(--touch-right);gap:4px}
+body.touch .top-actions .icon-button,body.touch .modal-layer .icon-button{width:44px;height:44px;flex:none}
+body.touch .top-actions .icon-button{background:#0b1828c9;border-radius:8px}
+body.touch .top-actions .icon-button svg{width:19px;height:19px}
+body.touch button{-webkit-tap-highlight-color:transparent}
+body.touch .brand{top:calc(env(safe-area-inset-top, 0px) + 20px);left:var(--touch-left);gap:6px}
+body.touch .brand h1{font-size:20px;letter-spacing:1.8px}
+body.touch .brand h1 span{display:none}
+body.touch .brand-mark{width:20px;height:28px;transform:skew(-24deg) scale(.7);transform-origin:left center;margin-right:-4px}
+body.touch .brand-sub{font-size:6px;letter-spacing:1.1px;margin-top:4px}
+body.touch .world-status{display:none}
+body.touch .mission-panel{top:calc(env(safe-area-inset-top, 0px) + 86px);left:var(--touch-left);width:176px;padding-left:10px}
+body.touch .mission-panel .eyebrow{font-size:7px;letter-spacing:1px}
+body.touch .mission-panel h2{font-size:21px;margin:7px 0}
+body.touch .mission-panel p{display:none}
+body.touch .mission-objective{font-size:10px;line-height:1.45;gap:5px}
+body.touch .mission-meta{font-size:7px;margin-top:7px;padding-left:19px}
+body.touch .map-panel{top:calc(env(safe-area-inset-top, 0px) + 76px);right:var(--touch-right);width:116px}
+body.touch .minimap-button{height:98px}
+body.touch .map-caption{font-size:8px;margin-top:5px;letter-spacing:0}
+body.touch .weather{display:none}
+
+body.touch #look-zone{left:40%;top:18%;z-index:0}
+body.touch #joystick,body.touch #look-joystick{
+  position:absolute;bottom:var(--touch-bottom);width:var(--move-size);height:var(--move-size);
+  pointer-events:auto;touch-action:none;border-radius:50%;border:1px solid #c1e3d452;
+  background:radial-gradient(circle at center,#8ed6c714 0 38%,transparent 39%),#09192380;
+  box-shadow:inset 0 0 0 8px #91bbbc07,0 3px 18px #0002;z-index:1;
+  -webkit-tap-highlight-color:transparent;
+}
+body.touch #joystick{left:var(--touch-left)}
+body.touch #look-joystick{right:var(--touch-right);width:var(--look-size);height:var(--look-size);border-color:#7ee6e35c}
+body.touch .virtual-stick::before,body.touch .virtual-stick::after{content:'';position:absolute;display:block;background:#c1e3d417;pointer-events:none}
+body.touch .virtual-stick::before{left:10px;right:10px;top:50%;height:1px}
+body.touch .virtual-stick::after{top:10px;bottom:10px;left:50%;width:1px}
+body.touch #joystick-thumb,body.touch #look-thumb{
+  position:absolute;left:50%;top:50%;width:44px;height:44px;border-radius:50%;
+  transform:translate(-50%,-50%);background:#c8ebdc30;border:1px solid #c9edcf99;
+  box-shadow:0 2px 10px #0003;pointer-events:none;z-index:1;
+}
+body.touch #look-thumb{width:40px;height:40px;background:#7ee6e327;border-color:#7ee6e3aa}
+body.touch .joystick-label{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:8px;font-weight:600;letter-spacing:1.5px;color:#c3d9d19c;pointer-events:none}
+body.touch #look-joystick .joystick-label{color:#9fdcd6b3}
+body.touch .virtual-stick.active{border-color:var(--acid);background-color:#16312aa6}
+body.touch #look-joystick.active{border-color:var(--cyan);background-color:#103238a6}
+body.touch .virtual-stick.active .stick-thumb{background:#d9ff864d;border-color:var(--acid)}
+body.touch #look-joystick.active .stick-thumb{background:#7ee6e359;border-color:var(--cyan)}
+
+body.touch .touch-actions{
+  right:var(--touch-right);bottom:var(--actions-bottom);width:auto;height:auto;transform:none;
+  display:grid;grid-template-columns:48px 48px 64px;grid-template-rows:48px 48px;gap:10px;
+  grid-template-areas:'use reload fire' 'climb jump fire';align-items:center;z-index:2;
+}
+body.touch .touch-actions button{
+  position:static;inset:auto;transform:none;width:48px;height:48px;margin:0;padding:5px 2px;
+  display:flex;flex-direction:column;gap:3px;border-radius:14px;border:1px solid #b8d7ce70;
+  background:#0b1b29c9;backdrop-filter:none;color:#daebe1;font:600 10px 'Barlow',sans-serif;
+  -webkit-tap-highlight-color:transparent;
+}
+body.touch .touch-actions button svg{width:21px;height:21px;fill:none;stroke:currentColor;stroke-width:1.6}
+body.touch .touch-actions button span{font:600 7px 'Barlow',sans-serif;letter-spacing:.6px;line-height:1}
+body.touch #touch-interact{grid-area:use;border-color:#b9df8799;color:#e3f4b4}
+body.touch #touch-reload{grid-area:reload}
+body.touch #touch-jump{grid-area:jump}
+body.touch #touch-climb{grid-area:climb;width:48px;height:48px;color:var(--cyan);border-color:#7ee6e377;font-size:9px}
+body.touch .touch-actions #touch-fire{grid-area:fire;width:64px;height:72px;border-radius:23px;background:#253627d9;border-color:#deff7aaa;color:var(--acid);gap:6px}
+body.touch #touch-fire svg{width:28px;height:28px}
+body.touch .touch-actions button.active,body.touch .touch-actions button:active{background:#4a603be6;border-color:var(--acid);box-shadow:0 0 0 3px #deff7a20}
+
+/* Interactive HUD stays above the broad drag-to-look surface. */
+body.touch .player-panel{z-index:6;left:var(--touch-left);bottom:calc(var(--touch-bottom) + var(--move-size) + 18px);width:156px;filter:drop-shadow(0 2px 3px #000)}
+body.touch .player-id,body.touch .cred-meter,body.touch .medkit-hud>span{display:none}
+body.touch .vital-row{gap:6px;margin:7px 0}
+body.touch .vital-row .bar{flex:1;width:auto}
+body.touch .vital-row small{display:none}
+body.touch .credits{margin-top:9px;font-size:13px}
+body.touch .medkit-hud{min-height:44px;padding:8px 10px;margin-top:8px;font-size:8px;gap:7px;background:#0b1b29c9;border:1px solid #b8d7ce50;border-radius:8px}
+body.touch .medkit-hud kbd{display:none}
+body.touch .medkit-hud b{font-size:15px}
+body.touch .weapon-panel,body.touch .driving-panel{right:var(--touch-right);bottom:var(--status-bottom);width:126px}
+body.touch .weapon-class,body.touch .gun-icon,body.touch #reload-hint{display:none}
+body.touch .weapon-main{height:40px;justify-content:flex-end}
+body.touch .weapon-main strong{font-size:36px}
+body.touch .weapon-caption{justify-content:flex-end;font-size:9px}
+body.touch .ammo-bars{height:3px;margin-top:7px;gap:2px}
+body.touch .driving-panel strong{font-size:44px}
+body.touch .driving-panel>small{font-size:9px}
+body.touch .driving-panel small span,body.touch .driving-panel p{display:none}
+body.touch .interaction{bottom:calc(var(--status-bottom) + 122px);max-width:calc(100% - 32px);width:max-content;padding:9px 13px;gap:8px}
+body.touch .interaction kbd{display:none}
+body.touch .interaction span{font-size:11px}
+body.touch .climb-panel,body.touch .climb-panel.near-wall{left:50%;right:auto;bottom:calc(var(--status-bottom) + 122px);transform:translateX(-50%);width:min(280px,calc(100% - 32px))}
+body.touch .climb-panel p{font-size:9px}
+body.touch .build-label{display:none}
+body.touch .notification{top:calc(env(safe-area-inset-top, 0px) + 66px);font-size:11px;max-width:calc(100% - 32px)}
+body.touch.menu-open .notification{top:auto;bottom:calc(env(safe-area-inset-bottom, 0px) + 18px)}
+body.touch .modal-layer{padding:calc(env(safe-area-inset-top, 0px) + 12px) calc(env(safe-area-inset-right, 0px) + 12px) calc(env(safe-area-inset-bottom, 0px) + 12px) calc(env(safe-area-inset-left, 0px) + 12px)}
+body.touch .modal-layer>section{max-height:100%;overscroll-behavior:contain}
+body.touch .modal-layer .rpg-button,body.touch .map-location,body.touch .text-button{min-height:44px}
+body.touch .map-navigation{gap:6px}
+body.touch .map-navigation .rpg-button{min-width:44px;padding:9px 12px}
+body.touch .map-navigation span{flex-basis:100%;margin-left:0}
+body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3px;margin-top:0;color:#aec6c8}
+
+@media(max-width:380px){
+  body.touch{--touch-left:calc(env(safe-area-inset-left, 0px) + 12px);--touch-right:calc(env(safe-area-inset-right, 0px) + 12px);--move-size:112px;--look-size:108px}
+  body.touch .brand-mark,body.touch .brand-sub{display:none}
+  body.touch .brand h1{font-size:18px;letter-spacing:1px}
+  body.touch .top-actions{gap:3px}
+  body.touch .mission-panel{width:156px}
+  body.touch .map-panel{width:100px}
+  body.touch .minimap-button{height:85px}
+  body.touch .player-panel{width:108px}
+  body.touch .touch-actions{column-gap:8px}
+}
+@media(max-height:700px) and (orientation:portrait){
+  body.touch{--status-bottom:calc(var(--actions-bottom) + 115px)}
+  body.touch .interaction{top:calc(env(safe-area-inset-top, 0px) + 196px);bottom:auto;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px)}
+  body.touch .climb-panel,body.touch .climb-panel.near-wall{bottom:var(--status-bottom);width:150px;left:auto;right:var(--touch-right);transform:none}
+  body.touch .climb-panel p{display:none}
+}
+@media(max-height:560px) and (orientation:landscape){
+  body.touch{--move-size:112px;--look-size:112px;--touch-bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);--actions-bottom:calc(var(--touch-bottom) + var(--look-size) + 14px)}
+  body.touch .brand{top:calc(env(safe-area-inset-top, 0px) + 19px)}
+  body.touch .mission-panel{top:calc(env(safe-area-inset-top, 0px) + 71px);width:190px}
+  body.touch .mission-panel h2{font-size:19px;margin:5px 0}
+  body.touch .mission-objective{font-size:9px}
+  body.touch .map-panel{top:calc(env(safe-area-inset-top, 0px) + 67px);width:94px}
+  body.touch .minimap-button{height:clamp(44px,calc(100dvh - 320px),72px)}
+  body.touch .map-caption{display:none}
+  body.touch .player-panel{left:calc(var(--touch-left) + var(--move-size) + 18px);bottom:var(--touch-bottom);width:136px}
+  body.touch .weapon-panel,body.touch .driving-panel{right:calc(var(--touch-right) + var(--look-size) + 18px);bottom:var(--touch-bottom);width:112px}
+  body.touch .medkit-hud{margin-top:6px}
+  body.touch .interaction{top:auto;left:50%;bottom:calc(var(--touch-bottom) + 130px);transform:translateX(-50%);max-width:240px}
+  body.touch .climb-panel,body.touch .climb-panel.near-wall{left:50%;right:auto;bottom:calc(var(--touch-bottom) + 125px);width:240px;transform:translateX(-50%)}
+  body.touch .climb-panel p{display:none}
+  body.touch .district-arrival{top:23%;width:45%}
+  body.touch .district-arrival strong{font-size:26px}
+  body.touch .map-navigation span{flex-basis:auto;margin-left:auto}
+  body.touch .map-heading .eyebrow{display:none}
+  body.touch .map-heading h2{margin:0;font-size:22px;white-space:nowrap}
+  body.touch .city-map-card{position:relative;height:100%;display:grid;grid-template-columns:190px 1fr;grid-template-rows:44px minmax(0,1fr) auto;gap:10px 12px}
+  body.touch .map-heading,body.touch .map-navigation{margin:0}
+  body.touch .map-heading{grid-column:1}
+  body.touch #close-map{position:absolute;top:16px;right:16px}
+  body.touch .map-navigation{grid-column:2;justify-content:flex-end;flex-wrap:nowrap;padding-right:56px}
+  body.touch .map-navigation span{display:none}
+  body.touch .map-navigation .rpg-button{white-space:nowrap}
+  body.touch .map-layout{grid-column:1/-1;container-type:size;display:grid;grid-template-columns:minmax(0,1fr) 210px;grid-template-rows:minmax(0,1fr);overflow:hidden}
+  body.touch #full-map{width:min(100%,calc(100cqh * 9 / 7));height:auto;justify-self:center}
+  body.touch .map-sidebar{display:flex;max-height:100%;min-height:0;overflow:auto;overscroll-behavior:contain}
+  body.touch .map-locations{flex:none;max-height:140px;min-height:88px}
+  body.touch .map-selection{flex:none}
+  body.touch .map-legend{grid-column:1/-1;margin-top:0;gap:8px;font-size:6px}
+}
+@media(max-height:359px) and (orientation:landscape){
+  body.touch .map-panel{top:calc(env(safe-area-inset-top, 0px) + 12px);left:50%;right:auto;width:72px;transform:translateX(-50%)}
+  body.touch .minimap-button{height:44px}
+}

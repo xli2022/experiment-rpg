@@ -1,4 +1,5 @@
 import { boxCoordinates, circleHitsBox, clamp, overlapsHeight, surfaceHeightAt } from './physics.js';
+import { resetFall } from './jump.js';
 
 export const CLIMB = Object.freeze({ reach: 1.15, offset: .48, speed: 3.4, fast: 5.1, sideways: 2.3, mantleTime: .72 });
 const identity = box => box.id ?? `${box.minX}:${box.minZ}:${box.maxX}:${box.maxZ}:${box.maxY}`;
@@ -37,6 +38,7 @@ export function startClimb(player, face, boxes = []) {
   if (!face || player.climb) return false;
   const x = face.x + face.tx * face.u + face.nx * CLIMB.offset, z = face.z + face.tz * face.u + face.nz * CLIMB.offset;
   if (blocked(x, player.y, z, boxes, face.id)) return false;
+  resetFall(player);
   player.x = x; player.z = z; player.yaw = Math.atan2(face.nx, face.nz);
   player.climb = { ...face, mode: 'climb', phase: 0, speed: 0, blocked: false, progress: 0 };
   player.jumpPhase = ''; player.velocityY = player.vx = player.vz = player.speed = 0;
@@ -45,6 +47,7 @@ export function startClimb(player, face, boxes = []) {
 
 export function dropClimb(player, push = false) {
   if (!player.climb) return false;
+  resetFall(player);
   const { x, z, nx, nz, tx, tz, u } = player.climb;
   // A mantle moves inward before the feet clear the ledge. Cancelling must
   // return to the outside face so ordinary collision cannot trap us in it.
@@ -66,7 +69,7 @@ export function stepClimb(player, axes, dt, boxes, fast = false) {
     player.y = state.start.y + (state.end.y - state.start.y) * lift;
     player.x = state.start.x + (state.end.x - state.start.x) * inward;
     player.z = state.start.z + (state.end.z - state.start.z) * inward;
-    if (t === 1) { player.climb = null; player.groundY = player.y = state.end.y; player.velocityY = 0; player.jumpPhase = ''; return 'roof'; }
+    if (t === 1) { player.climb = null; player.groundY = player.y = state.end.y; player.velocityY = 0; player.jumpPhase = ''; resetFall(player); return 'roof'; }
     return 'mantle';
   }
   const u = clamp(state.u + axes.x * CLIMB.sideways * dt, -state.width / 2 + .5, state.width / 2 - .5);

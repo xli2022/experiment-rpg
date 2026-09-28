@@ -5,7 +5,7 @@ import { findSpawnPosition } from '../src/spawn.js';
 import { createVerticalCity } from '../src/vertical-city.js';
 import { WorldStream } from '../src/world-stream.js';
 import { WORLD_OBJECTS, placeById } from '../src/content.js';
-import { terrainHeight } from '../src/master-plan.js';
+import { createMasterPlan, terrainHeight } from '../src/master-plan.js';
 import { carCollider, circleHitsBox, overlapsHeight, supportHeight, moveWithCollisions, orientedBox, WORLD_LIMIT } from '../src/physics.js';
 
 const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
@@ -52,7 +52,11 @@ test('home and elevated garden arrivals preserve their intended position and all
     assert.equal(safe.x, preferred.x); assert.equal(safe.z, preferred.z);
     assert.ok(Math.abs(safe.y - preferred.y) <= .6);
     assertCanStep(safe);
-    if (id === 'garden-rest') assert.ok(safe.y - terrainHeight(safe.x, safe.z) > 5, 'Garden arrival remains on its deck');
+    if (id === 'garden-rest') {
+      const deck = createMasterPlan().supports.find(s => s.id === 'stacks-garden');
+      assert.equal(safe.y, deck.maxY, 'Garden arrival remains on its deck');
+      assert.ok(safe.y - terrainHeight(safe.x, safe.z) > 3);
+    }
   }
 });
 

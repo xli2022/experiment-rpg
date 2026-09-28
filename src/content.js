@@ -1,4 +1,5 @@
 import { MASTER_DISTRICTS, districtAt as masterDistrictAt, createMasterPlan, terrainHeight, SHOWCASE, nearestOnSegment } from './master-plan.js';
+import { CITY_SCALE, authoredToWorld, atEastpoint } from './world-scale.js';
 // Authored world content. Coordinates are shared by the simulation, journal and map.
 export const DISTRICTS = MASTER_DISTRICTS.map(d => ({ ...d, color: `#${d.color.toString(16).padStart(6, '0')}` }));
 
@@ -72,7 +73,7 @@ function roadside(x, z, offset = 4) {
   return { x: best.x, z: best.z, y: terrainHeight(best.x, best.z) };
 }
 export const REGIONAL_STOPS = DISTRICTS.map(d => {
-  const p = roadside(d.x, d.z + 75);
+  const p = roadside(d.x, d.z + 75 * CITY_SCALE);
   return object(`metro-district-${d.id}`, `${d.name} Station`, 'transit', p.x, p.z, 'Discover this station on foot, then use the night tram to travel between districts.', { y: p.y, district: d.id });
 });
 export const WORLD_OBJECTS = [...PLACES, ...MEMORIES, ...CACHES, ...REGIONAL_STOPS];
@@ -119,12 +120,16 @@ export const ENDINGS = {
 // The story now lives in the master plan. Keep stable IDs so existing chapter,
 // inventory and dialogue progress survives the replacement of the old map.
 const deck = id => masterPlan.supports.find(s => s.id === id);
-const onDeck = (id, x, z) => ({ x: x + (id.startsWith('eastpoint-') ? SHOWCASE.x - 2550 : 0), z: z + (id.startsWith('eastpoint-') ? SHOWCASE.z - 600 : 0), y: deck(id).maxY });
+// Layout coordinates stay in the authored plan; only these boundary helpers
+// convert them. SHOWCASE and DISTRICTS already contain runtime coordinates.
+const onDeck = (id, x, z) => ({ ...(id.startsWith('eastpoint-') ? atEastpoint(x, z) : authoredToWorld(x, z)), y: deck(id).maxY });
 const ground = (x, z) => ({ x, z, y: terrainHeight(x, z) });
-const eastpointGround = (x, z) => ground(x + SHOWCASE.x - 2550, z + SHOWCASE.z - 600);
+const groundAtPosition = p => ground(p.x, p.z);
+const authoredGround = (x, z) => groundAtPosition(authoredToWorld(x, z));
+const eastpointGround = (x, z) => groundAtPosition(atEastpoint(x, z));
 const inDistrict = (id, dx = 0, dz = 0) => {
   const d = DISTRICTS.find(d => d.id === id);
-  return roadside(d.x + dx, d.z + dz, 6);
+  return roadside(d.x + dx * CITY_SCALE, d.z + dz * CITY_SCALE, 6);
 };
 const layout = {
   home: ground(SHOWCASE.spawn.x, SHOWCASE.spawn.z),
@@ -152,8 +157,8 @@ const layout = {
   medicine: inDistrict('foundry', -140, 80),
   'freight-manifest': inDistrict('foundry', 140, 100),
   parcel: inDistrict('east-reach', -150, 50),
-  'metro-north': ground(1134, -934),
-  'metro-garden': ground(-456, -3624),
+  'metro-north': authoredGround(1134, -934),
+  'metro-garden': authoredGround(-456, -3624),
   'metro-freight': inDistrict('foundry', -70, 60),
   'metro-dock': inDistrict('void-port', -80, 80),
   'metro-ridge': inDistrict('north-ridge', -90, 70),
@@ -172,7 +177,7 @@ for (const p of [...WORLD_OBJECTS, ...CONTACTS]) {
 }
 for (const p of WORLD_OBJECTS) {
   if (p.y < terrainHeight(p.x, p.z) + 3) continue;
-  const rampId = p.district === 'stacks' ? 'stacks-garden-access' : p.district === 'citadel' ? 'citadel-concourse-access' : p.x > SHOWCASE.x + 40 ? 'eastpoint-east-walk-ramp' : 'eastpoint-west-walk-ramp';
+  const rampId = p.district === 'stacks' ? 'stacks-garden-access' : p.district === 'citadel' ? 'citadel-concourse-access' : p.x > SHOWCASE.x + 40 * CITY_SCALE ? 'eastpoint-east-walk-ramp' : 'eastpoint-west-walk-ramp';
   p.approach = masterPlan.supports.find(s => s.id === rampId);
 }
 Object.assign(placeById('home'), { name: 'Eastpoint hideout', description: 'Your shelter beneath the interchange. Rest here to restore health, armor and ammunition.', arrivalOffset: { x: 0, z: 7 } });
@@ -192,7 +197,7 @@ for (const q of QUESTS) {
   q.description = renamed(q.description);
   for (const s of q.steps) s.text = renamed(s.text);
 }
-QUESTS[0].description = 'Mara is broadcasting from the Upper Market, eight metres above Eastpoint. Follow the signed pedestrian ramp south of the hideout, then cross the skybridge to trace her lost signal.';
+QUESTS[0].description = 'Mara is broadcasting from the Upper Market, four metres above Eastpoint. Follow the signed pedestrian ramp south of the hideout, then cross the skybridge to trace her lost signal.';
 QUESTS[0].steps[1].text = 'Cross the skybridge and recover the relay transmission';
 for (const p of WORLD_OBJECTS) p.description = renamed(p.description);
 for (const ending of Object.values(ENDINGS)) ending.text = renamed(ending.text);

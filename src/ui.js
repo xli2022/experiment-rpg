@@ -1,7 +1,10 @@
 import { WORLD_OBJECTS, DISTRICTS, districtAt } from './content.js';
-import { MAP_SPAN, COLORS, SYMBOLS } from './world.js';
+import { COLORS, SYMBOLS } from './world.js';
 import { formatCurrency } from './currency.js';
 import { coastX } from './master-plan.js';
+import { WORLD_LIMIT } from './world-config.js';
+import { CITY_SCALE } from './world-scale.js';
+import { constrainMapView, MAP_WORLD_SPAN } from './map-viewport.js';
 
 const $ = id => document.getElementById(id);
 export class HUD {
@@ -23,25 +26,37 @@ export class HUD {
     n['reload-hint'].innerHTML = state.reloading > 0 ? 'RELOADING...' : '<kbd>R</kbd> RELOAD';
     n.credits.textContent = data.credits.toLocaleString('en-US'); n['cred-value'].textContent = data.xp; n.level.textContent = String(1 + Math.floor(data.xp / 500)).padStart(2, '0');
     n.fps.textContent = Math.round(fps);
-    const climbing = !!player.climb;
-    if (this.lastDriving !== !!driving || this.lastClimbing !== climbing) {
-      n['weapon-panel'].classList.toggle('hidden', !!driving || climbing); n['driving-panel'].classList.toggle('hidden', !driving);
-      for (const id of ['crosshair', 'touch-fire', 'touch-reload']) $(id).style.display = driving || climbing ? 'none' : '';
-      $('touch-interact').style.display = climbing ? 'none' : '';
-      this.lastDriving = !!driving; this.lastClimbing = climbing;
+    const climbing = !!player.climb, gliding = !!player.parachute;
+    if (this.lastDriving !== !!driving || this.lastClimbing !== climbing || this.lastGliding !== gliding) {
+      n['weapon-panel'].classList.toggle('hidden', !!driving || climbing || gliding); n['driving-panel'].classList.toggle('hidden', !driving);
+      for (const id of ['crosshair', 'touch-fire', 'touch-reload']) $(id).style.display = driving || climbing || gliding ? 'none' : '';
+      $('touch-interact').style.display = climbing || gliding ? 'none' : '';
+      const jump = $('touch-jump'), interact = $('touch-interact');
+      jump.querySelector('span').textContent = driving ? 'BRAKE' : 'JUMP';
+      jump.setAttribute('aria-label', driving ? 'Handbrake' : 'Jump');
+      interact.querySelector('span').textContent = driving ? 'EXIT' : 'USE';
+      interact.setAttribute('aria-label', driving ? 'Exit vehicle' : 'Talk, use, or enter vehicle');
+      $('joystick').querySelector('.joystick-label').textContent = driving ? 'DRIVE' : climbing ? 'CLIMB' : gliding ? 'GLIDE' : 'MOVE';
+      this.lastDriving = !!driving; this.lastClimbing = climbing; this.lastGliding = gliding;
     }
     const face = player.climb ?? player.climbCandidate, touch = document.body.classList.contains('touch');
     const showClimb = !!face && !driving && state.started && !state.paused;
-    $('climb-panel').classList.toggle('hidden', !showClimb); $('climb-panel').classList.toggle('near-wall', !climbing);
+    const showGlide = gliding && !driving && state.started && !state.paused;
+    $('climb-panel').classList.toggle('hidden', !showClimb && !showGlide); $('climb-panel').classList.toggle('near-wall', !climbing && !gliding);
     $('touch-climb').classList.toggle('hidden', !showClimb); $('touch-climb').textContent = climbing ? 'LET GO' : 'CLIMB';
-    if (showClimb) {
+    if (showGlide) {
+      $('climb-title').textContent = player.parachute.openness < 1 ? 'PARACHUTE OPENING' : 'PARACHUTE';
+      $('climb-height').textContent = `${Math.max(0, Math.round(player.y - player.groundY))} M`;
+      $('climb-progress').style.width = `${Math.round(player.parachute.openness * 100)}%`;
+      $('climb-controls').textContent = touch ? 'Stick to steer · Height to landing\nPacks away on landing' : 'WASD to steer · Height to landing\nPacks away on landing';
+    } else if (showClimb) {
       $('climb-title').textContent = !climbing ? 'WALL WITHIN REACH' : face.mode === 'mantle' ? 'PULLING UP' : face.blocked ? 'MOVE ALONG THE WALL' : 'CLIMBING';
       $('climb-height').textContent = `${Math.round(climbing ? player.y : face.roofY)} M`;
       $('climb-progress').style.width = `${Math.min(100, Math.max(0, (player.y - face.baseY) / Math.max(1, face.roofY - face.baseY) * 100))}%`;
       $('climb-controls').textContent = touch ? climbing ? 'Stick: climb & move sideways. ↑ jump off. LET GO to drop.' : 'Tap CLIMB to grab this wall.' : climbing ? 'W/S up & down · A/D sideways\nShift climb faster · Space jump off · C release' : 'C to climb · Space to grab a wall ahead';
     }
     if (driving) { const speed = Math.round(Math.abs(driving.speed) * 3.6); n.speed.textContent = speed; n['speed-bar'].style.width = `${Math.min(speed / 151 * 100, 100)}%`; }
-    const canInteract = !driving && !climbing && (nearby || nearest) && state.started && !state.paused;
+    const canInteract = !driving && !climbing && !gliding && (nearby || nearest) && state.started && !state.paused;
     n.interaction.classList.toggle('hidden', !canInteract);
     if (canInteract) {
       n['interact-caption'].textContent = nearby ? nearby.name.toUpperCase() : 'ARCHER GT / AVAILABLE';
@@ -70,6 +85,7 @@ export class HUD {
   drawMap(player, yaw, drones, objective, expanded = false) {
     const ctx = expanded ? this.full : this.map, w = ctx.canvas.width, h = ctx.canvas.height;
     const view = this.city.mapView;
+    if (expanded) constrainMapView(view, ctx.canvas);
     const scale = expanded ? Math.min(w, h) / view.span : 2.1;
     const cx = expanded ? view.x : player.x, cz = expanded ? view.z : player.z;
     const point = (x, z) => [w / 2 + (x - cx) * scale, h / 2 + (z - cz) * scale];
@@ -108,7 +124,7 @@ export class HUD {
     if (expanded) {
       ctx.font = '600 10px Barlow, Arial'; ctx.fillStyle = '#b5cbcc'; ctx.textAlign = 'center';
       DISTRICTS.forEach(d => { ctx.fillStyle = this.campaign.data.discovered.includes(d.id) ? '#bed5cc' : '#6f8a95'; ctx.fillText(d.name.toUpperCase(), ...point(d.x, d.z + 40)); });
-      ctx.textAlign = 'left'; ctx.font = '10px Barlow, Arial'; ctx.fillStyle = '#7a999d'; ctx.fillText('N ↑', 20, 27); ctx.fillText(`${view.span >= MAP_SPAN ? '11 KM × 11 KM' : `${Math.round(view.span)} M VIEW`} / ${DISTRICTS.length} DISTRICTS`, 20, h - 20);
+      ctx.textAlign = 'left'; ctx.font = '10px Barlow, Arial'; ctx.fillStyle = '#7a999d'; ctx.fillText('N ↑', 20, 27); ctx.fillText(`${view.span >= MAP_WORLD_SPAN ? `${MAP_WORLD_SPAN / 1000} KM × ${MAP_WORLD_SPAN / 1000} KM` : `${Math.round(view.span)} M VIEW`} / ${DISTRICTS.length} DISTRICTS`, 20, h - 20);
     }
   }
   drawBaseMap(ctx, w, h, cx, cz, scale, expanded) {
@@ -121,22 +137,30 @@ export class HUD {
       const c = canvas.getContext('2d'), point = (px, pz) => [canvas.width / 2 + (px - x) * scale, canvas.height / 2 + (pz - z) * scale];
       const rx = canvas.width / 2 / scale, rz = canvas.height / 2 / scale;
       c.fillStyle = '#0a1822'; c.fillRect(0, 0, canvas.width, canvas.height);
+      c.save(); c.beginPath(); c.rect(...point(-WORLD_LIMIT, -WORLD_LIMIT), MAP_WORLD_SPAN * scale, MAP_WORLD_SPAN * scale); c.clip();
       c.fillStyle = '#092a3c'; c.beginPath();
-      c.moveTo(...point(6000, -6000));
-      for (let shore = -6000; shore <= 6000; shore += 120) c.lineTo(...point(coastX(shore), shore));
-      c.lineTo(...point(6000, 6000)); c.closePath(); c.fill();
+      const coastExtent = WORLD_LIMIT + 500 * CITY_SCALE;
+      c.moveTo(...point(coastExtent, -coastExtent));
+      for (let shore = -coastExtent; shore <= coastExtent; shore += 120 * CITY_SCALE) c.lineTo(...point(coastX(shore), shore));
+      c.lineTo(...point(coastExtent, coastExtent)); c.closePath(); c.fill();
       const segments = this.city.roadIndex.query(x - rx, z - rz, x + rx, z + rz);
       for (const layer of ['local', 'secondary', 'primary', 'expressway', 'ramp', 'pedestrian']) {
         const minimumWidth = { expressway: 2, primary: 1.7, secondary: .85, local: .35 }[layer] ?? .65;
-        c.beginPath(); c.lineWidth = Math.max(minimumWidth, ({ expressway: 30, primary: 26, secondary: 21 }[layer] ?? 10) * scale);
         c.strokeStyle = { local: '#344e59', secondary: '#6b9bc0', primary: '#b375a4', expressway: '#f18c65', ramp: '#e6ad79', pedestrian: '#7ad8c5' }[layer];
+        const widths = new Map();
         for (const s of segments) {
           const roadClass = s.road?.class ?? s.class;
-          const kind = s.kind === 'pedestrian' || roadClass === 'pedestrian' ? 'pedestrian' : roadClass === 'ramp' ? 'ramp' : roadClass === 'expressway' ? 'expressway' : roadClass === 'primary' ? 'primary' : roadClass === 'secondary' && s.width >= 20 ? 'secondary' : 'local';
+          const kind = s.kind === 'pedestrian' || roadClass === 'pedestrian' ? 'pedestrian' : roadClass === 'ramp' ? 'ramp' : roadClass === 'expressway' ? 'expressway' : roadClass === 'primary' ? 'primary' : roadClass === 'secondary' ? 'secondary' : 'local';
           if (kind !== layer || scale < .12 && kind === 'pedestrian') continue;
-          c.moveTo(...point(s.a.x, s.a.z)); c.lineTo(...point(s.b.x, s.b.z));
+          const width = Math.max(minimumWidth, s.width * scale);
+          if (!widths.has(width)) widths.set(width, []);
+          widths.get(width).push(s);
         }
-        c.stroke();
+        for (const [width, group] of widths) {
+          c.beginPath(); c.lineWidth = width;
+          for (const s of group) { c.moveTo(...point(s.a.x, s.a.z)); c.lineTo(...point(s.b.x, s.b.z)); }
+          c.stroke();
+        }
       }
       if (scale >= .12) for (const s of this.city.masterPlan.supports) {
         c.strokeStyle = '#7ad8c5'; c.fillStyle = '#457c7699';
@@ -168,6 +192,7 @@ export class HUD {
           if (scale > .5) c.strokeRect(-b.w * scale / 2, -b.d * scale / 2, b.w * scale, b.d * scale); c.restore();
         }
       }
+      c.restore();
       cache = { key, canvas, x, z }; this.mapCaches[slot] = cache;
     }
     ctx.drawImage(cache.canvas, -128 + (cache.x - cx) * scale, -128 + (cache.z - cz) * scale);

@@ -6,15 +6,16 @@ import {
 } from '../src/master-plan.js';
 import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt } from '../src/physics.js';
 import { VerticalMetropolis } from '../src/vertical-city.js';
+import { CITY_SCALE } from '../src/world-scale.js';
 
 const plan = createMasterPlan();
 
-test('master map has thirteen named districts and a coherent 11 km coordinate system', () => {
+test('master map has thirteen named districts and a coherent 5.5 km runtime coordinate system', () => {
   assert.equal(MASTER_DISTRICTS.length, 13);
   assert.equal(new Set(MASTER_DISTRICTS.map(d => d.id)).size, 13);
   assert.deepEqual({ x: MASTER_DISTRICTS[0].x, z: MASTER_DISTRICTS[0].z }, fromReference(458, 553));
-  assert.deepEqual(fromMap(0, 0), { x: -5500, z: -5500 });
-  assert.deepEqual(fromMap(11, 11), { x: 5500, z: 5500 });
+  assert.deepEqual(fromMap(0, 0), { x: -2750, z: -2750 });
+  assert.deepEqual(fromMap(11, 11), { x: 2750, z: 2750 });
   for (const district of MASTER_DISTRICTS) assert.equal(districtAt(district.x, district.z).id, district.id);
   assert.equal(plan.interchanges.length, 10);
   assert.equal(new Set(plan.interchanges.map(i => i.name)).size, 10);
@@ -25,19 +26,19 @@ test('terrain heights exactly interpolate the resident ground triangles and desc
   const a = terrainHeight(x, z), b = terrainHeight(x + size, z), c = terrainHeight(x, z + size), d = terrainHeight(x + size, z + size);
   assert.ok(Math.abs(terrainHeight(x + size * .2, z + size * .3) - (a + .2 * (b - a) + .3 * (c - a))) < 1e-10);
   assert.ok(Math.abs(terrainHeight(x + size * .8, z + size * .7) - (d + .2 * (c - d) + .3 * (b - d))) < 1e-10);
-  assert.ok(terrainHeight(-4200, -4200) > terrainHeight(4000, 4200) + 60);
-  for (let z = -5000; z <= 5000; z += 500) assert.ok(terrainHeight(coastX(z) + 150, z) < WATER_LEVEL);
+  assert.ok(terrainHeight(-2100, -2100) > terrainHeight(2000, 2100) + 30);
+  for (let z = -2500; z <= 2500; z += 250) assert.ok(terrainHeight(coastX(z) + 150, z) < WATER_LEVEL);
 });
 
 test('roads retain finite heights, with dry streets and raised bridges over the bay', () => {
-  // Covering all 11 km of the city needs more resident road metadata; visual
+  // Covering all 5.5 km of the city needs more resident road metadata; visual
   // chunks still stream independently. Keep the expanded index bounded.
   assert.ok(plan.roadIndex.size < 25000);
   for (const road of plan.roads) {
     assert.ok(road.points.length >= 2, road.id);
     for (const point of road.points) {
       assert.ok([point.x, point.y, point.z].every(Number.isFinite), road.id);
-      assert.ok(Math.abs(point.x) <= 5500.01 && Math.abs(point.z) <= 5500.01, road.id);
+      assert.ok(Math.abs(point.x) <= 2750.01 && Math.abs(point.z) <= 2750.01, road.id);
       assert.ok(terrainHeight(point.x, point.z) >= 0 || road.bridge && point.y > WATER_LEVEL + 5, `${road.id} enters water without a raised bridge`);
       if (road.level === 0) assert.ok(Math.abs(point.y - terrainHeight(point.x, point.z) - .07) < 1e-7, `${road.id} leaves its ground surface`);
     }
@@ -88,7 +89,7 @@ test('neighborhood streets vary their block rhythm and continue into the surroun
       const a = r.points[0], b = r.points.at(-1);
       return Math.max(...r.points.map(p => nearestOnSegment(p.x, p.z, a, b).distance));
     });
-    assert.ok(Math.max(...bends) > 30, `${id} should follow its hills with visibly bent local streets`);
+    assert.ok(Math.max(...bends) > 30 * CITY_SCALE, `${id} should follow its hills with visibly bent local streets`);
   }
 });
 
@@ -97,29 +98,29 @@ function landStreetCoverage() {
     [s.a, s.b].every(p => p.y - terrainHeight(p.x, p.z) < .3)));
   const cells = new Map(), samples = [];
   const cellAt = (x, z) => {
-    const key = `${Math.floor((x + 5500) / 1000)},${Math.floor((z + 5500) / 1000)}`;
+    const key = `${Math.floor((x + 2750) / 500)},${Math.floor((z + 2750) / 500)}`;
     if (!cells.has(key)) cells.set(key, { key, samples: 0, length: 0 });
     return cells.get(key);
   };
   // Sample beyond district centres, including the former empty outer strips.
-  // A 150 m map margin and the sloping 90 m shoreline are not urban blocks.
-  for (let z = -5350; z <= 5350; z += 100) for (let x = -5350; x <= 5350; x += 100) {
-    if (x > coastX(z) - 90 || terrainHeight(x, z) < 0) continue;
+  // A 75 m map margin and the sloping 45 m shoreline are not urban blocks.
+  for (let z = -2675; z <= 2675; z += 50) for (let x = -2675; x <= 2675; x += 50) {
+    if (x > coastX(z) - 45 || terrainHeight(x, z) < 0) continue;
     let distance = Infinity;
-    for (const s of plan.roadIndex.near(x, z, 450)) if (ground.has(s)) {
+    for (const s of plan.roadIndex.near(x, z, 225)) if (ground.has(s)) {
       distance = Math.min(distance, nearestOnSegment(x, z, s.a, s.b).distance);
     }
     samples.push({ x, z, distance });
     cellAt(x, z).samples++;
   }
-  // Clip each segment at kilometre-cell boundaries so a road on a boundary
+  // Clip each segment at half-kilometre-cell boundaries so a road on a boundary
   // cannot make its neighbour look empty through midpoint-only assignment.
   for (const s of ground) {
     const dx = s.b.x - s.a.x, dz = s.b.z - s.a.z, length = Math.hypot(dx, dz), splits = [0, 1];
     for (const [a, b, delta] of [[s.a.x, s.b.x, dx], [s.a.z, s.b.z, dz]]) {
       if (Math.abs(delta) < 1e-8) continue;
-      const first = Math.floor((Math.min(a, b) + 5500) / 1000) + 1;
-      for (let line = first * 1000 - 5500; line < Math.max(a, b); line += 1000) splits.push((line - a) / delta);
+      const first = Math.floor((Math.min(a, b) + 2750) / 500) + 1;
+      for (let line = first * 500 - 2750; line < Math.max(a, b); line += 500) splits.push((line - a) / delta);
     }
     splits.sort((a, b) => a - b);
     for (let i = 1; i < splits.length; i++) {
@@ -135,19 +136,19 @@ const landCoverage = landStreetCoverage();
 test('ground streets cover usable land without the old kilometre-wide gaps', () => {
   const samples = landCoverage.samples;
   assert.ok(samples.length > 10000, 'audit the whole land area, not only district centres');
-  const covered = samples.filter(p => p.distance <= 250).length / samples.length;
-  assert.ok(covered >= .95, `only ${(covered * 100).toFixed(1)}% of usable land is within 250 m of a ground street`);
-  const gaps = samples.filter(p => p.distance > 450);
+  const covered = samples.filter(p => p.distance <= 125).length / samples.length;
+  assert.ok(covered >= .95, `only ${(covered * 100).toFixed(1)}% of usable land is within 125 m of a ground street`);
+  const gaps = samples.filter(p => p.distance > 225);
   assert.equal(gaps.length, 0, `land still has a large road gap near ${gaps[0]?.x},${gaps[0]?.z}`);
 });
 
-test('kilometre-scale road density stays balanced while allowing different neighborhood patterns', () => {
-  const densities = landCoverage.cells.map(c => c.length / (c.samples * 10000) * 1000).sort((a, b) => a - b);
+test('half-kilometre-scale road density stays balanced while allowing different neighborhood patterns', () => {
+  const densities = landCoverage.cells.map(c => c.length / (c.samples * 2500) * 1000).sort((a, b) => a - b);
   assert.ok(densities.length >= 100, 'compare every predominantly land cell across the city');
   const mean = densities.reduce((sum, density) => sum + density, 0) / densities.length;
   const variation = Math.sqrt(densities.reduce((sum, density) => sum + (density - mean) ** 2, 0) / densities.length) / mean;
   assert.ok(variation < .35, `road density varies too much between city cells (${variation.toFixed(3)})`);
-  assert.ok(densities[Math.floor(densities.length * .1)] >= 2.5, 'sparsest neighborhoods need a connected local street fabric');
+  assert.ok(densities[Math.floor(densities.length * .1)] >= 5, 'sparsest neighborhoods need a connected local street fabric');
 });
 
 test('infill cross streets divide long strips into walkable blocks at real ground-level junctions', () => {
@@ -179,13 +180,13 @@ test('infill cross streets divide long strips into walkable blocks at real groun
       const x = piece.a.x + (piece.b.x - piece.a.x) * t, z = piece.a.z + (piece.b.z - piece.a.z) * t;
       // Streets returning along the map boundary have no outboard blocks to
       // subdivide. Keep those bends bounded while limiting interior block size.
-      const boundary = Math.abs(x) > 5200 || Math.abs(z) > 5200;
-      assert.ok(length <= (boundary ? 1200 : 650), `${road.id} has an uninterrupted ${length.toFixed(0)} m block near ${x},${z}`);
+      const boundary = Math.abs(x) > 2600 || Math.abs(z) > 2600;
+      assert.ok(length <= (boundary ? 600 : 325), `${road.id} has an uninterrupted ${length.toFixed(0)} m block near ${x},${z}`);
       spans.push(length);
     }
   }
   assert.ok(spans.length > roads.length * 2, 'connecting streets should have internal junctions, not only end connections');
-  assert.ok(spans.filter(length => length <= 500).length / spans.length >= .95, 'at least 95% of new blocks should have a crossing within 500 m');
+  assert.ok(spans.filter(length => length <= 250).length / spans.length >= .95, 'at least 95% of new blocks should have a crossing within 250 m');
 });
 
 test('neighboring fabrics and their continuations do not form narrow duplicate parallel streets', () => {
@@ -195,7 +196,7 @@ test('neighboring fabrics and their continuations do not form narrow duplicate p
     if (!segment.road.district) continue;
     const dx = segment.b.x - segment.a.x, dz = segment.b.z - segment.a.z, length = Math.hypot(dx, dz);
     const x = (segment.a.x + segment.b.x) / 2, z = (segment.a.z + segment.b.z) / 2, y = (segment.a.y + segment.b.y) / 2;
-    for (const neighbor of plan.roadIndex.near(x, z, 250)) {
+    for (const neighbor of plan.roadIndex.near(x, z, 125)) {
       if (neighbor.road === segment.road || neighbor.road.kind === 'ramp') continue;
       const nx = neighbor.b.x - neighbor.a.x, nz = neighbor.b.z - neighbor.a.z;
       if (Math.abs(dx * nx + dz * nz) / (length * Math.hypot(nx, nz)) < .98) continue;
@@ -204,7 +205,7 @@ test('neighboring fabrics and their continuations do not form narrow duplicate p
       // close side-by-side street sections consume a whole block's frontage.
       if (hit.t <= .05 || hit.t >= .95 || Math.abs(hit.y - y) > .5) continue;
       checked++;
-      assert.ok(hit.distance >= 55, `${segment.road.id} crowds ${neighbor.road.id} at ${x}, ${z}`);
+      assert.ok(hit.distance >= 27.5, `${segment.road.id} crowds ${neighbor.road.id} at ${x}, ${z}`);
     }
   }
   assert.ok(checked > 0, 'inspect actual nearby parallel streets');
@@ -213,9 +214,9 @@ test('neighboring fabrics and their continuations do not form narrow duplicate p
 test('ground vehicles can pass beneath Eastpoint while its upper deck remains independently walkable', () => {
   const { x, z } = SHOWCASE, base = terrainHeight(x, z);
   assert.ok(Math.abs(plan.surfaceHeight(x, z, base + .5) - (base + .07)) < .03);
-  assert.ok(Math.abs(plan.surfaceHeight(x, z) - (base + 25.07)) < .03);
+  assert.ok(Math.abs(plan.surfaceHeight(x, z) - (base + 12.57)) < .03);
   const deck = plan.supports.find(s => s.id === 'eastpoint-concourse');
-  assert.ok(plan.surfaceHeight(deck.x, deck.z, deck.y - 1) < deck.y - 7);
+  assert.ok(plan.surfaceHeight(deck.x, deck.z, deck.y - 1) < deck.y - 3.5);
   assert.equal(plan.surfaceHeight(deck.x, deck.z, deck.y + .1), deck.y);
   const start = plan.spawn;
   assert.ok(plan.surfaceHeight(start.x, start.z) < terrainHeight(start.x, start.z) + .2, 'spawn should stand beside the upper concourse');
@@ -349,7 +350,7 @@ test('outside traffic lanes retain continuous road support across every angled s
 });
 
 test('main corridors avoid duplicate parallel stretches while allowing the PNG shared junctions', () => {
-  const main = road => road.width >= 21 || ['primary', 'expressway'].includes(road.class);
+  const main = road => road.width >= 10.5 || ['primary', 'expressway'].includes(road.class);
   const segments = new Set([...plan.roadIndex.cells.values()].flat()), alignment = Math.cos(20 * Math.PI / 180);
   const sharedNodes = new Map();
   const mainRoads = plan.roads.filter(main);
@@ -363,14 +364,14 @@ test('main corridors avoid duplicate parallel stretches while allowing the PNG s
     const dx = s.b.x - s.a.x, dz = s.b.z - s.a.z, length = Math.hypot(dx, dz);
     for (const t of [0, .5, 1]) {
       const x = s.a.x + dx * t, z = s.a.z + dz * t;
-      for (const other of plan.roadIndex.near(x, z, 500)) {
+      for (const other of plan.roadIndex.near(x, z, 250)) {
         if (!main(other.road) || s.road.id >= other.road.id) continue;
         const ox = other.b.x - other.a.x, oz = other.b.z - other.a.z;
         if (Math.abs(dx * ox + dz * oz) / (length * Math.hypot(ox, oz)) < alignment) continue;
         const gap = nearestOnSegment(x, z, other.a, other.b).distance;
         const joins = sharedNodes.get(`${s.road.id}/${other.road.id}`) ?? [];
-        if (joins.some(p => Math.hypot(p.x - x, p.z - z) < 400)) continue;
-        assert.ok(gap >= 300, `${s.road.name} crowds ${other.road.name} at ${Math.round(x)},${Math.round(z)} (${gap.toFixed(1)} m)`);
+        if (joins.some(p => Math.hypot(p.x - x, p.z - z) < 200)) continue;
+        assert.ok(gap >= 150, `${s.road.name} crowds ${other.road.name} at ${Math.round(x)},${Math.round(z)} (${gap.toFixed(1)} m)`);
         checked++;
       }
     }
@@ -380,8 +381,8 @@ test('main corridors avoid duplicate parallel stretches while allowing the PNG s
 });
 
 test('the PNG road silhouette and all ten numbered interchanges share one reference transform', () => {
-  assert.deepEqual(fromReference(45, 135), { x: -5500, z: -5500 });
-  assert.deepEqual(fromReference(997, 1115), { x: 5500, z: 5500 });
+  assert.deepEqual(fromReference(45, 135), { x: -2750, z: -2750 });
+  assert.deepEqual(fromReference(997, 1115), { x: 2750, z: 2750 });
   const mainIds = ['ring', 'meridian', 'neon-spine', 'north-freightway', 'north-gate-link', 'south-bypass', 'western-north', 'western-arterial'];
   for (const id of mainIds) {
     const road = plan.roads.find(r => r.id === id);

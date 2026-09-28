@@ -6,10 +6,11 @@ import { createMasterPlan, terrainHeight, TERRAIN_GRID, SHOWCASE, MASTER_DISTRIC
 import { WorldStream } from '../src/world-stream.js';
 import { surfaceHeightAt, boxContainsPoint } from '../src/physics.js';
 import { SpatialGrid } from '../src/spatial-grid.js';
+import { CITY_SCALE } from '../src/world-scale.js';
 
 const worldPoint = (p, x, z) => ({ x: p.x + x * Math.cos(p.yaw) + z * Math.sin(p.yaw), z: p.z - x * Math.sin(p.yaw) + z * Math.cos(p.yaw) });
 
-test('vertical terrain uses the physical 64 m triangles without overlapping floor layers', () => {
+test('vertical terrain uses the physical 32 m triangles without overlapping floor layers', () => {
   const geometry = createVerticalGroundGeometry(), position = geometry.attributes.position, normal = geometry.attributes.normal;
   assert.ok(geometry.index.count / 3 < 65000, 'resident ground has a bounded triangle budget');
   for (let i = 0; i < position.count; i += 59) {
@@ -62,7 +63,7 @@ test('frontage buildings face accessible surface streets and sit on their rotate
       const dx = p.street.x - p.x, dz = p.street.z - p.z, distance = Math.hypot(dx, dz);
       assert.ok((dx * Math.sin(p.yaw) + dz * Math.cos(p.yaw)) / distance > .99999, `${p.id} presents its entrance to its street`);
       assert.ok(Math.abs(distance - p.d / 2 - p.street.width / 2 - p.setback) < 1e-7);
-      assert.ok(p.setback >= 6.5, 'awnings leave walking space beside the carriageway');
+      assert.ok(p.setback >= 6.5 * CITY_SCALE, 'awnings leave walking space beside the carriageway');
       assert.equal(p.box.yaw, p.yaw, 'rotated visual footprints and collision agree');
       const heights = [-.5, .5].flatMap(sx => [-.5, .5].map(sz => {
         const corner = worldPoint(p, sx * p.w, sz * p.d); return terrainHeight(corner.x, corner.z);
@@ -81,8 +82,8 @@ test('frontage buildings face accessible surface streets and sit on their rotate
   }
   assert.ok(count > 550, 'district streets supply actual frontage development');
   assert.ok(diagonal > 50, 'buildings follow bends instead of retaining a world-axis grid');
-  assert.ok(sizes.size > 15 && setbacks.size > 5, 'lot dimensions and yards vary');
-  const remote = metro.area(-5300, -3500, -5200, -3400).flatMap(block => block.buildings);
+  assert.ok(sizes.size > 8 && setbacks.size > 3, 'compact lot dimensions and yards vary');
+  const remote = metro.area(-5300 * CITY_SCALE, -3500 * CITY_SCALE, -5200 * CITY_SCALE, -3400 * CITY_SCALE).flatMap(block => block.buildings);
   assert.ok(remote.every(p => p.anchor || p.street), 'no independent carpet of off-street buildings remains');
 });
 
@@ -197,7 +198,7 @@ test('roads and pedestrian decks remain support surfaces while piers and rails a
   const supports = city.spatial.near(deck.x, deck.z, 2).filter(p => p.supportOnly);
   assert.ok(supports.some(p => p.id === deck.id && p.maxY === deck.y));
   assert.equal(city.surfaceHeight(deck.x, deck.z, deck.y + .1), deck.y);
-  assert.ok(city.surfaceHeight(deck.x, deck.z, terrainHeight(deck.x, deck.z) + 1) < deck.y - 5, 'the lower level remains independently walkable');
+  assert.ok(city.surfaceHeight(deck.x, deck.z, terrainHeight(deck.x, deck.z) + 1) < deck.y - 3, 'the lower level remains independently walkable');
   const objects = city.metropolis.area(deck.x - 90, deck.z - 90, deck.x + 90, deck.z + 90).flatMap(b => b.infrastructure);
   assert.ok(objects.some(p => p.kind === 'pier'));
   assert.ok(objects.some(p => p.kind === 'rail' && p.minY >= deck.y - .1 && !p.walkable));

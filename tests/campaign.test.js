@@ -170,5 +170,5 @@ test('survey waypoints follow district terrain while authored raised objectives 
   game.pin = 'mara';
   const raised = game.objective();
   assert.equal(raised.y, placeById('mara').y);
-  assert.ok(raised.y - terrainHeight(raised.x, raised.z) > 5);
+  assert.ok(raised.y - terrainHeight(raised.x, raised.z) > 3);
 });

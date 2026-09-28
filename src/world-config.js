@@ -1,5 +1,7 @@
-// 121 square kilometres, just below San Francisco's 2020 Census land area.
-export const WORLD_LIMIT = 5500;
+import { AUTHORED_WORLD_LIMIT, CITY_SCALE } from './world-scale.js';
+
+// The original street graph occupies a compact 5.5 km square (30.25 km²).
+export const WORLD_LIMIT = AUTHORED_WORLD_LIMIT * CITY_SCALE;
 export const MAP_SPAN = WORLD_LIMIT * 2 + 60;
 export const CHUNK_SIZE = 96;
 export const METRO_BLOCK_SIZE = 192;
@@ -13,7 +15,7 @@ export const OUTER_DISTRICTS = [
   { id: 'southbank', name: 'Southbank', x: 520, z: 510, color: '#97c4d3', description: 'New apartment blocks, offices and neighborhood markets.' },
   { id: 'promenade', name: 'Bay Promenade', x: 0, z: 620, color: '#8bd5ce', description: 'A long waterfront boulevard, palms, ferry halls and places to watch the water.' },
   { id: 'lantern', name: 'Lantern Ward', x: -520, z: 510, color: '#eba2b8', description: 'Painted row houses, bright shopfronts and pocket gardens.' },
-].map(d => ({ ...d, x: Math.round(d.x * 6 / 192) * 192, z: Math.round(d.z * 6 / 192) * 192 }));
+].map(d => ({ ...d, x: Math.round(d.x * 6 / 192) * 192 * CITY_SCALE, z: Math.round(d.z * 6 / 192) * 192 * CITY_SCALE }));
 
 export function outerDistrictAt(x, z) {
   // Wards extend from the inner ring to the boundary; compare bearings, not center distances.

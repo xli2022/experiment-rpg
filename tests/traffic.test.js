@@ -34,7 +34,7 @@ test('traffic follows distinct right-hand lanes and joins its loop without snapp
 
 test('regional traffic stays on the actual deformed road network, outside its central cut-out', () => {
   const metro = new Metropolis();
-  for (const p of [{ x: 2220, z: -2150 }, { x: -3100, z: 3650 }, { x: 0, z: 800 }]) {
+  for (const p of [{ x: 2220, z: -2150 }, { x: -1550, z: 1825 }, { x: 0, z: 800 }]) {
     const routes = regionalTrafficRoutes(p);
     assert.ok(routes.length > 0);
     for (const route of routes) for (let s = 0; s < route.length; s += 5) {

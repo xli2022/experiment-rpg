@@ -7,13 +7,15 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { addSky } from './city.js';
 import { createVerticalCity } from './vertical-city.js';
 import { terrainHeight, SHOWCASE } from './master-plan.js';
+import { WORLD_LIMIT } from './world-config.js';
 import { createDrone } from './models.js';
 import { Input } from './input.js';
 import { GameAudio } from './audio.js';
 import { HUD } from './ui.js';
 import { createCrowd } from './crowd.js';
 import { loadCharacterAssets, createCharacter, animateCharacter, characterShot } from './characters.js';
-import { beginJump, stepJump } from './jump.js';
+import { beginJump, stepJump, resetFall } from './jump.js';
+import { createParachute, updateParachute } from './parachute.js';
 import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from './physics.js';
 import { MOVEMENT, footVelocity } from './locomotion.js';
 import { findClimbFace, startClimb, dropClimb, stepClimb } from './climbing.js';
@@ -28,6 +30,7 @@ import { createShadows } from './shadows.js';
 import { createContactShadows } from './contact-shadows.js';
 import { createTraffic } from './traffic.js';
 import { findSpawnPosition } from './spawn.js';
+import { setupFullscreen } from './fullscreen.js';
 import './npc.css';
 
 const $ = id => document.getElementById(id);
@@ -36,9 +39,9 @@ const storage = { getItem: key => window.localStorage.getItem(key), setItem: (ke
 const saved = readSave(storage), campaign = new Campaign(saved.progress);
 const state = { started: false, paused: false, mapOpen: false, modal: null, health: 100, armor: campaign.maxArmor, ammo: 24, reloading: 0, cooldown: 0, damageAt: -100, time: campaign.data.elapsed };
 const arrival = placeById('home');
-const player = { x: arrival.x, y: arrival.y ?? 0, z: arrival.z, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: arrival.y ?? 0, climb: null, climbCandidate: null, pushTime: 0 };
+const player = { x: arrival.x, y: arrival.y ?? 0, z: arrival.z, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: arrival.y ?? 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null };
 let renderer, composer, bloom, city, character, hud, input, scene, camera, crowd, worldLife, rpgUI;
-let worldStream, sky, shadows, traffic, contactShadows;
+let worldStream, sky, shadows, traffic, contactShadows, parachute;
 const resolution = new ResolutionGovernor();
 const frameCosts = { updateMs: 0, renderMs: 0 };
 let driving = null, nearestCar = null, quality = 'high', animationId;
@@ -77,6 +80,7 @@ async function init() {
   const characterAssets = await loadCharacterAssets();
   city = createVerticalCity(scene, worldStream, WORLD_OBJECTS);
   crowd = createCrowd(scene, characterAssets.citizen, city); character = createCharacter(characterAssets.player); scene.add(character.root);
+  parachute = createParachute(); character.root.add(parachute.root);
   worldLife = createWorldLife(scene, characterAssets.citizen, campaign);
   const portraits = createNPCPortraits(renderer, worldLife.avatars);
   const spawn = refugeArrival(placeById(campaign.data.rest)) ?? refugeArrival(arrival);
@@ -87,7 +91,7 @@ async function init() {
     player.x = resume.x; player.z = resume.z; player.y = Math.max(resume.y ?? 0, terrainHeight(resume.x, resume.z));
     player.groundY = groundAt(player.x, player.z, player.y + .5);
   }
-  if (saved.loaded && saved.worldRevision !== WORLD_REVISION) saved.warning = 'AFTERLIGHT REBUILT // Your story is preserved. Welcome to Eastpoint and the vertical city.';
+  if (saved.loaded && saved.worldRevision !== WORLD_REVISION) saved.warning = 'AFTERLIGHT COMPACTED // Your story is preserved. You have returned to your refuge in the smaller city.';
   ENCOUNTERS.forEach(encounter => encounter.positions.forEach(([x, z], i) => {
     const homeY = encounter.heights?.[i] ?? terrainHeight(x, z);
     const model = createDrone(); model.root.position.set(x, homeY + 3.1, z); scene.add(model.root);
@@ -118,12 +122,12 @@ async function init() {
     started: state.started, paused: state.paused, modal: state.modal, health: state.health, armor: state.armor, ammo: state.ammo, reloading: state.reloading,
     voice: voice.snapshot(), sound: { enabled: audio.enabled, state: audio.context?.state ?? 'idle' }, cast: Object.keys(worldLife.avatars), crowdArchetypes: crowd.archetypes,
     position: { x: player.x, y: player.y, z: player.z }, driving: driving ? { x: driving.x, y: driving.y, z: driving.z, speed: driving.speed, yaw: driving.yaw } : null,
-    traversal: { groundY: player.groundY, climb: player.climb && { mode: player.climb.mode, roofY: player.climb.roofY, phase: player.climb.phase, blocked: player.climb.blocked }, candidate: player.climbCandidate, nearby: nearbyColliders(player.x, player.z, 3) },
+    traversal: { groundY: player.groundY, verticalSpeed: player.velocityY, parachute: player.parachute && { ...player.parachute }, climb: player.climb && { mode: player.climb.mode, roofY: player.climb.roofY, phase: player.climb.phase, blocked: player.climb.blocked }, candidate: player.climbCandidate, nearby: nearbyColliders(player.x, player.z, 3) },
     yaw: cameraYaw, pitch: cameraPitch, fps, quality, touch: input.touch, drawCalls: renderer.info.render.calls,
     rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
     performance: { ...frameCosts, scale: resolution.scale, activeCrowd: crowd.active, streaming: { ...worldStream.stats }, blueprints: city.metropolis.blocks.size }, population: crowd.snapshot(),
     shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(),
-    city: { span: 11000, areaKm2: 121, districts: DISTRICTS.length, roads: city.plan.roads.length, vertical: true },
+    city: { span: WORLD_LIMIT * 2, areaKm2: (WORLD_LIMIT * 2 / 1000) ** 2, districts: DISTRICTS.length, roads: city.plan.roads.length, vertical: true },
     character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: crowd.count, crowdDrawCalls: crowd.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
     camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
     cars: city.cars.map(c => ({ x: c.x, y: c.y, z: c.z, trafficId: c.trafficId })), drones: drones.map(d => { const projected = d.root.position.clone().project(camera); return { x: d.root.position.x, y: d.root.position.y, z: d.root.position.z, health: d.health, dead: d.dead, screen: { x: projected.x, y: projected.y, z: projected.z } }; }),
@@ -132,6 +136,10 @@ async function init() {
 }
 
 function setupUI() {
+  setupFullscreen($('fullscreen-button'), {
+    notify: message => hud.notify(message, 5),
+    restoreFocus: () => { if (state.started && !state.paused) canvas.focus({ preventScroll: true }); },
+  });
   $('start-button').addEventListener('click', start);
   $('help-button').addEventListener('click', () => setPause(true)); $('all-controls').addEventListener('click', () => setPause(true));
   $('resume-button').addEventListener('click', () => { closeMenus(); if (!state.started) start(); });
@@ -339,7 +347,7 @@ function useWorldObject(place) {
 
 function interact() {
   if (!state.started || state.paused) return;
-  if (player.climb) return;
+  if (player.climb || player.parachute) return;
   if (driving) {
     if (Math.abs(driving.speed) > 7) { hud.notify('Slow down before exiting the vehicle.', 2); return; }
     const others = nearbyColliders(driving.x, driving.z, 8, driving);
@@ -366,7 +374,7 @@ function interact() {
   input.firing = false; input.aiming = false;
 }
 function findNearestCar() {
-  if (player.climb) return null;
+  if (player.climb || player.parachute) return null;
   let best = null, distance = 4.5;
   for (const car of city.cars) { const d = Math.hypot(player.x - car.x, player.z - car.z); if (Math.abs(player.y - car.y) < 1.6 && d < distance) { best = car; distance = d; } }
   return best;
@@ -390,9 +398,11 @@ function toggleClimb() {
 }
 function resetTraversal() {
   player.climb = player.climbCandidate = null; player.groundY = player.pushTime = 0;
+  resetFall(player);
+  if (parachute) updateParachute(parachute, player, 0);
 }
 function reload() {
-  if (driving || player.climb || state.reloading > 0 || state.ammo === 24) return;
+  if (driving || player.climb || player.parachute || state.reloading > 0 || state.ammo === 24) return;
   state.reloading = character.clips.Reload.duration; input.firing = false; audio.reload();
 }
 function respawn() {
@@ -440,7 +450,7 @@ function hitTrafficCar(car, point) {
   } else hud.notify(`VEHICLE HIT // ${result.hitsRemaining} more ${result.hitsRemaining === 1 ? 'hit' : 'hits'} to stop it.`, 1.4);
 }
 function shoot() {
-  if (!state.started || state.paused || driving || player.climb || state.cooldown > 0 || state.reloading > 0) return;
+  if (!state.started || state.paused || driving || player.climb || player.parachute || state.cooldown > 0 || state.reloading > 0) return;
   if (state.ammo === 0) { reload(); return; }
   state.ammo--; state.cooldown = .2; shotRecoil = 1; character.flash.visible = true; characterShot(character); audio.shot();
   raycaster.setFromCamera(new THREE.Vector2(0, .02), camera); const ray = raycaster.ray;
@@ -481,7 +491,7 @@ function shoot() {
 }
 
 function updatePlayer(dt) {
-  const axes = input.axes(), look = input.look();
+  const axes = input.axes(), look = input.look(dt);
   cameraYaw -= look.x; cameraPitch = clamp(cameraPitch + look.y, -.65, 1.03);
   if (driving) {
     const delta = stepVehicle(driving, axes.y, axes.x, input.keys.has('Space'), dt);
@@ -517,15 +527,21 @@ function updatePlayer(dt) {
       if (result === 'roof') { hud.notify('ROOFTOP // Keep exploring. Space to jump; C to grab another wall.', 3); saveProgress(); }
     } else {
       const walk = input.keys.has('AltLeft') || input.keys.has('AltRight');
-      const delta = footVelocity(player, axes, cameraYaw, dt, { sprint, walk, aiming: input.aiming, sprintSpeed: campaign.sprintSpeed });
+      const aiming = !player.parachute && input.aiming, firing = !player.parachute && input.firing;
+      const delta = footVelocity(player, axes, cameraYaw, dt, { sprint, walk, aiming, sprintSpeed: campaign.sprintSpeed });
       if (player.pushTime > 0) { player.pushTime -= dt; delta.x = player.pushVX * dt; delta.z = player.pushVZ * dt; }
       const beforeX = player.x, beforeZ = player.z;
       moveWithCollisions(player, delta.x, delta.z, .43, colliders);
       player.speed = Math.hypot(player.x - beforeX, player.z - beforeZ) / dt;
-      if (amount > .08 && !input.aiming && !input.firing) player.yaw += angleDelta(player.yaw, Math.atan2(-delta.x, -delta.z)) * (1 - Math.exp(-MOVEMENT.turn * dt));
-      if (input.aiming || input.firing) player.yaw += angleDelta(player.yaw, cameraYaw) * (1 - Math.exp(-MOVEMENT.turn * dt));
+      if (amount > .08 && !aiming && !firing) player.yaw += angleDelta(player.yaw, Math.atan2(-delta.x, -delta.z)) * (1 - Math.exp(-MOVEMENT.turn * dt));
+      if (aiming || firing) player.yaw += angleDelta(player.yaw, cameraYaw) * (1 - Math.exp(-MOVEMENT.turn * dt));
       const groundY = groundAt(player.x, player.z, player.y + .35);
+      const wasGliding = !!player.parachute;
       stepJump(player, dt, groundY);
+      if (player.parachute && !wasGliding) {
+        input.firing = input.aiming = false; state.reloading = 0;
+        hud.notify(input.touch ? 'PARACHUTE OPEN // Use the stick to steer toward a roof or the street.' : 'PARACHUTE OPEN // WASD to steer toward a roof or the street.', 4);
+      }
     }
     player.climbCandidate = player.climb ? null : findClimbFace(player, colliders);
     updateCharacter(dt); audio.update(0, false);
@@ -547,7 +563,8 @@ function updatePlayer(dt) {
 function updateCharacter(dt) {
   character.root.position.set(player.x, player.y + .05, player.z); character.root.rotation.y = player.yaw;
   const height = Math.max(0, player.y - player.groundY);
-  animateCharacter(character, input?.aiming || input?.firing, dt, { speed: player.speed, climb: player.climb, jumpPhase: player.jumpPhase, jumpTime: player.jumpTime, height, groundHeight: player.groundY, verticalSpeed: player.velocityY, pitch: cameraPitch, reloading: state.reloading });
+  animateCharacter(character, input?.aiming || input?.firing, dt, { speed: player.speed, climb: player.climb, parachute: player.parachute, jumpPhase: player.jumpPhase, jumpTime: player.jumpTime, height, groundHeight: player.groundY, verticalSpeed: player.velocityY, pitch: cameraPitch, reloading: state.reloading });
+  updateParachute(parachute, player, dt);
 }
 
 function updateContactShadows() {
@@ -571,11 +588,14 @@ function updateContactShadows() {
 }
 
 function updateCamera(dt, snap = false) {
-  const aiming = !driving && !player.climb && input?.aiming;
-  const distance = driving ? 10.4 : aiming ? 3.3 : 5.9;
-  const targetHeight = driving ? 1.45 : 1.35;
+  const glide = player.parachute?.openness ?? 0;
+  const aiming = !driving && !player.climb && !player.parachute && input?.aiming;
+  // Leave room for the full canopy even in a narrow portrait viewport.
+  const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect));
+  const distance = driving ? 10.4 : aiming ? 3.3 : 5.9 + glide * (glideDistance - 5.9);
+  const targetHeight = driving ? 1.45 : 1.35 + glide * 1.25;
   cameraTarget.set(player.x, player.y + targetHeight, player.z);
-  const shoulder = driving ? .35 : aiming ? .8 : .68;
+  const shoulder = driving ? .35 : aiming ? .8 : .68 * (1 - glide * .7);
   cameraTarget.x += Math.cos(cameraYaw) * shoulder; cameraTarget.z -= Math.sin(cameraYaw) * shoulder;
   desiredCamera.set(cameraTarget.x + Math.sin(cameraYaw) * Math.cos(cameraPitch) * distance, cameraTarget.y + Math.sin(cameraPitch) * distance + .5, cameraTarget.z + Math.cos(cameraYaw) * Math.cos(cameraPitch) * distance);
   // Prevent the follow camera from clipping through nearby buildings.
@@ -587,7 +607,7 @@ function updateCamera(dt, snap = false) {
   const groundCorrection = Math.max(0, terrainHeight(camera.position.x, camera.position.z) + .55 - camera.position.y);
   camera.position.y += groundCorrection;
   camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + shotRecoil * .045, cameraTarget.z);
-  camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62, 8, dt); camera.updateProjectionMatrix();
+  camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
   character.root.visible = !driving && camera.position.distanceTo(character.root.position) > 1.5;
 }

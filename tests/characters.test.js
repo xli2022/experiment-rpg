@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { createCharacter, animateCharacter, characterShot } from '../src/characters.js';
 import { beginJump, stepJump, JUMP } from '../src/jump.js';
+import { createParachute, updateParachute } from '../src/parachute.js';
 
 function loadGLB(name) {
   const file = readFileSync(new URL(`../public/models/${name}.glb`, import.meta.url));
@@ -156,6 +157,60 @@ test('animation transitions keep both body layers normalized and the gun attache
   for (let i = 0; i < 180; i++) step({ speed: 0 });
   assert.equal(model.animation, 'Idle');
   for (const jumpPhase of ['start', 'air', 'land']) for (let i = 0; i < 20; i++) step({ speed: 0, jumpPhase, jumpTime: i / 60 });
+});
+
+test('parachute animation reaches the risers, stows the weapon and releases into landing', () => {
+  const model = createCharacter(actorAsset());
+  characterShot(model);
+  for (let i = 0; i < 120; i++) animateCharacter(model, true, 1 / 60, {
+    speed: 10, jumpPhase: 'fall', verticalSpeed: -5, height: 20,
+    parachute: { elapsed: i / 60, openness: Math.min(1, i / 30) },
+  });
+  assert.equal(model.animation, 'Parachute');
+  assert.equal(model.gun.visible, false);
+  assert.equal(model.upper.Fire.getEffectiveWeight(), 0);
+  for (const [side, sign] of [['L', -1], ['R', 1]]) {
+    const hand = model.bones.get(`Hand${side}`).getWorldPosition(new THREE.Vector3());
+    assert.ok(hand.distanceTo(new THREE.Vector3(sign * .43, 1.9, -.12)) < .12, `${side} hand holds its steering riser`);
+    const foot = model.bones.get(`Foot${side}`).getWorldPosition(new THREE.Vector3());
+    assert.ok(foot.y < .3 && foot.y > -.1, `${side} leg hangs beneath the harness`);
+  }
+  for (const layer of [model.lower, model.upper]) assert.ok(Math.abs(Object.values(layer).reduce((sum, action) => sum + action.getEffectiveWeight(), 0) - 1) < .00001);
+  const hand = model.bones.get('HandR').getWorldPosition(new THREE.Vector3());
+  animateCharacter(model, false, 1 / 60, { jumpPhase: 'land', jumpTime: 0 });
+  assert.ok(hand.distanceTo(model.bones.get('HandR').getWorldPosition(new THREE.Vector3())) < .3, 'Landing blends out of the suspended pose');
+  for (let i = 0; i < 120; i++) animateCharacter(model, false, 1 / 60);
+  assert.equal(model.animation, 'Idle');
+  assert.equal(model.gun.visible, true);
+  assert.ok(model.parachuteWeight < .001);
+});
+
+test('the deployed canopy and actual rig stay attached while turning and descending far from the origin', () => {
+  const model = createCharacter(actorAsset()), canopy = createParachute();
+  model.root.add(canopy.root);
+  const player = { x: 470, y: 180, z: -690, yaw: .8, vx: 6, vz: -3, parachute: { openness: 1, elapsed: 1 } };
+  try {
+    for (let frame = 0; frame < 120; frame++) {
+      player.x += .1; player.y -= 5 / 60; player.z -= .05; player.yaw += .008;
+      model.root.position.set(player.x, player.y + .05, player.z); model.root.rotation.y = player.yaw;
+      animateCharacter(model, false, 1 / 60, { parachute: player.parachute, jumpPhase: 'fall', height: 80, verticalSpeed: -5 });
+      updateParachute(canopy, player, 1 / 60); model.root.updateMatrixWorld(true);
+      const positions = canopy.suspension.geometry.getAttribute('position');
+      for (const [i, side] of ['L', 'R'].entries()) {
+        const riser = new THREE.Vector3().fromBufferAttribute(positions, canopy.anchors.length * 2 + i * 2 + 1);
+        canopy.suspension.localToWorld(riser);
+        const hand = model.bones.get(`Hand${side}`).getWorldPosition(new THREE.Vector3());
+        if (frame > 45) assert.ok(hand.distanceTo(riser) < .12, `${side} hand and line share the moving character transform`);
+      }
+      assert.equal(model.gun.visible, false);
+      assert.ok(new THREE.Box3().setFromObject(canopy.canopy).min.y > player.y + 3.4, 'the banked wing remains above the suspended character');
+    }
+    player.parachute = null; updateParachute(canopy, player, 0);
+    const visible = []; canopy.root.traverseVisible(object => { if (object.geometry) visible.push(object); });
+    assert.equal(visible.length, 0, 'landing or a traversal reset leaves no floating backpack, harness, lines, or canopy');
+  } finally {
+    canopy.root.traverse(object => { object.geometry?.dispose(); object.material?.dispose(); });
+  }
 });
 
 test('jump clips keep their outgoing pose through takeoff, contact and recovery', () => {

@@ -10,9 +10,9 @@ import { circleHitsBox, moveWithCollisions, overlapsHeight } from '../src/physic
 import { WorldStream, ResolutionGovernor } from '../src/world-stream.js';
 import { Campaign, writeSave, readSave } from '../src/campaign.js';
 
-test('city covers 121 square kilometres without exceeding San Francisco land area', () => {
+test('compact city covers 30.25 square kilometres and movement respects its boundary', () => {
   const area = (WORLD_LIMIT * 2 / 1000) ** 2;
-  assert.equal(area, 121); assert.ok(area < 46.91 * 2.589988110336);
+  assert.equal(area, 30.25);
   const point = { x: WORLD_LIMIT - 3, z: WORLD_LIMIT - 3 };
   moveWithCollisions(point, 30, 30, .5, []);
   assert.equal(point.x, WORLD_LIMIT - .5); assert.equal(point.z, WORLD_LIMIT - .5);
@@ -41,10 +41,10 @@ test('inner road lanes and intersections stay clear of trees and street furnitur
 });
 
 test('regional blueprints are deterministic after eviction and bounded in memory', () => {
-  const metro = new Metropolis(WORLD_OBJECTS), first = structuredClone(metro.block(16, -14));
+  const metro = new Metropolis(WORLD_OBJECTS), first = structuredClone(metro.block(8, -7));
   for (let x = -26; x < 26; x++) for (let z = -3; z < 3; z++) metro.block(x, z);
   assert.ok(metro.blocks.size <= 160);
-  assert.deepEqual(metro.block(16, -14), first);
+  assert.deepEqual(metro.block(8, -7), first);
   assert.ok(first.buildings.length > 0 && first.trees.length > 0);
 });
 
@@ -57,7 +57,7 @@ test('the whole regional city stays within bounds and keeps buildings out of str
       assert.ok(Math.max(Math.abs(b.box.minX), Math.abs(b.box.minZ), Math.abs(b.box.maxX), Math.abs(b.box.maxZ)) < WORLD_LIMIT);
     }
   }
-  assert.ok(buildings > 30000 && trees > 40000);
+  assert.ok(buildings > 7000 && trees > 9000);
 });
 
 test('regional transit, fast travel arrival and parked cars have collision-free clearance', () => {
@@ -133,7 +133,7 @@ test('a long road stays visible near its far end even when its owning cell is be
 
 test('saves retain metropolitan positions and still read original city saves', () => {
   const data = new Map(), storage = { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value) };
-  for (const position of [{ x: -2.5, z: 30 }, { x: 5000, z: -4900 }]) {
+  for (const position of [{ x: -2.5, z: 30 }, { x: WORLD_LIMIT - 500, z: -WORLD_LIMIT + 600 }]) {
     writeSave(storage, new Campaign().data, position); assert.deepEqual(readSave(storage).position, position);
   }
   writeSave(storage, new Campaign().data, { x: WORLD_LIMIT + 5, z: 0 }); assert.equal(readSave(storage).position, null);

@@ -3,7 +3,7 @@ import { clamp } from './physics.js';
 export class Input {
   constructor(canvas, callbacks) {
     this.keys = new Set(); this.lookX = 0; this.lookY = 0; this.firing = false; this.aiming = false;
-    this.joyX = 0; this.joyY = 0; this.sensitivity = 1; this.dragging = false;
+    this.joyX = 0; this.joyY = 0; this.lookJoyX = 0; this.lookJoyY = 0; this.sensitivity = 1; this.dragging = false;
     this.enabled = false; this.canvas = canvas; this.callbacks = callbacks;
     canvas.tabIndex = 0;
     this.touch = matchMedia('(pointer: coarse)').matches;
@@ -53,40 +53,60 @@ export class Input {
       else if (this.dragging) { this.lookX += e.clientX - this.lastX; this.lookY += e.clientY - this.lastY; this.lastX = e.clientX; this.lastY = e.clientY; }
     });
     document.addEventListener('pointerlockchange', () => { if (!document.pointerLockElement) { this.firing = false; this.aiming = false; } });
-    const stick = document.getElementById('joystick'), thumb = document.getElementById('joystick-thumb');
-    let stickId = null;
-    const updateStick = e => {
-      const rect = stick.getBoundingClientRect(), radius = rect.width * .36;
-      let x = e.clientX - rect.left - rect.width / 2, y = e.clientY - rect.top - rect.height / 2;
-      const length = Math.hypot(x, y); if (length > radius) { x *= radius / length; y *= radius / length; }
-      this.joyX = x / radius; this.joyY = -y / radius; thumb.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    const resets = [];
+    // Each control owns exactly one pointer. Releasing a different finger, or a
+    // delayed capture event from an old gesture, cannot cancel the current one.
+    const control = (id, onDown, onMove = () => {}, onUp = () => {}) => {
+      const el = document.getElementById(id); let owner = null;
+      const active = value => { el.classList.toggle('active', value); el.dataset.active = String(value); };
+      const end = e => {
+        if (owner === null || e && e.pointerId !== owner) return;
+        const pointerId = owner; owner = null; active(false); onUp();
+        if (el.hasPointerCapture?.(pointerId)) el.releasePointerCapture(pointerId);
+      };
+      el.addEventListener('pointerdown', e => {
+        if (!this.enabled || owner !== null) return;
+        e.preventDefault(); e.stopPropagation(); owner = e.pointerId;
+        el.setPointerCapture(e.pointerId); active(true); callbacks.audio(); onDown(e);
+      });
+      el.addEventListener('pointermove', e => { if (this.enabled && e.pointerId === owner) onMove(e); });
+      for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(type, end);
+      active(false); resets.push(() => end());
     };
-    stick.addEventListener('pointerdown', e => { if (!this.enabled || stickId !== null) return; e.preventDefault(); stickId = e.pointerId; stick.setPointerCapture(e.pointerId); updateStick(e); callbacks.audio(); });
-    stick.addEventListener('pointermove', e => { if (this.enabled && e.pointerId === stickId) updateStick(e); });
-    const endStick = e => { if (e && e.pointerId !== stickId) return; stickId = null; this.joyX = this.joyY = 0; thumb.style.transform = 'translate(-50%,-50%)'; };
-    stick.addEventListener('pointerup', endStick); stick.addEventListener('pointercancel', endStick); stick.addEventListener('lostpointercapture', endStick);
-    const look = document.getElementById('look-zone'); let lookId = null, lx = 0, ly = 0;
-    look.addEventListener('pointerdown', e => { if (!this.enabled || lookId !== null) return; lookId = e.pointerId; lx = e.clientX; ly = e.clientY; look.setPointerCapture(e.pointerId); });
-    look.addEventListener('pointermove', e => { if (!this.enabled || e.pointerId !== lookId) return; this.lookX += (e.clientX - lx) * 1.8; this.lookY += (e.clientY - ly) * 1.8; lx = e.clientX; ly = e.clientY; });
-    const endLook = e => { if (!e || e.pointerId === lookId) lookId = null; }; look.addEventListener('pointerup', endLook); look.addEventListener('pointercancel', endLook); look.addEventListener('lostpointercapture', endLook);
-    this.resetTouch = () => { endStick(); endLook(); };
-    function button(id, onDown, onUp = () => {}) {
-      const el = document.getElementById(id);
-      el.addEventListener('pointerdown', e => { e.preventDefault(); e.stopPropagation(); el.setPointerCapture(e.pointerId); onDown(); });
-      el.addEventListener('pointerup', onUp); el.addEventListener('pointercancel', onUp); el.addEventListener('lostpointercapture', onUp);
-    }
-    button('touch-fire', () => { if (this.enabled) { this.firing = true; callbacks.audio(); callbacks.fire(); } }, () => { this.firing = false; });
-    button('touch-interact', () => { if (this.enabled) callbacks.interact(); });
-    button('touch-climb', () => { if (this.enabled) callbacks.climb(); });
-    button('touch-reload', () => { if (this.enabled) callbacks.reload(); });
-    button('touch-jump', () => { if (this.enabled) { this.keys.add('Space'); callbacks.jump(); } }, () => this.keys.delete('Space'));
+    const stick = (id, thumbId, setAxes) => {
+      const el = document.getElementById(id), thumb = document.getElementById(thumbId);
+      const update = e => {
+        const rect = el.getBoundingClientRect(), radius = Math.max(1, Math.min(rect.width, rect.height) * .28);
+        let x = e.clientX - rect.left - rect.width / 2, y = e.clientY - rect.top - rect.height / 2;
+        const length = Math.hypot(x, y), amount = Math.min(1, length / radius);
+        if (length > radius) { x *= radius / length; y *= radius / length; }
+        // A radial quiet center avoids drift; smooth remapping retains gentle
+        // steering and a full-strength outer edge in every direction.
+        const t = Math.max(0, (amount - .12) / .88), strength = t * t * (3 - 2 * t);
+        setAxes(length ? x / Math.min(length, radius) * strength : 0, length ? y / Math.min(length, radius) * strength : 0);
+        thumb.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+      };
+      control(id, update, update, () => { setAxes(0, 0); thumb.style.transform = 'translate(-50%,-50%)'; });
+    };
+    stick('joystick', 'joystick-thumb', (x, y) => { this.joyX = x; this.joyY = -y; });
+    stick('look-joystick', 'look-thumb', (x, y) => { this.lookJoyX = x; this.lookJoyY = y; });
+    let lx = 0, ly = 0;
+    control('look-zone', e => { lx = e.clientX; ly = e.clientY; }, e => {
+      this.lookX += (e.clientX - lx) * 1.8; this.lookY += (e.clientY - ly) * 1.8; lx = e.clientX; ly = e.clientY;
+    });
+    control('touch-fire', () => { this.firing = true; callbacks.fire(); }, undefined, () => { this.firing = false; });
+    control('touch-interact', () => callbacks.interact());
+    control('touch-climb', () => callbacks.climb());
+    control('touch-reload', () => callbacks.reload());
+    control('touch-jump', () => { this.keys.add('Space'); callbacks.jump(); }, undefined, () => this.keys.delete('Space'));
+    this.resetTouch = () => { for (const reset of resets) reset(); };
   }
   lock() {
     if (this.touch || !this.enabled || document.pointerLockElement === this.canvas || !this.canvas.requestPointerLock) return;
     try { const pending = this.canvas.requestPointerLock(); pending?.catch(() => {}); } catch { /* Drag-look remains available when pointer lock is blocked. */ }
   }
   clear() {
-    this.keys.clear(); this.firing = this.aiming = this.dragging = false; this.joyX = this.joyY = this.lookX = this.lookY = 0;
+    this.keys.clear(); this.firing = this.aiming = this.dragging = false; this.joyX = this.joyY = this.lookX = this.lookY = this.lookJoyX = this.lookJoyY = 0;
     this.resetTouch();
   }
   setEnabled(enabled) {
@@ -100,8 +120,10 @@ export class Input {
     const y = (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) + this.joyY;
     const length = Math.max(1, Math.hypot(x, y)); return { x: x / length, y: y / length };
   }
-  look() {
-    const result = { x: clamp(this.lookX, -350, 350) * .0024 * this.sensitivity, y: clamp(this.lookY, -350, 350) * .002 * this.sensitivity };
+  look(dt = 1 / 60) {
+    const elapsed = Number.isFinite(dt) ? clamp(dt, 0, .1) : 0;
+    const result = { x: (clamp(this.lookX, -350, 350) * .0024 + this.lookJoyX * 2.1 * elapsed) * this.sensitivity,
+      y: (clamp(this.lookY, -350, 350) * .002 + this.lookJoyY * 1.5 * elapsed) * this.sensitivity };
     this.lookX = this.lookY = 0; return result;
   }
 }

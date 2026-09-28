@@ -4,10 +4,11 @@ import { createTerrainMaterials } from './terrain-materials.js';
 import { buildingSign, createBuildingSignMaterial } from './building-signs.js';
 import { buildingStructure } from './architecture.js';
 import { segmentHitsBox } from './city-plan.js';
-import { seededRandom, orientedBox, boxCoordinates } from './physics.js';
+import { seededRandom, orientedBox, boxCoordinates, rayBoxDistance } from './physics.js';
 import { SpatialGrid } from './spatial-grid.js';
 import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { createMasterPlan, districtAt, terrainHeight, TERRAIN_GRID, WATER_LEVEL, isWater, SHOWCASE } from './master-plan.js';
+import { CITY_SCALE, atEastpoint } from './world-scale.js';
 
 const BLOCK_SIZE = 192, CACHE_LIMIT = 160;
 const center = segment => ({ x: (segment.a.x + segment.b.x) / 2, y: (segment.a.y + segment.b.y) / 2, z: (segment.a.z + segment.b.z) / 2 });
@@ -16,9 +17,6 @@ const inCell = (p, cell) => inBounds(p, cell.x, cell.z, cell.x + CHUNK_SIZE, cel
 const boundsOverlap = (a, b) => a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
 const hash = text => { let value = 2166136261; for (const c of text) value = Math.imul(value ^ c.charCodeAt(0), 16777619); return value >>> 0; };
 const colors = { concrete: 0x657780, dark: 0x263745, rail: 0x77939c, cyan: 0x74d8d5, amber: 0xe4b276, pink: 0xcd8fb1 };
-// Authored Eastpoint furniture keeps its local composition when the map trace
-// relocates the interchange. Heights are resampled at the resulting position.
-const atEastpoint = (x, z) => ({ x: x + SHOWCASE.x - 2550, z: z + SHOWCASE.z - 600 });
 
 function districtStyle(district) {
   const id = district.id.toLowerCase();
@@ -85,8 +83,9 @@ function showcaseBuildings(plan, reserved) {
   ];
   return anchors.flatMap(([authoredX, authoredZ, w, d, h, type], i) => {
     const { x, z } = atEastpoint(authoredX, authoredZ);
+    w *= CITY_SCALE; d *= CITY_SCALE;
     const box = orientedBox(x, z, w + 2, d + 2);
-    if (plan.reserveBox(box, 3) || reserved.some(p => p.x > box.minX - 12 && p.x < box.maxX + 12 && p.z > box.minZ - 12 && p.z < box.maxZ + 12)) return [];
+    if (plan.reserveBox(box, 2) || reserved.some(p => p.x > box.minX - 6 && p.x < box.maxX + 6 && p.z > box.minZ - 6 && p.z < box.maxZ + 6)) return [];
     const grades = groundTop({ x, z, w, d });
     return [{ id: `eastpoint-anchor:${i}`, x, z, y: grades.max + .12, ground: grades.min, w, d, h, yaw: 0, type, district: 'east-reach', variation: .2 + (i % 4) * .2, tint: i % 2 ? 0x93a6a8 : 0x7f9ca9, accent: i % 2 ? colors.amber : colors.cyan, anchor: true }];
   });
@@ -146,7 +145,9 @@ function segmentFeatures(segment, plan) {
     return Math.abs(other.y - f.y) < 2 && Math.abs(Math.cos(frame.yaw - f.yaw)) < .9 && Math.hypot(other.x - f.x, other.z - f.z) < (s.width + segment.width) / 2 + 7;
   });
   if (!crossing) for (const side of [-1, 1]) {
-    const x = f.x + side * f.nx * (segment.width / 2 + .6), z = f.z + side * f.nz * (segment.width / 2 + .6);
+    // Cars retain their full size in the compact map. Use the deck shoulder
+    // for railings so their swept turns fit through the shorter ramp bends.
+    const x = f.x + side * f.nx * (segment.width / 2 + 1.2), z = f.z + side * f.nz * (segment.width / 2 + 1.2);
     const rail = { kind: 'rail', ...orientedBox(x, z, .28, f.flatLength + .2, f.yaw, Math.max(segment.a.y, segment.b.y) + .98, Math.min(segment.a.y, segment.b.y) + .12, { walkable: false }), y: f.y + .52, pitch: f.pitch, length: f.length + .2 };
     if (!blocksPassage(rail, plan, segment.road)) result.push(rail);
   }
@@ -215,6 +216,22 @@ function streetLife(plan, reserved) {
   return result;
 }
 
+function streetlightFits(p, plan) {
+  const top = p.y + 8.6, originY = p.y + .25;
+  const surfaces = [...plan.roadIndex.near(p.x, p.z, 1.2), ...plan.supportIndex.near(p.x, p.z, 1.2)]
+    .filter(surface => surface.maxY > originY && surface.minY < top);
+  if (!surfaces.length) return true;
+  // Poles retain their human-scale height while viaducts move down with the
+  // compact city. Leave out a lamp when its pole or head would pierce a slab.
+  // Probe the head's envelope as well as its center, using actual sloped slabs
+  // rather than their tall broad-phase bounds beneath a ramp.
+  for (const [x, z] of [[0, 0], [-.16, -1.05], [-.16, 1.05], [.16, -1.05], [.16, 1.05]]) {
+    const origin = { ...localPoint(p, x, z), y: originY };
+    if (surfaces.some(surface => rayBoxDistance(origin, { x: 0, y: 1, z: 0 }, surface, top - originY) !== Infinity)) return false;
+  }
+  return true;
+}
+
 /** Deterministic nearby blueprints; rendering and collision share these parts. */
 export class VerticalMetropolis {
   constructor(plan = createMasterPlan(), reserved = []) {
@@ -230,9 +247,9 @@ export class VerticalMetropolis {
         distances.push(distances[i - 1] + Math.hypot(road.points[i].x - road.points[i - 1].x, road.points[i].z - road.points[i - 1].z));
         stations.set(road.points[i], distances[i]);
       }
-      // Station spacing varies between streets; per-lot jitter and widths then
-      // break up repetition without restarting a grid at streaming boundaries.
-      this.frontages.set(road, { distances, stations, length: distances.at(-1), spacing: 48 + hash(road.id) % 13 });
+      // Compress the original frontage rhythm with the map, including widths
+      // and setbacks. Heights and human-scale architectural details stay tall.
+      this.frontages.set(road, { distances, stations, length: distances.at(-1), spacing: (48 + hash(road.id) % 13) * CITY_SCALE });
     }
   }
   frontageCandidates(minX, minZ, maxX, maxZ) {
@@ -240,8 +257,8 @@ export class VerticalMetropolis {
     for (const segment of this.roadIndex.query(minX - 70, minZ - 70, maxX + 70, maxZ + 70)) {
       const road = segment.road, route = this.frontages.get(road);
       if (!route) continue;
-      const first = Math.max(0, Math.floor((route.stations.get(segment.a) - 35) / route.spacing));
-      const last = Math.ceil((route.stations.get(segment.b) - 20) / route.spacing);
+      const first = Math.max(0, Math.floor((route.stations.get(segment.a) - 35 * CITY_SCALE) / route.spacing));
+      const last = Math.ceil((route.stations.get(segment.b) - 20 * CITY_SCALE) / route.spacing);
       for (let slot = first; slot <= last; slot++) for (const side of [-1, 1]) {
         const id = `frontage:${road.id}:${side}:${slot}`;
         if (candidates.has(id)) continue;
@@ -249,8 +266,8 @@ export class VerticalMetropolis {
         // not repeatedly evaluate the same deterministic lot.
         candidates.set(id, null);
         const random = seededRandom(hash(id)), range = (a, b) => a + random() * (b - a);
-        const distance = 27 + slot * route.spacing + range(-4, 4);
-        if (distance > route.length - 24) continue;
+        const distance = (27 + range(-4, 4)) * CITY_SCALE + slot * route.spacing;
+        if (distance > route.length - 24 * CITY_SCALE) continue;
         let lo = 1, hi = route.distances.length - 1;
         while (lo < hi) { const mid = (lo + hi) >> 1; if (route.distances[mid] < distance) lo = mid + 1; else hi = mid; }
         const a = road.points[lo - 1], b = road.points[lo], length = route.distances[lo] - route.distances[lo - 1];
@@ -261,8 +278,9 @@ export class VerticalMetropolis {
         const district = districtAt(street.x, street.z), style = districtStyle(district), variation = random();
         if (variation > style.density) continue;
         const type = style.types[Math.floor(random() * style.types.length)];
-        const w = range(style.freight ? 31 : 26, Math.min(style.freight ? 45 : 49, route.spacing - 8)), d = range(style.freight ? 31 : 24, style.freight ? 44 : 39);
-        const setback = range(style.freight ? 10 : 6.5, style.freight ? 15 : 10);
+        const w = range(style.freight ? 31 : 26, Math.min(style.freight ? 45 : 49, route.spacing / CITY_SCALE - 8)) * CITY_SCALE;
+        const d = range(style.freight ? 31 : 24, style.freight ? 44 : 39) * CITY_SCALE;
+        const setback = range(style.freight ? 10 : 6.5, style.freight ? 15 : 10) * CITY_SCALE;
         const nx = (b.z - a.z) / length, nz = -(b.x - a.x) / length, offset = road.width / 2 + setback + d / 2;
         const x = street.x + side * nx * offset, z = street.z + side * nz * offset, yaw = Math.atan2(-side * nx, -side * nz);
         if (!inBounds({ x, z }, minX, minZ, maxX, maxZ)) continue;
@@ -275,14 +293,14 @@ export class VerticalMetropolis {
         const footprint = orientedBox(x, z, w + 2, d + 2, yaw);
         // Rear yards and side passages belong to their building's lot. Include
         // them in overlap rejection, not in the solid collision footprint.
-        const yard = localPoint(p, 0, -3), lot = orientedBox(yard.x, yard.z, w + 6, d + 14, yaw);
+        const yard = localPoint(p, 0, -1.5), lot = orientedBox(yard.x, yard.z, w + 4, d + 8, yaw);
         if (Math.max(Math.abs(lot.minX), Math.abs(lot.maxX), Math.abs(lot.minZ), Math.abs(lot.maxZ)) >= WORLD_LIMIT - 28) continue;
         const grades = groundTop(p);
-        if (grades.max - grades.min > 2.4 || grades.min <= WATER_LEVEL + 1) continue;
+        if (grades.max - grades.min > 2.4 * CITY_SCALE || grades.min <= WATER_LEVEL + CITY_SCALE) continue;
         const corners = [[-.5, -.5], [.5, -.5], [-.5, .5], [.5, .5]].map(([sx, sz]) => localPoint(lot, sx * lot.w, sz * lot.d));
         if (corners.some(point => isWater(point.x, point.z))) continue;
-        if (frontageBlocked(footprint, this.plan, 4) || this.anchors.some(anchor => lotsOverlap(lot, orientedBox(anchor.x, anchor.z, anchor.w + 8, anchor.d + 8, anchor.yaw)))) continue;
-        if (this.reserved.some(point => point.x > lot.minX - 14 && point.x < lot.maxX + 14 && point.z > lot.minZ - 14 && point.z < lot.maxZ + 14)) continue;
+        if (frontageBlocked(footprint, this.plan, 2) || this.anchors.some(anchor => lotsOverlap(lot, orientedBox(anchor.x, anchor.z, anchor.w + 4, anchor.d + 4, anchor.yaw)))) continue;
+        if (this.reserved.some(point => point.x > lot.minX - 7 && point.x < lot.maxX + 7 && point.z > lot.minZ - 7 && point.z < lot.maxZ + 7)) continue;
         p.y = grades.max + .12; p.ground = grades.min; p.lot = lot;
         candidates.set(id, p);
       }
@@ -309,7 +327,7 @@ export class VerticalMetropolis {
         (other.candidate.priority < p.priority || other.candidate.priority === p.priority && other.candidate.id < p.id) && lotsOverlap(p.lot, other))) continue;
       const physical = buildingBoxes(p);
       p.box = physical[0]; p.sign = buildingSign(p, this.plan); buildings.push(p); colliders.push(...physical);
-      const yard = localPoint(p, 0, -p.d / 2 - 4.5), freight = districtStyle(districtAt(p.x, p.z)).freight;
+      const yard = localPoint(p, 0, -p.d / 2 - 2.5), freight = districtStyle(districtAt(p.x, p.z)).freight;
       const yardBox = orientedBox(yard.x, yard.z, 7, 3.6, p.yaw);
       if (p.variation > .35 && !frontageBlocked(yardBox, this.plan, 3) && !isWater(yard.x, yard.z)) {
         const y = terrainHeight(yard.x, yard.z);
@@ -332,7 +350,8 @@ export class VerticalMetropolis {
       const order = s.index ?? s.segmentIndex ?? s.road?.points?.indexOf(s.a) ?? 0;
       if (order % 3 === 1 && f.flatLength > 5) {
         const side = order % 2 ? 1 : -1, x = f.x + side * f.nx * (s.width / 2 + 2.6), z = f.z + side * f.nz * (s.width / 2 + 2.6);
-        if (!isWater(x, z)) props.push({ x, z, y: elevated(s) ? f.y : terrainHeight(x, z), kind: 'lamp', yaw: f.yaw, tint: districtStyle(districtAt(x, z)).accent });
+        const lamp = { x, z, y: elevated(s) ? f.y : terrainHeight(x, z), kind: 'lamp', yaw: f.yaw, tint: districtStyle(districtAt(x, z)).accent };
+        if (!isWater(x, z) && streetlightFits(lamp, this.plan)) props.push(lamp);
       }
     }
     const block = { bx, bz, buildings, trees, props, features, colliders, infrastructure, park: false };
@@ -355,7 +374,7 @@ export class VerticalMetropolis {
 
 /** One triangulated terrain surface, sampled identically by walking physics. */
 export function createVerticalGroundGeometry() {
-  const span = Math.ceil((WORLD_LIMIT + 128) / TERRAIN_GRID) * TERRAIN_GRID, count = span * 2 / TERRAIN_GRID;
+  const span = Math.ceil((WORLD_LIMIT + 128 * CITY_SCALE) / TERRAIN_GRID) * TERRAIN_GRID, count = span * 2 / TERRAIN_GRID;
   const positions = [], vertexColors = [], uv = [], indices = [], color = new THREE.Color();
   for (let z = 0; z <= count; z++) for (let x = 0; x <= count; x++) {
     const px = -span + x * TERRAIN_GRID, pz = -span + z * TERRAIN_GRID;
@@ -612,10 +631,11 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   // parked spawns. Their positions, collisions and map markers use this list.
   if (typeof document !== 'undefined') {
     const labels = [
-      { x: SHOWCASE.x - 67, z: SHOWCASE.z + 38, y: terrainHeight(SHOWCASE.x - 67, SHOWCASE.z + 38) + 5.8, title: 'EASTPOINT', subtitle: 'STREET 00  //  SKYWAY +08  //  EXPRESS +25', yaw: Math.PI / 2, w: 12, h: 4 },
-      { x: SHOWCASE.x - 65, z: SHOWCASE.z + 92, y: terrainHeight(SHOWCASE.x - 65, SHOWCASE.z + 92) + 6, title: 'NEON SPINE', subtitle: 'AFTERLIGHT CORE  ←  //  BLACKWATER BAY  →', yaw: 0, w: 12, h: 4 },
+      { ...atEastpoint(2483, 638), title: 'EASTPOINT', subtitle: 'STREET 00  //  SKYWAY +04  //  EXPRESS +12.5', yaw: Math.PI / 2, w: 8, h: 2.7 },
+      { ...atEastpoint(2485, 692), title: 'NEON SPINE', subtitle: 'AFTERLIGHT CORE  ←  //  BLACKWATER BAY  →', yaw: 0, w: 8, h: 2.7 },
     ];
     for (const p of labels) {
+      p.y = terrainHeight(p.x, p.z) + 5.8;
       const texture = signTexture(p.title, p.subtitle, '#8de1d7'), geometry = new THREE.PlaneGeometry(p.w, p.h), material = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false });
       for (const side of [-1, 1]) {
         const mesh = new THREE.Mesh(geometry, material);
@@ -626,5 +646,5 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   }
   const plan = { ...masterPlan, buildings: [], trees: [], features: [], props: [] };
   return { ...weather, ground, water, cars, signs, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
-    mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
+    mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

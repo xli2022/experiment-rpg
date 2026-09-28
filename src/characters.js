@@ -4,6 +4,7 @@ import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { JUMP } from './jump.js';
 import { animateClimb } from './climb-animation.js';
+import { animateParachutePose } from './parachute.js';
 
 let assets;
 export function loadCharacterAssets() {
@@ -138,15 +139,16 @@ export function characterShot(model) {
 export function animateCharacter(model, aiming, dt, options = {}) {
   model.time += dt; model.shotAge += dt;
   model.combatTimer = Math.max(0, model.combatTimer - dt);
-  const reloading = options.reloading > 0;
+  const parachute = options.climb ? null : options.parachute;
+  const reloading = !parachute && options.reloading > 0;
   if (reloading && !model.wasReloading) model.reloadAge = 0;
   if (reloading) { model.reloadAge += dt; model.combatTimer = 2.2; }
   model.wasReloading = reloading;
-  const speed = options.climb ? 0 : options.speed ?? 0;
+  const speed = options.climb || parachute ? 0 : options.speed ?? 0;
   const moving = speed > .08;
-  const combat = !options.climb && (aiming || reloading || model.combatTimer > 0);
+  const combat = !options.climb && !parachute && (aiming || reloading || model.combatTimer > 0);
   model.combatWeight = THREE.MathUtils.damp(model.combatWeight, combat ? 1 : 0, combat ? 18 : 7, dt);
-  const armed = model.combatWeight;
+  const armed = parachute ? 0 : model.combatWeight;
   const jump = options.jumpPhase === 'fall' ? 'air' : options.jumpPhase;
   const jumpTime = options.jumpTime || 0;
   // Each outgoing clip keeps its last sample during the crossfade. Reusing the
@@ -162,16 +164,16 @@ export function animateCharacter(model, aiming, dt, options = {}) {
   if (jump === 'land') model.jumpTimes.JumpLand = Math.min(jumpTime, JUMP.impactDuration) * JUMP.landingPlayback + Math.max(0, jumpTime - JUMP.impactDuration) * JUMP.recoveryPlayback;
   model.previousJump = jump;
   const gait = moving ? speed > 6.3 ? 'Run' : speed > 2.5 ? 'Jog' : 'Walk' : 'Idle';
-  const target = jump === 'start' ? 'JumpStart' : jump === 'air' ? 'JumpLoop' : jump === 'land' ? 'JumpLand' : gait;
+  const target = parachute ? 'Idle' : jump === 'start' ? 'JumpStart' : jump === 'air' ? 'JumpLoop' : jump === 'land' ? 'JumpLand' : gait;
   model.animation = reloading ? 'Reload' : jump ? target : combat ? (moving ? 'Armed' + gait : 'ArmedIdle') : target;
   const targetWeights = { [target]: 1 };
-  if (jump === 'air' && options.verticalSpeed < 0) {
+  if (!parachute && jump === 'air' && options.verticalSpeed < 0) {
     const v = options.verticalSpeed, h = Math.max(0, options.height || 0);
     const contactIn = (v + Math.sqrt(v * v + 2 * JUMP.gravity * h)) / JUMP.gravity;
     const prepare = THREE.MathUtils.smoothstep(JUMP.landingLead - contactIn, 0, JUMP.landingLead);
     targetWeights.JumpLoop = 1 - prepare; targetWeights.JumpLand = prepare;
   }
-  if (jump === 'land') {
+  if (!parachute && jump === 'land') {
     // A moving character steps out of the impact instead of sliding through the
     // entire planted recovery. Standing jumps keep the full authored recovery.
     const recover = THREE.MathUtils.smoothstep(jumpTime, moving ? .08 : JUMP.landing - .25, moving ? .34 : JUMP.landing);
@@ -214,11 +216,12 @@ export function animateCharacter(model, aiming, dt, options = {}) {
   model.mixer.update(dt);
   model.body.position.y = model.baseBodyY;
   animateClimb(model, options.climb, dt);
+  animateParachutePose(model, parachute, dt);
   model.root.updateMatrixWorld(true);
   // Rotational crossfades can put a boot below the pavement even when both
   // source clips are grounded. Correct the blended body using the actual boot
   // vertices; retain airborne poses and release the correction smoothly.
-  if (model.contacts.length && !options.climb) {
+  if (model.contacts.length && !options.climb && !parachute) {
     let minimum = Infinity;
     for (const { bone, point } of model.contacts) {
       minimum = Math.min(minimum, model.contactPoint.copy(point).applyMatrix4(bone.matrixWorld).y);
