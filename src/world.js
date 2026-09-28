@@ -9,6 +9,7 @@ import { orientedBox } from './physics.js';
 export { MAP_SPAN } from './world-config.js';
 export const SYMBOLS = { contact: '●', terminal: '◇', transit: 'T', rest: '+', board: '≡', memory: '◈', cache: '□' };
 export const COLORS = { contact: '#deff7a', terminal: '#e8cd95', transit: '#7ee6e3', rest: '#7de5ad', board: '#e9ecbc', memory: '#c5a3ff', cache: '#a8bec9' };
+export const WORLD_LABEL_LAYOUT = Object.freeze({ rootOffsetY: .07, offsetY: 3, width: 4.4, height: .83 });
 
 export function expandCity(scene, city) {
   const b = new Batches(scene);
@@ -135,7 +136,7 @@ export function createWorldLife(scene, asset, game) {
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; return texture;
   }
   for (const place of WORLD_OBJECTS) {
-    const root = new THREE.Group(); root.position.set(place.x, (place.y ?? 0) + .07, place.z); scene.add(root);
+    const root = new THREE.Group(); root.position.set(place.x, (place.y ?? 0) + WORLD_LABEL_LAYOUT.rootOffsetY, place.z); scene.add(root);
     const color = place.color ?? COLORS[place.type];
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .8 });
     const ring = new THREE.Mesh(ringGeometry, mat); ring.rotation.x = -Math.PI / 2; root.add(ring);
@@ -157,7 +158,8 @@ export function createWorldLife(scene, asset, game) {
       if (place.type === 'rest') { const bench = new THREE.Mesh(new THREE.BoxGeometry(2.5, .45, .9), material(0x39564e)); bench.position.set(0, .4, 1.2); root.add(bench); }
     }
     const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture(`${SYMBOLS[place.type]}  ${place.name}`, color), transparent: true, depthTest: true }));
-    label.position.y = 3; label.scale.set(4.4, .83, 1); root.add(label);
+    label.position.y = place.labelHeight ?? WORLD_LABEL_LAYOUT.offsetY;
+    label.scale.set(WORLD_LABEL_LAYOUT.width, WORLD_LABEL_LAYOUT.height, 1); root.add(label);
     objects.push({ ...place, root, body, ring, label });
   }
   return {

@@ -1,0 +1,41 @@
+{
+  "source": "George.gltf",
+  "license": "CC0-1.0",
+  "author": "Quaternius",
+  "sourceHeight": 6.456647,
+  "minimumY": -0.019082,
+  "idleBounds": {
+    "min": [
+      -2.057406,
+      -0.019082,
+      -0.95578
+    ],
+    "max": [
+      2.096246,
+      6.437565,
+      1.686333
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 8818,
+  "primitives": 6,
+  "bones": 47,
+  "animations": {
+    "Idle": 3.333333,
+    "Walk": 0.833333
+  },
+  "sourceAnimations": {
+    "Idle": "Idle",
+    "Walk": "Walk"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 1.91e-06,
+  "recommendedHeight": 1.9,
+  "estimatedWalkSpeed": 2.6654,
+  "bytes": 659552,
+  "maxExportedPoseBoundsError": 3.81e-06
+}

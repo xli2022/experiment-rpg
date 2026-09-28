@@ -1,5 +1,7 @@
 # Character asset provenance
 
+Downloaded robot and alien pedestrians have separate [Quaternius source and license records](quaternius/SOURCES.md). Their native rigs and animations are exported by `scripts/build_visitors.py` into `public/models/visitors/`.
+
 The Vex and citizen models combine MakeHuman Community's CC0 system assets and Quaternius's CC0 animations with original Afterlight rigging, boots, gloves, cybernetic equipment, weapon, retargeting, and export work. No Cyberpunk 2077 models or textures are included. Animation provenance and the unmodified source license are documented in [the animation source folder](../animations/quaternius/SOURCES.md).
 
 ## Licenses

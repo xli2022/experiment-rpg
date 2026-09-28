@@ -110,10 +110,13 @@ body.touch .map-navigation .rpg-button{min-width:44px;padding:9px 12px}
 body.touch .map-navigation span{flex-basis:100%;margin-left:0}
 body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3px;margin-top:0;color:#aec6c8}
 
+@media(max-width:420px){
+  body.touch .brand-mark{display:none}
+}
 @media(max-width:380px){
   body.touch{--touch-left:calc(env(safe-area-inset-left, 0px) + 12px);--touch-right:calc(env(safe-area-inset-right, 0px) + 12px);--move-size:112px}
   body.touch .brand-mark,body.touch .brand-sub{display:none}
-  body.touch .brand h1{font-size:18px;letter-spacing:1px}
+  body.touch .brand h1{font-size:clamp(14px,calc(5vw - 2px),17px);letter-spacing:.6px}
   body.touch .top-actions{gap:3px}
   body.touch .mission-panel{width:156px}
   body.touch .map-panel{width:100px}
@@ -164,4 +167,73 @@ body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3
 @media(max-height:359px) and (orientation:landscape){
   body.touch .map-panel{top:calc(env(safe-area-inset-top, 0px) + 12px);left:50%;right:auto;width:72px;transform:translateX(-50%)}
   body.touch .minimap-button{height:44px}
+}
+
+/* The title owns the space below the header. Gameplay readouts appear after
+   entering the city, instead of sitting underneath the introduction and CTA. */
+body.touch:not(.playing) .map-panel,
+body.touch:not(.playing) .player-panel,
+body.touch:not(.playing) .weapon-panel{display:none}
+body.touch:not(.playing) #journal-button{display:none}
+body.touch .welcome::before{inset:0}
+@media(max-width:900px), (max-height:560px){
+  body:not(.playing) .map-panel,
+  body:not(.playing) .player-panel,
+  body:not(.playing) .weapon-panel{display:none}
+  body:not(.playing) #journal-button{display:none}
+  .welcome{
+    inset:calc(env(safe-area-inset-top, 0px) + 100px) calc(env(safe-area-inset-right, 0px) + 24px) calc(env(safe-area-inset-bottom, 0px) + 24px) calc(env(safe-area-inset-left, 0px) + 24px);
+    max-width:none;transform:none;display:flex;flex-direction:column;
+    align-items:flex-start;justify-content:safe center;overflow:auto;
+    overscroll-behavior:contain;scrollbar-width:thin;
+  }
+  .welcome>*{flex-shrink:0;max-width:100%}
+  .welcome::before{inset:0}
+  .welcome-tag{margin:0 0 20px}
+  .welcome-kicker{margin:0 0 12px}
+  .welcome h2{font-size:clamp(32px,10vw,56px);line-height:1.04}
+  .welcome-copy{margin:16px 0 22px}
+  .welcome .primary-button{min-height:48px;max-width:100%;gap:24px}
+  .start-hint{margin:12px 0 0}
+  .start-hint>span:last-child{margin-top:0;letter-spacing:.3px}
+}
+
+/* Narrow windows need the same header separation even with a mouse attached. */
+@media(max-width:900px){
+  body:not(.touch) .brand{left:16px;top:20px;gap:6px}
+  body:not(.touch) .brand h1{font-size:20px;letter-spacing:1.5px}
+  body:not(.touch) .brand h1 span{display:none}
+  body:not(.touch) .brand-mark{width:20px;height:28px;transform:skew(-24deg) scale(.7);transform-origin:left center;margin-right:-4px}
+  body:not(.touch) .top-actions{right:16px;top:16px;gap:5px}
+  body:not(.touch) .world-status{left:16px;right:auto;top:64px;width:max-content;max-width:calc(100% - 32px);transform:none;white-space:normal;flex-wrap:wrap;font-size:7px;letter-spacing:.5px;gap:6px}
+  body:not(.touch) .world-status #district,body:not(.touch) .world-status .divider{display:inline}
+}
+@media(max-width:700px){
+  body:not(.touch) .mission-panel{left:16px;top:104px;width:calc(100% - 148px)}
+  body:not(.touch) .mission-panel p{display:none}
+  body:not(.touch) .map-panel{right:16px;top:104px;width:100px}
+  body:not(.touch) .minimap-button{height:85px}
+  body:not(.touch) .weather{display:none}
+}
+@media(max-width:380px){
+  body:not(.touch) .brand-mark{display:none}
+  body:not(.touch) .brand h1{font-size:18px;letter-spacing:1px}
+}
+
+/* Short landscape screens use two content columns, keeping both instructions
+   and the start button visible without shrinking touch targets. */
+@media(max-height:560px) and (orientation:landscape){
+  .welcome{
+    top:calc(env(safe-area-inset-top, 0px) + 80px);
+    bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);
+    display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);
+    grid-template-rows:auto auto auto;column-gap:24px;row-gap:12px;
+    align-content:safe center;align-items:start;justify-content:normal;
+  }
+  .welcome-tag{display:none}
+  .welcome-kicker{grid-column:1;grid-row:1;margin:0}
+  .welcome h2{grid-column:1;grid-row:2;font-size:clamp(30px,5.5vw,48px)}
+  .welcome-copy{grid-column:2;grid-row:1 / span 2;align-self:center;margin:0;font-size:11px;line-height:1.65}
+  .welcome .primary-button{grid-column:1;grid-row:3;padding:12px 16px}
+  .start-hint{grid-column:2;grid-row:3;align-self:center;margin:0;line-height:1.7}
 }

@@ -2,10 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createCrowd } from '../src/crowd.js';
+import { VISITOR_PROFILES } from '../src/npc-visitors.js';
 import { populationFor } from '../src/population.js';
 import { SpatialGrid } from '../src/spatial-grid.js';
 
 const asset = () => ({ scene: new THREE.Group(), animations: ['Idle', 'Walk', 'WalkFormal'].map(name => new THREE.AnimationClip(name, 1, [])) });
+function visitorAsset() {
+  const scene = new THREE.Group(), bone = new THREE.Bone(); bone.name = 'VisitorRoot';
+  const geometry = new THREE.BoxGeometry(.5, 1.8, .45).translate(0, .9, 0), vertices = geometry.attributes.position.count;
+  const weights = new Float32Array(vertices * 4);
+  for (let i = 0; i < vertices; i++) weights[i * 4] = 1;
+  geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(new Uint16Array(vertices * 4), 4));
+  geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
+  const mesh = new THREE.SkinnedMesh(geometry, new THREE.MeshStandardMaterial());
+  scene.add(bone, mesh); mesh.bind(new THREE.Skeleton([bone]));
+  const turn = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), .15);
+  const track = new THREE.QuaternionKeyframeTrack('VisitorRoot.quaternion', [0, .5, 1], [0, 0, 0, 1, ...turn.toArray(), 0, 0, 0, 1]);
+  return { scene, animations: [new THREE.AnimationClip('Idle', 1, []), new THREE.AnimationClip('Walk', 1, [track])] };
+}
 function districtCity(id, streets = true) {
   const roadIndex = new SpatialGrid(), supportIndex = new SpatialGrid();
   const city = { colliders: [], masterPlan: { terrainHeight: () => 0, districtAt: () => ({ id }), roadIndex, supportIndex } };
@@ -31,6 +45,7 @@ test('pedestrian density follows district and quality budgets while preserving t
     assert.equal(crowd.people.length, 26);
     assert.equal(snapshot.target, expected.pedestrians);
     assert.equal(snapshot.assigned, expected.pedestrians);
+    assert.deepEqual(snapshot.species, { human: expected.pedestrians, robot: 0, alien: 0 });
     assert.equal(snapshot.district, district);
     assert.equal(snapshot.quality, quality);
     const people = assigned(crowd);
@@ -40,6 +55,44 @@ test('pedestrian density follows district and quality budgets while preserving t
     }
     assert.ok(crowd.people.filter(person => !person.path).every(person => !person.root.visible && !person.root.parent));
   }
+});
+
+test('robot and alien walkers share the normal crowd budget and navigation at both quality levels', () => {
+  const visitors = Object.fromEntries(VISITOR_PROFILES.map(profile => [profile.id, visitorAsset()]));
+  const player = { x: 0, y: 0, z: 0 };
+  for (const quality of ['high', 'low']) {
+    const city = districtCity('core'), crowd = createCrowd(new THREE.Scene(), asset(), city, visitors);
+    crowd.setQuality(quality); crowd.update(0, player, null, 90);
+    assert.equal(crowd.count, 26);
+    assert.equal(crowd.archetypes, 12 + VISITOR_PROFILES.length, 'Visitor slots retain the full human wardrobe variety');
+    const snapshot = crowd.snapshot();
+    assert.equal(snapshot.assigned, populationFor(city, player, quality).pedestrians);
+    assert.deepEqual(new Set(assigned(crowd).map(person => person.species)), new Set(['human', 'robot', 'alien']));
+    assert.equal(Object.values(snapshot.species).reduce((sum, count) => sum + count, 0), snapshot.assigned);
+    assert.ok(snapshot.species.human > snapshot.species.robot + snapshot.species.alien, 'Visitors mix into a mostly human city');
+    const walkers = assigned(crowd), before = walkers.map(person => person.root.position.clone());
+    for (let frame = 0; frame < 120; frame++) crowd.update(1 / 60, player, null, 90);
+    for (const [i, person] of walkers.entries()) {
+      const distance = person.root.position.distanceTo(before[i]);
+      assert.ok(distance > .1 && distance < 2.5, `${person.model} moves along its assigned sidewalk at pedestrian speed`);
+      assert.equal(person.root.position.y, .08);
+      assert.ok(person.root.position.toArray().every(Number.isFinite));
+    }
+  }
+  for (const source of Object.values(visitors)) {
+    assert.deepEqual(source.scene.getObjectByName('VisitorRoot').quaternion.toArray(), [0, 0, 0, 1], 'Crowd animation leaves reusable source rigs unchanged');
+  }
+});
+
+test('unavailable visitor models fall back to human walkers while available models remain in the pool', () => {
+  const profile = VISITOR_PROFILES[0], visitors = { [profile.id]: visitorAsset() };
+  const crowd = createCrowd(new THREE.Scene(), asset(), districtCity('core'), visitors);
+  crowd.update(0, { x: 0, y: 0, z: 0 }, null, 90);
+  assert.equal(crowd.archetypes, 13);
+  assert.ok(crowd.people.some(person => person.model === profile.id));
+  assert.ok(crowd.people.every(person => person.species === 'human' || person.model === profile.id));
+  assert.equal(crowd.snapshot().assigned, 24, 'Missing optional downloads never reduce pedestrian capacity');
+  assert.equal(new Set(crowd.people.filter(person => person.species === 'human').map(person => person.model)).size, 12);
 });
 
 test('street and upper-market crowds prioritize the player floor without a fixed deck quota', () => {

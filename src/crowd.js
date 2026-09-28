@@ -1,5 +1,6 @@
 import { createNPC } from './npc-appearance.js';
 import { CROWD_PROFILES } from './npc-profiles.js';
+import { createVisitor, VISITOR_PROFILES } from './npc-visitors.js';
 import { seededRandom, circleHitsBox, overlapsHeight, surfaceHeightAt, angleDelta, clamp } from './physics.js';
 import * as THREE from 'three';
 import { streetPoint } from './metropolis.js';
@@ -95,23 +96,29 @@ function pedestrianSlots(paths, city, player, radius, spacing) {
 }
 
 // Full authored skeletal motion, including the hands, torso and feet.
-export function createCrowd(scene, asset, city = null) {
+export function createCrowd(scene, asset, city = null, visitorAssets = {}) {
   const count = 26, random = seededRandom(707);
   let drawCalls = 0, active = 0, quality = 'high', target = count, spacing = 7, district = null;
   const frustum = new THREE.Frustum(), matrix = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 2);
   let paths = [], slots = [], scanTime = 0, spawnTime = 0, firstUpdate = true, scanX = Infinity, scanY = Infinity, scanZ = Infinity;
   const inView = p => { sphere.center.set(p.x, (p.y ?? 0) + 1, p.z); return frustum.intersectsSphere(sphere); };
+  let humanIndex = 0;
   const people = Array.from({ length: count }, (_, i) => {
-    const avatar = createNPC(asset, CROWD_PROFILES[i % CROWD_PROFILES.length], i % 3 ? 'Walk' : 'WalkFormal');
+    const visitor = i % 3 === 1 ? VISITOR_PROFILES[Math.floor(i / 3) % VISITOR_PROFILES.length] : null;
+    const available = visitor && visitorAssets[visitor.id];
+    const profile = available ? visitor : CROWD_PROFILES[humanIndex++ % CROWD_PROFILES.length];
+    const species = available ? visitor.species : 'human', model = profile.id;
+    const avatar = available ? createVisitor(available, profile, 'Walk') : createNPC(asset, profile, i % 3 ? 'Walk' : 'WalkFormal');
     const { root, mixer, action, scale } = avatar;
+    root.userData.species = species; root.userData.model = model;
     const speed = (i % 2 ? 1 : -1) * (.85 + random() * .35);
     root.position.set((i < 14 ? 0 : i < 20 ? -64 : 64) + (i % 2 ? 10.5 : -10.5), .25, -120 + random() * 240);
     root.rotation.y = speed > 0 ? Math.PI : 0;
     root.traverseVisible(object => { if (object.isMesh) drawCalls++; });
     action.time = random() * action.getClip().duration;
-    action.timeScale = Math.abs(speed) / (1.084589 * scale);
+    action.timeScale = Math.abs(speed) / (avatar.walkSpeed ?? 1.084589 * scale);
     mixer.update(0); if (!city?.masterPlan) scene.add(root); else root.visible = false;
-    return { root, mixer, speed, elapsed: 0, spawn: root.position.clone(), regional: false, lane: 0, along: 0, path: null };
+    return { root, mixer, speed, species, model, elapsed: 0, spawn: root.position.clone(), regional: false, lane: 0, along: 0, path: null };
   });
   function retire(person) {
     person.path = null; person.root.visible = false; person.elapsed = 0;
@@ -131,9 +138,13 @@ export function createCrowd(scene, asset, city = null) {
     person.root.rotation.y = Math.atan2((best.path.a.x - best.path.b.x) * Math.sign(person.speed), (best.path.a.z - best.path.b.z) * Math.sign(person.speed));
     return true;
   }
-  return { count, drawCalls, people, get active() { return active; }, archetypes: CROWD_PROFILES.length,
+  return { count, drawCalls, people, get active() { return active; }, archetypes: new Set(people.map(person => person.model)).size,
     setQuality(value) { quality = value === 'low' ? 'low' : 'high'; scanTime = spawnTime = 0; },
-    snapshot() { return { capacity: count, target, assigned: people.filter(person => person.path).length, active, spacing, district, quality, paths: paths.length, slots: slots.length }; },
+    snapshot() {
+      const assigned = people.filter(person => person.path), species = { human: 0, robot: 0, alien: 0 };
+      for (const person of assigned) species[person.species] = (species[person.species] ?? 0) + 1;
+      return { capacity: count, target, assigned: assigned.length, active, species, spacing, district, quality, paths: paths.length, slots: slots.length };
+    },
     update(dt, player, camera, radius = 65) {
     if (camera) { camera.updateMatrixWorld(); matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(matrix); } active = 0;
     if (city?.masterPlan) {

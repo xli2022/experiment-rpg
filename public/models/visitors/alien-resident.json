@@ -1,0 +1,41 @@
+{
+  "source": "Alien_Helmet.blend",
+  "license": "CC0-1.0",
+  "author": "Quaternius",
+  "sourceHeight": 3.10617,
+  "minimumY": -0.004616,
+  "idleBounds": {
+    "min": [
+      -0.737078,
+      -0.004616,
+      -0.587953
+    ],
+    "max": [
+      0.738962,
+      3.101555,
+      0.883022
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 4898,
+  "primitives": 6,
+  "bones": 45,
+  "animations": {
+    "Idle": 4.166667,
+    "Walk": 1.041667
+  },
+  "sourceAnimations": {
+    "Idle": "Alien_Idle",
+    "Walk": "Alien_Walk"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 6.9e-07,
+  "recommendedHeight": 1.78,
+  "estimatedWalkSpeed": 1.4605,
+  "bytes": 655432,
+  "maxExportedPoseBoundsError": 1.67e-06
+}

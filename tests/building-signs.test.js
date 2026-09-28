@@ -5,12 +5,27 @@ import { BUILDING_SIGN_CATALOG } from '../src/building-signs.js';
 import { createVerticalCity, VerticalMetropolis } from '../src/vertical-city.js';
 import { createMasterPlan, MASTER_DISTRICTS, SHOWCASE } from '../src/master-plan.js';
 import { WorldStream, WORLD_GEOMETRY } from '../src/world-stream.js';
+import { WORLD_LIMIT } from '../src/world-config.js';
+import { WORLD_OBJECTS } from '../src/content.js';
+import { SpatialGrid } from '../src/spatial-grid.js';
+import { createInfrastructureIndex, geometryVolume, infrastructureIntersections } from '../src/infrastructure-clearance.js';
+
+let worldAudit;
+function entireWorld() {
+  if (worldAudit) return worldAudit;
+  // Match live reserved landmarks: suppressing a frontage candidate can also
+  // change which neighboring candidate wins the deterministic lot selection.
+  const plan = createMasterPlan(), metro = new VerticalMetropolis(plan, WORLD_OBJECTS);
+  const blocks = metro.area(-WORLD_LIMIT, -WORLD_LIMIT, WORLD_LIMIT, WORLD_LIMIT);
+  const buildings = blocks.flatMap(block => block.buildings);
+  const infrastructure = createInfrastructureIndex(plan, blocks.flatMap(block => block.infrastructure));
+  return worldAudit = { blocks, buildings, infrastructure };
+}
 
 test('every generated building and landmark has a type-appropriate sign on its street-facing wall', () => {
-  const metro = new VerticalMetropolis(createMasterPlan()), types = new Set(), designs = new Set();
-  const districts = [...MASTER_DISTRICTS, SHOWCASE];
+  const types = new Set(), designs = new Set(), world = entireWorld();
   let buildings = 0, landmarks = 0;
-  for (const district of districts) for (const block of metro.area(district.x - 260, district.z - 260, district.x + 260, district.z + 260)) {
+  for (const block of world.blocks) {
     for (const p of block.buildings) {
       buildings++; landmarks += Number(Boolean(p.anchor)); types.add(p.type);
       const sign = p.sign; assert.ok(sign, `${p.id} has a sign`); designs.add(sign.title);
@@ -26,13 +41,40 @@ test('every generated building and landmark has a type-appropriate sign on its s
       assert.ok(sign.uv.every(Number.isFinite) && sign.uv[0] >= 0 && sign.uv[1] >= 0 && sign.uv[0] + sign.uv[2] <= 1 && sign.uv[1] + sign.uv[3] <= 1);
     }
   }
-  assert.ok(buildings > 600 && landmarks > 0);
+  assert.ok(buildings > 12000 && landmarks > 0, 'the audit covers the entire map, including roads between named districts');
+  assert.equal(new Set(world.buildings.map(building => building.id)).size, buildings, 'every deterministic building is audited once');
   assert.deepEqual(types, new Set(Object.keys(BUILDING_SIGN_CATALOG)));
   assert.equal(designs.size, 28, 'districts use the full shared tenant catalog');
 });
 
+test('every building sign and its backboard clear all rendered road shoulders, ramps, decks, rails and piers', () => {
+  const { buildings, infrastructure } = entireWorld();
+  assert.ok(infrastructure.size > 26000, 'the full infrastructure network is checked');
+  for (const building of buildings) {
+    const sign = building.sign;
+    // The visible plane is at depth 0; its wider backing spans -.22 to -.04.
+    // Audit their combined envelope, including the backing border.
+    const volume = { ...sign, x: sign.x - Math.sin(sign.yaw) * .11, z: sign.z - Math.cos(sign.yaw) * .11,
+      w: sign.w + .24, h: sign.h + .2, d: .22 };
+    const hits = infrastructureIntersections(volume, infrastructure);
+    assert.equal(hits.length, 0, `${building.id} intersects ${hits.map(hit => `${hit.kind}:${hit.id ?? ''}`).join(', ')}`);
+  }
+});
+
+test('clearance checks use the actual pitched slab and diagonal footprint instead of their broad bounds', () => {
+  const slab = geometryVolume({ x: 0, y: 10, z: 0, w: 6, h: .6, d: 20, yaw: Math.PI / 4, pitch: -Math.atan(.5) });
+  const infrastructure = new SpatialGrid([slab]);
+  const panel = { x: 0, y: 6, z: 0, w: 1, h: 1, d: .2, yaw: 0 };
+  assert.equal(infrastructureIntersections(panel, infrastructure).length, 0, 'a panel below the local ramp surface remains valid');
+  assert.equal(infrastructureIntersections({ ...panel, y: 10 }, infrastructure).length, 1, 'a panel through the slab is rejected');
+  assert.equal(infrastructureIntersections({ ...panel, x: 7, y: 10, z: -7 }, infrastructure).length, 0, 'a diagonal road does not occupy the corners of its AABB');
+  const rail = new SpatialGrid([geometryVolume({ x: 0, y: 6, z: .4, w: 10, h: 1, d: .2 })]);
+  assert.equal(infrastructureIntersections(panel, rail).length, 0);
+  assert.equal(infrastructureIntersections(panel, rail, .21).length, 1, 'requested mounting clearance includes the space beside a rail');
+});
+
 test('sign faces are visible from the street for every building type and share a single draw per chunk', () => {
-  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream), examples = new Map(), materials = new Set();
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS), examples = new Map(), materials = new Set();
   try {
     for (const d of MASTER_DISTRICTS) for (const b of city.metropolis.area(d.x - 200, d.z - 200, d.x + 200, d.z + 200)) {
       for (const p of b.buildings) if (!examples.has(p.type)) examples.set(p.type, p);
@@ -64,7 +106,7 @@ test('sign faces are visible from the street for every building type and share a
 });
 
 test('sign instance UV buffers are released with chunks and regenerate without losing the shared atlas', () => {
-  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream);
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
   const p = city.metropolis.area(SHOWCASE.x - 150, SHOWCASE.z - 150, SHOWCASE.x + 150, SHOWCASE.z + 150).flatMap(b => b.buildings)[0];
   const cell = stream.cell(Math.floor(p.x / 96), Math.floor(p.z / 96));
   try {

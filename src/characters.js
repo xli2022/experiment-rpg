@@ -5,14 +5,20 @@ import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.j
 import { JUMP } from './jump.js';
 import { animateClimb } from './climb-animation.js';
 import { animateParachutePose } from './parachute.js';
+import { VISITOR_PROFILES } from './npc-visitors.js';
 
 let assets;
 export function loadCharacterAssets() {
   if (!assets) {
     const loader = new GLTFLoader();
     const modelBase = `${import.meta.env.BASE_URL}models/`;
-    assets = Promise.all([loader.loadAsync(`${modelBase}vex.glb`), loader.loadAsync(`${modelBase}citizen.glb`)])
-      .then(([player, citizen]) => {
+    assets = Promise.all([loader.loadAsync(`${modelBase}vex.glb`), loader.loadAsync(`${modelBase}citizen.glb`),
+      ...VISITOR_PROFILES.map(profile => loader.loadAsync(`${modelBase}visitors/${profile.id}.glb`).catch(error => {
+        console.warn(`Could not load ${profile.id}; using human pedestrians for its slots.`, error);
+        return null;
+      })),
+    ])
+      .then(([player, citizen, ...visitors]) => {
         // Both exports use the same atlas. Reuse GPU materials/textures as well.
         const shared = new Map();
         player.scene.traverse(object => { if (object.isMesh) shared.set(object.material.name, object.material); });
@@ -25,7 +31,7 @@ export function loadCharacterAssets() {
           old.dispose();
         });
         for (const texture of unusedTextures) texture.dispose();
-        return { player, citizen };
+        return { player, citizen, visitors: Object.fromEntries(VISITOR_PROFILES.map((profile, i) => [profile.id, visitors[i]])) };
       });
   }
   return assets;

@@ -1,0 +1,41 @@
+{
+  "source": "Alien.blend",
+  "license": "CC0-1.0",
+  "author": "Quaternius",
+  "sourceHeight": 2.900449,
+  "minimumY": -0.004616,
+  "idleBounds": {
+    "min": [
+      -0.706871,
+      -0.004616,
+      -0.498352
+    ],
+    "max": [
+      0.656746,
+      2.895833,
+      0.73231
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 3780,
+  "primitives": 5,
+  "bones": 45,
+  "animations": {
+    "Idle": 4.166667,
+    "Walk": 1.041667
+  },
+  "sourceAnimations": {
+    "Idle": "Alien_Idle",
+    "Walk": "Alien_Walk"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 6.9e-07,
+  "recommendedHeight": 1.86,
+  "estimatedWalkSpeed": 1.6344,
+  "bytes": 529324,
+  "maxExportedPoseBoundsError": 1.19e-06
+}

@@ -13,5 +13,8 @@
 
 # Keep third-party source data and license notices byte-for-byte intact.
 assets/characters/source/** -text -whitespace
+assets/characters/quaternius/*.blend -text -whitespace
+assets/characters/quaternius/*.gltf -text -whitespace
+assets/characters/quaternius/License-*.txt -text -whitespace
 assets/animations/quaternius/License.txt -text -whitespace
 assets/animations/quaternius/README.txt -text -whitespace

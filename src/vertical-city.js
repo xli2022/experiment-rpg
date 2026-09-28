@@ -2,13 +2,15 @@ import * as THREE from 'three';
 import { signTexture } from './city.js';
 import { createTerrainMaterials } from './terrain-materials.js';
 import { buildingSign, createBuildingSignMaterial } from './building-signs.js';
+import { createInfrastructureIndex, geometryVolume, infrastructureIntersections, roadSolidRecipes, supportSolidRecipe } from './infrastructure-clearance.js';
 import { buildingStructure } from './architecture.js';
 import { segmentHitsBox } from './city-plan.js';
-import { seededRandom, orientedBox, boxCoordinates, rayBoxDistance } from './physics.js';
+import { seededRandom, orientedBox, boxCoordinates } from './physics.js';
 import { SpatialGrid } from './spatial-grid.js';
 import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { createMasterPlan, districtAt, terrainHeight, TERRAIN_GRID, WATER_LEVEL, isWater, SHOWCASE } from './master-plan.js';
 import { CITY_SCALE, atEastpoint } from './world-scale.js';
+import { wayfindingSigns } from './wayfinding.js';
 
 const BLOCK_SIZE = 192, CACHE_LIMIT = 160;
 const center = segment => ({ x: (segment.a.x + segment.b.x) / 2, y: (segment.a.y + segment.b.y) / 2, z: (segment.a.z + segment.b.z) / 2 });
@@ -149,7 +151,14 @@ function segmentFeatures(segment, plan) {
     // for railings so their swept turns fit through the shorter ramp bends.
     const x = f.x + side * f.nx * (segment.width / 2 + 1.2), z = f.z + side * f.nz * (segment.width / 2 + 1.2);
     const rail = { kind: 'rail', ...orientedBox(x, z, .28, f.flatLength + .2, f.yaw, Math.max(segment.a.y, segment.b.y) + .98, Math.min(segment.a.y, segment.b.y) + .12, { walkable: false }), y: f.y + .52, pitch: f.pitch, length: f.length + .2 };
-    if (!blocksPassage(rail, plan, segment.road)) result.push(rail);
+    if (blocksPassage(rail, plan, segment.road)) continue;
+    // Curving ramp joins and merging highways can bring another stone
+    // shoulder into the railing, even when the narrow driving lane is clear.
+    // Test the actual tilted solids, including adjacent segments of this road.
+    const volume = geometryVolume({ ...rail, h: .95, d: rail.length });
+    const intersectsDeck = plan.roadIndex.query(volume.minX - 2, volume.minZ - 2, volume.maxX + 2, volume.maxZ + 2)
+      .some(other => other !== segment && roadSolidRecipes(other).some(solid => volume.obb.intersectsOBB(geometryVolume(solid).obb)));
+    if (!intersectsDeck) result.push(rail);
   }
   const order = segment.index ?? segment.segmentIndex ?? road.points?.indexOf(segment.a) ?? 0;
   if (order % 3 === 0 && !crossing) {
@@ -216,20 +225,14 @@ function streetLife(plan, reserved) {
   return result;
 }
 
-function streetlightFits(p, plan) {
-  const top = p.y + 8.6, originY = p.y + .25;
-  const surfaces = [...plan.roadIndex.near(p.x, p.z, 1.2), ...plan.supportIndex.near(p.x, p.z, 1.2)]
-    .filter(surface => surface.maxY > originY && surface.minY < top);
-  if (!surfaces.length) return true;
-  // Poles retain their human-scale height while viaducts move down with the
-  // compact city. Leave out a lamp when its pole or head would pierce a slab.
-  // Probe the head's envelope as well as its center, using actual sloped slabs
-  // rather than their tall broad-phase bounds beneath a ramp.
-  for (const [x, z] of [[0, 0], [-.16, -1.05], [-.16, 1.05], [.16, -1.05], [.16, 1.05]]) {
-    const origin = { ...localPoint(p, x, z), y: originY };
-    if (surfaces.some(surface => rayBoxDistance(origin, { x: 0, y: 1, z: 0 }, surface, top - originY) !== Infinity)) return false;
-  }
-  return true;
+function streetlightFits(p, infrastructure) {
+  // The foot mounts into its own pavement. Everything above that small
+  // attachment must clear the actual slabs, shoulders, piers and railings.
+  const parts = [
+    { ...p, y: p.y + 4.36, w: .18, h: 8.48, d: .18 },
+    { ...p, y: p.y + 8.4, w: .32, h: .24, d: 2.1 },
+  ];
+  return parts.every(part => infrastructureIntersections(part, infrastructure, .02).length === 0);
 }
 
 /** Deterministic nearby blueprints; rendering and collision share these parts. */
@@ -238,6 +241,8 @@ export class VerticalMetropolis {
     this.plan = plan; this.reserved = reserved; this.blocks = new Map(); this.generated = 0;
     this.roads = plan.roads; this.roadIndex = plan.roadIndex;
     this.supportParts = plan.supports.flatMap(s => supportFeatures(s, plan, reserved)).concat(streetLife(plan, reserved));
+    const segments = new Set([...plan.roadIndex.cells.values()].flat());
+    this.infrastructureIndex = createInfrastructureIndex(plan, this.supportParts.concat([...segments].flatMap(segment => segmentFeatures(segment, plan))));
     this.anchors = showcaseBuildings(plan, reserved);
     this.frontages = new Map();
     for (const road of plan.roads) {
@@ -349,9 +354,18 @@ export class VerticalMetropolis {
       const parts = segmentFeatures(s, this.plan); infrastructure.push(...parts); colliders.push(...parts);
       const order = s.index ?? s.segmentIndex ?? s.road?.points?.indexOf(s.a) ?? 0;
       if (order % 3 === 1 && f.flatLength > 5) {
-        const side = order % 2 ? 1 : -1, x = f.x + side * f.nx * (s.width / 2 + 2.6), z = f.z + side * f.nz * (s.width / 2 + 2.6);
-        const lamp = { x, z, y: elevated(s) ? f.y : terrainHeight(x, z), kind: 'lamp', yaw: f.yaw, tint: districtStyle(districtAt(x, z)).accent };
-        if (!isWater(x, z) && streetlightFits(lamp, this.plan)) props.push(lamp);
+        const high = elevated(s), side = order % 2 ? 1 : -1, offset = s.width / 2 + (high ? .65 : 2.6);
+        const x = f.x + side * f.nx * offset, z = f.z + side * f.nz * offset;
+        let y = terrainHeight(x, z);
+        if (high) {
+          // The bridge's stone shoulder extends only 1.7 m beyond the lane.
+          // Ground the upright pole on its actual pitched/banked top plane,
+          // leaving the outer railing at 1.2 m clear of the lamp.
+          const normal = new THREE.Vector3(0, 1, 0).applyEuler(new THREE.Euler(f.pitch, f.yaw, -Math.atan(s.crossSlope ?? 0), 'YXZ'));
+          y = f.y - .55 - .12 + (.55 - normal.x * (x - f.x) - normal.z * (z - f.z)) / normal.y;
+        }
+        const lamp = { x, z, y, kind: 'lamp', yaw: f.yaw, tint: districtStyle(districtAt(x, z)).accent };
+        if (!isWater(x, z) && streetlightFits(lamp, this.infrastructureIndex)) props.push(lamp);
       }
     }
     const block = { bx, bz, buildings, trees, props, features, colliders, infrastructure, park: false };
@@ -552,13 +566,13 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   }
   function buildRoad(s, add) {
     const f = roadFrame(s); if (f.flatLength < .01) return;
-    const high = elevated(s), thickness = high ? 1.1 : .32;
     const roll = -Math.atan(s.crossSlope ?? 0);
     // Curved segments overlap far enough for the outside driving lane to stay
     // on the deck. Metadata specifies horizontal extension at each endpoint.
-    const length = f.length + 2 * (s.supportOverlap ?? .12) * f.length / f.flatLength;
-    add(mats.stone, f.x, f.y - thickness * .5 - .12, f.z, s.width + 3.4, thickness, length + .04, f.yaw, 0x667b82, false, 'box', f.pitch, roll);
-    add(mats.road, f.x, f.y - .055, f.z, s.width, .11, length, f.yaw, undefined, false, 'box', f.pitch, roll);
+    for (const solid of roadSolidRecipes(s)) {
+      const deck = solid.kind === 'road-deck';
+      add(deck ? mats.stone : mats.road, solid.x, solid.y, solid.z, solid.w, solid.h, solid.d, solid.yaw, deck ? 0x667b82 : undefined, false, 'box', solid.pitch, solid.roll);
+    }
     const crossings = masterPlan.roadIndex.query(f.x - 18, f.z - 18, f.x + 18, f.z + 18);
     const clearMark = p => !crossings.some(q => {
       if (q.road === s.road) return false;
@@ -577,12 +591,12 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     }
   }
   function buildSupport(s, add) {
+    const slab = supportSolidRecipe(s);
+    add(pedestrianPaving, slab.x, slab.y, slab.z, slab.w, slab.h, slab.d, slab.yaw ?? 0, undefined, false, 'box', slab.pitch ?? 0);
     if (s.kind === 'deck' || (!s.a && s.width && s.depth)) {
-      add(pedestrianPaving, s.x, s.y - .325, s.z, s.width, .65, s.depth, 0, undefined, false);
       add(mats.glow, s.x, s.y - .18, s.z + s.depth / 2 + .01, s.width * .9, .11, .08, colors.cyan, false);
     } else if (s.a && s.b) {
       const f = roadFrame(s);
-      add(pedestrianPaving, f.x, f.y - .325, f.z, s.width, .65, f.length + .14, f.yaw, undefined, false, 'box', f.pitch);
       for (const side of [-1, 1]) add(mats.glow, f.x + side * f.nx * (s.width / 2 - .15), f.y + .025, f.z + side * f.nz * (s.width / 2 - .15), .09, .012, f.length, f.yaw, colors.cyan, false, 'box', f.pitch);
     }
   }
@@ -592,7 +606,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
       for (const p of block.buildings) if (inCell(p, cell)) buildBuilding(p, add);
       for (const p of block.trees) if (inCell(p, cell)) {
         add(mats.stone, p.x, p.y + 2.5 * p.size, p.z, .5 * p.size, 5 * p.size, .5 * p.size, 0, 0x696459, false, 'trunk');
-        add(mats.stone, p.x, p.y + 5.1 * p.size, p.z, 3 * p.size, 3.8 * p.size, 3 * p.size, 0, 0x557c6d, false, 'crown');
+        add(mats.stone, p.x, p.y + 5.1 * p.size, p.z, 1.5 * p.size, 1.9 * p.size, 1.5 * p.size, 0, 0x557c6d, false, 'crown');
         add(mats.stone, p.x, p.y + .22, p.z, 3.4, .4, 3.4, 0, 0x667d7d, true);
       }
       for (const p of block.props) if (inCell(p, cell)) {
@@ -613,7 +627,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
           if (p.w > 1) add(mats.stone, p.x, p.maxY + .1, p.z, 9, .6, 2.4, p.yaw, 0x627984, false);
         } else if (p.kind === 'planter') {
           add(mats.stone, p.x, p.y, p.z, p.w, .7, p.d, 0, 0x5d7378, false);
-          add(mats.stone, p.x, p.maxY + .35, p.z, p.w - .4, .85, p.d - .4, 0, 0x567e67, true, 'crown');
+          add(mats.stone, p.x, p.maxY + .35, p.z, (p.w - .4) / 2, .425, (p.d - .4) / 2, 0, 0x567e67, true, 'crown');
         } else if (p.kind === 'kiosk') {
           add(mats.stone, p.x, p.y, p.z, p.w, 3.2, p.d, 0, 0x435e68, false);
           add(mats.stone, p.x - .5, p.maxY + .16, p.z, p.w + 2, .28, p.d + .6, 0, 0x9a8b83, false);
@@ -629,22 +643,19 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   };
   // Drivable cars are stopped NPC vehicles added during play, not designated
   // parked spawns. Their positions, collisions and map markers use this list.
+  const labels = wayfindingSigns(metropolis.infrastructureIndex);
   if (typeof document !== 'undefined') {
-    const labels = [
-      { ...atEastpoint(2483, 638), title: 'EASTPOINT', subtitle: 'STREET 00  //  SKYWAY +04  //  EXPRESS +12.5', yaw: Math.PI / 2, w: 8, h: 2.7 },
-      { ...atEastpoint(2485, 692), title: 'NEON SPINE', subtitle: 'AFTERLIGHT CORE  ←  //  BLACKWATER BAY  →', yaw: 0, w: 8, h: 2.7 },
-    ];
     for (const p of labels) {
-      p.y = terrainHeight(p.x, p.z) + 5.8;
       const texture = signTexture(p.title, p.subtitle, '#8de1d7'), geometry = new THREE.PlaneGeometry(p.w, p.h), material = new THREE.MeshBasicMaterial({ map: texture, toneMapped: false });
       for (const side of [-1, 1]) {
         const mesh = new THREE.Mesh(geometry, material);
+        mesh.name = `Wayfinding ${p.id}`;
         mesh.position.set(p.x + Math.sin(p.yaw) * side * .02, p.y, p.z + Math.cos(p.yaw) * side * .02);
         mesh.rotation.y = p.yaw + (side < 0 ? Math.PI : 0); scene.add(mesh); signs.push(mesh); stream.capture([mesh]);
       }
     }
   }
   const plan = { ...masterPlan, buildings: [], trees: [], features: [], props: [] };
-  return { ...weather, ground, water, cars, signs, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
+  return { ...weather, ground, water, cars, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

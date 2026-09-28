@@ -79,7 +79,7 @@ async function init() {
   $('loading-text').textContent = 'BUILDING AFTERLIGHT / STREETS, SKYWAYS & STORIES...';
   const characterAssets = await loadCharacterAssets();
   city = createVerticalCity(scene, worldStream, WORLD_OBJECTS);
-  crowd = createCrowd(scene, characterAssets.citizen, city); character = createCharacter(characterAssets.player); scene.add(character.root);
+  crowd = createCrowd(scene, characterAssets.citizen, city, characterAssets.visitors); character = createCharacter(characterAssets.player); scene.add(character.root);
   parachute = createParachute(); character.root.add(parachute.root);
   worldLife = createWorldLife(scene, characterAssets.citizen, campaign);
   const portraits = createNPCPortraits(renderer, worldLife.avatars);

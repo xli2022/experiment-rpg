@@ -1,0 +1,41 @@
+{
+  "source": "Robot.blend",
+  "license": "CC0-1.0",
+  "author": "Quaternius",
+  "sourceHeight": 4.496815,
+  "minimumY": -0.020304,
+  "idleBounds": {
+    "min": [
+      -1.520695,
+      -0.020304,
+      -1.281765
+    ],
+    "max": [
+      1.578764,
+      4.476511,
+      1.346106
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 3238,
+  "primitives": 3,
+  "bones": 43,
+  "animations": {
+    "Idle": 3.333333,
+    "Walk": 0.958333
+  },
+  "sourceAnimations": {
+    "Idle": "Robot_Idle",
+    "Walk": "Robot_Walking"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 1.43e-06,
+  "recommendedHeight": 1.62,
+  "estimatedWalkSpeed": 1.5038,
+  "bytes": 422196,
+  "maxExportedPoseBoundsError": 1.91e-06
+}

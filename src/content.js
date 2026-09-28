@@ -182,7 +182,7 @@ for (const p of WORLD_OBJECTS) {
 }
 Object.assign(placeById('home'), { name: 'Eastpoint hideout', description: 'Your shelter beneath the interchange. Rest here to restore health, armor and ammunition.', arrivalOffset: { x: 0, z: 7 } });
 Object.assign(placeById('trace'), { name: 'Skybridge relay', description: 'Cross the Upper Market skybridge to recover the relay’s last transmission.' });
-Object.assign(placeById('metro-neon'), { name: 'Eastpoint station' });
+Object.assign(placeById('metro-neon'), { name: 'Eastpoint station', labelHeight: 2.7 });
 Object.assign(placeById('metro-north'), { name: 'Citadel station' });
 Object.assign(placeById('metro-garden'), { name: 'Stacks garden station' });
 Object.assign(placeById('metro-dock'), { name: 'Void Port station' });
