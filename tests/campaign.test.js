@@ -4,6 +4,7 @@ import { Campaign, freshProgress, restoreProgress, readSave, writeSave, SAVE_KEY
 import { QUESTS, WORLD_OBJECTS, MEMORIES, CACHES, CONTACTS, DISTRICTS, ENCOUNTERS, UPGRADES, ENDINGS, placeById, districtAt } from '../src/content.js';
 import { WORLD_LIMIT } from '../src/world-config.js';
 import { dialogueFor, endingScene } from '../src/dialogue.js';
+import { terrainHeight } from '../src/master-plan.js';
 
 function completeStep(game, questId, ending = 'free', records = 'public') {
   const step = game.current(questId);
@@ -135,4 +136,39 @@ test('all quest destinations, contacts and map pins resolve inside the playable 
   for (const c of CONTACTS) assert.ok(dialogueFor(new Campaign(), c.id).choices.length >= 3);
   assert.equal(endingScene().choices.filter(c => c.kind === 'decision').length, 3);
   const game = new Campaign(); game.pin = 'rook'; assert.equal(game.objective().label, 'Rook'); assert.equal(game.objective().pinned, true);
+});
+
+test('patrol objectives retain their floor elevation when selecting the nearest surviving drone', () => {
+  for (const quest of QUESTS) for (let i = 0; i < quest.steps.length; i++) {
+    const step = quest.steps[i];
+    if (step.type !== 'kill') continue;
+    const encounter = ENCOUNTERS.find(e => e.id === step.target);
+    const progress = freshProgress();
+    progress.quests[quest.id] = { status: 'active', step: i, runs: 0 };
+    progress.tracked = quest.id;
+    const game = new Campaign(progress);
+    const [x, z] = encounter.positions[0], player = { x, z };
+    const initial = game.objective(player);
+    assert.equal(initial.id, `${encounter.id}-0`);
+    assert.equal(initial.y, encounter.heights[0]);
+    assert.ok(initial.y > 1, 'This encounter is above the old zero-height waypoint');
+    game.recordKill(initial.id, encounter.id);
+    const next = game.objective(player);
+    const remainingIndex = encounter.positions.findIndex((_, index) => next.id === `${encounter.id}-${index}`);
+    assert.ok(remainingIndex > 0, 'The next waypoint follows a surviving drone');
+    assert.equal(next.y, encounter.heights[remainingIndex]);
+  }
+});
+
+test('survey waypoints follow district terrain while authored raised objectives keep their height', () => {
+  const game = new Campaign();
+  assert.equal(game.accept('survey'), true);
+  game.data.tracked = 'survey';
+  const survey = game.objective(placeById('home'));
+  assert.equal(survey.y, terrainHeight(survey.x, survey.z));
+  assert.ok(survey.y > 1, 'Survey marker is not projected below the terrain');
+  game.pin = 'mara';
+  const raised = game.objective();
+  assert.equal(raised.y, placeById('mara').y);
+  assert.ok(raised.y - terrainHeight(raised.x, raised.z) > 5);
 });

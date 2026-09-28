@@ -15,7 +15,7 @@ export function expandCity(scene, city) {
   const steel = material(0x304654), concrete = material(0x263946), dark = material(0x162734);
   const amber = material(0xeeaa65, 0xf09a42, .8), teal = material(0x77ddd5, 0x36b8c5, 1.5);
   const green = material(0x365b43, 0x153d29, .2), glass = material(0x477974, 0x19443e, .5, .3, .5);
-  const paint = material(0x849598), road = material(0x1e2d38, 0, 0, .48, .4);
+  const paint = material(0x849598), road = material(0x1e2d38, 0, 0, .86, 0);
   function solid(mat, x, z, w, h, d, y = h / 2) {
     b.add(mat, x, y, z, w, h, d, 0, undefined, false);
     city.colliders.push(orientedBox(x, z, w, d, 0, y + h / 2, y - h / 2, { climbable: h >= 4 && w >= 4 && d >= 4 }));
@@ -135,7 +135,7 @@ export function createWorldLife(scene, asset, game) {
     const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; return texture;
   }
   for (const place of WORLD_OBJECTS) {
-    const root = new THREE.Group(); root.position.set(place.x, .07, place.z); scene.add(root);
+    const root = new THREE.Group(); root.position.set(place.x, (place.y ?? 0) + .07, place.z); scene.add(root);
     const color = place.color ?? COLORS[place.type];
     const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: .8 });
     const ring = new THREE.Mesh(ringGeometry, mat); ring.rotation.x = -Math.PI / 2; root.add(ring);
@@ -163,15 +163,15 @@ export function createWorldLife(scene, asset, game) {
   return {
     objects, avatars,
     nearest(player) {
-      if (player.y > 2.5 || player.climb) return null;
-      return objects.filter(p => !game.data.collected.includes(p.id) && Math.hypot(player.x - p.x, player.z - p.z) < (p.type === 'contact' ? 3.7 : 2.8)).sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0] ?? null;
+      if (player.climb) return null;
+      return objects.filter(p => !game.data.collected.includes(p.id) && Math.abs(player.y - (p.y ?? 0)) < 2.5 && Math.hypot(player.x - p.x, player.z - p.z) < (p.type === 'contact' ? 3.7 : 2.8)).sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0] ?? null;
     },
     update(dt, time, player, radius = 65, camera) {
       const goal = game.objective(player);
       projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection);
       for (const p of objects) {
         const distance = Math.hypot(player.x - p.x, player.z - p.z);
-        bounds.center.set(p.x, 1.5, p.z);
+        bounds.center.set(p.x, (p.y ?? 0) + 1.5, p.z);
         p.root.visible = !game.data.collected.includes(p.id) && distance < radius + 25 && frustum.intersectsSphere(bounds);
         if (!p.root.visible) { if (p.root.parent) scene.remove(p.root); continue; }
         if (!p.root.parent) scene.add(p.root);

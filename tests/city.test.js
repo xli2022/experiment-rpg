@@ -21,7 +21,8 @@ test('city covers 121 square kilometres without exceeding San Francisco land are
 test('the inner expansion has all building types, organic roads and clear story destinations', () => {
   const plan = createCityPlan(WORLD_OBJECTS);
   assert.deepEqual([...new Set(plan.buildings.map(b => b.type))].sort(), [...BUILDING_TYPES].sort());
-  assert.ok(plan.buildings.length > 500 && plan.trees.length > 900 && plan.props.length > 150);
+  // Connected perimeter avenues reserve a few former building lots.
+  assert.ok(plan.buildings.length > 450 && plan.trees.length > 900 && plan.props.length > 150);
   assert.ok(plan.roads.some(r => r.points.some((p, i) => i && Math.abs(p.x - r.points[i - 1].x) > .1 && Math.abs(p.z - r.points[i - 1].z) > .1)));
   for (const b of plan.buildings) assert.equal(plan.onRoad(b.box), false, `Building obstructs road: ${b.id}`);
   for (const place of WORLD_OBJECTS) assert.equal(plan.colliders.some(b => circleHitsBox(place.x, place.z, .5, b)), false, place.id);

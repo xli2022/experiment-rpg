@@ -1,8 +1,17 @@
-import { boxCoordinates, circleHitsBox, clamp, overlapsHeight } from './physics.js';
+import { boxCoordinates, circleHitsBox, clamp, overlapsHeight, surfaceHeightAt } from './physics.js';
 
 export const CLIMB = Object.freeze({ reach: 1.15, offset: .48, speed: 3.4, fast: 5.1, sideways: 2.3, mantleTime: .72 });
 const identity = box => box.id ?? `${box.minX}:${box.minZ}:${box.maxX}:${box.maxZ}:${box.maxY}`;
-const blocked = (x, y, z, boxes, own) => boxes.some(b => identity(b) !== own && overlapsHeight(b, y, 1.7, .08) && circleHitsBox(x, z, .38, b));
+const blocked = (x, y, z, boxes, own) => boxes.some(b => {
+  if (identity(b) === own) return false;
+  if (b.supportOnly) {
+    const top = surfaceHeightAt(x, z, b);
+    if (top === null) return false;
+    const thickness = b.slabThickness ?? b.surface?.slabThickness ?? .5;
+    return overlapsHeight({ minY: top - thickness, maxY: top }, y, 1.7, .08);
+  }
+  return overlapsHeight(b, y, 1.7, .08) && circleHitsBox(x, z, .38, b);
+});
 
 export function findClimbFace(player, boxes, yaw = player.yaw ?? 0, requireFacing = false) {
   let best = null;

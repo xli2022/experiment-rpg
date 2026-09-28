@@ -4,27 +4,44 @@ import { SpatialGrid } from './spatial-grid.js';
 import { footprint, propFootprint, segmentHitsBox, typeMix } from './city-plan.js';
 import { buildingColliders } from './architecture.js';
 import { PUBLIC_SPACES, publicSpaceColliders } from './public-spaces.js';
+import { REGIONAL_INNER_EDGE, streetPoint } from './roads.js';
+export { streetPoint } from './roads.js';
 
-export function streetPoint(u, v) {
-  const fade = Math.min(1, Math.max(0, (Math.max(Math.abs(u), Math.abs(v)) - 816) / 650));
-  // One continuous deformation keeps intersections joined and chunk borders seamless.
-  return { x: u + fade * (60 * Math.sin(v / 430) + 18 * Math.sin(v / 170)), z: v + fade * 52 * Math.sin(u / 510) };
+const blockRandom = (bx, bz) => seededRandom(Math.imul(bx + 53, 73856093) ^ Math.imul(bz + 71, 19349663));
+const parkBlock = (bx, bz, random = blockRandom(bx, bz)) => random() < (outerDistrictAt(bx * 192, bz * 192).id === 'cypress' ? .6 : .13);
+
+function* areaBlocks(minX, minZ, maxX, maxZ) {
+  // Covers the maximum street deformation plus a building's footprint at an edge.
+  for (let x = Math.floor((minX - 115) / 192); x <= Math.floor((maxX + 115) / 192); x++) {
+    for (let z = Math.floor((minZ - 85) / 192); z <= Math.floor((maxZ + 85) / 192); z++) {
+      if (Math.abs(x * 192) > WORLD_LIMIT + 192 || Math.abs(z * 192) > WORLD_LIMIT + 192) continue;
+      if (x >= -4 && x < 4 && z >= -4 && z < 4) continue;
+      yield [x, z];
+    }
+  }
 }
 
 export class Metropolis {
   constructor(reserved = []) {
     this.reserved = reserved; this.roads = []; this.roadIndex = new SpatialGrid([], 96); this.blocks = new Map(); this.generated = 0;
-    const span = WORLD_LIMIT - 76;
-    for (let s = -5376; s <= 5376; s += METRO_BLOCK_SIZE) for (const horizontal of [false, true]) {
-      const width = s % 768 === 0 ? 18 : 11, points = [];
-      for (let t = -span; t <= span; t += 48) points.push(horizontal ? streetPoint(t, s) : streetPoint(s, t));
-      const road = { name: width === 18 ? 'Regional avenue' : 'Neighborhood street', width, points };
-      this.roads.push(road);
-      for (let i = 1; i < points.length; i++) {
-        const a = points[i - 1], b = points[i];
-        if (Math.max(Math.abs(a.x), Math.abs(a.z), Math.abs(b.x), Math.abs(b.z)) < 780) continue;
-        const pad = width / 2 + 3;
-        this.roadIndex.add({ a, b, width, minX: Math.min(a.x, b.x) - pad, maxX: Math.max(a.x, b.x) + pad, minZ: Math.min(a.z, b.z) - pad, maxZ: Math.max(a.z, b.z) + pad });
+    // End on the outermost cross street, not in the unbuilt strip beyond it.
+    // Aligned sampling includes every grid intersection exactly.
+    const span = Math.floor((WORLD_LIMIT - 76) / METRO_BLOCK_SIZE) * METRO_BLOCK_SIZE;
+    for (let s = -span; s <= span; s += METRO_BLOCK_SIZE) for (const horizontal of [false, true]) {
+      const width = s % 768 === 0 ? 18 : 11;
+      // The central district has its own street layout. Split metadata here too:
+      // map/traffic paths must never bridge the deliberately unpainted center.
+      // Preserve the +/-768 perimeter avenue to join every exposed grid stub.
+      const ranges = Math.abs(s) < REGIONAL_INNER_EDGE ? [[-span, -REGIONAL_INNER_EDGE], [REGIONAL_INNER_EDGE, span]] : [[-span, span]];
+      for (const [start, end] of ranges) {
+        const points = [];
+        for (let t = start; t <= end; t += 48) points.push(horizontal ? streetPoint(t, s) : streetPoint(s, t));
+        const road = { name: width === 18 ? 'Regional avenue' : 'Neighborhood street', width, points };
+        this.roads.push(road);
+        for (let i = 1; i < points.length; i++) {
+          const a = points[i - 1], b = points[i], pad = width / 2 + 3;
+          this.roadIndex.add({ a, b, width, minX: Math.min(a.x, b.x) - pad, maxX: Math.max(a.x, b.x) + pad, minZ: Math.min(a.z, b.z) - pad, maxZ: Math.max(a.z, b.z) + pad });
+        }
       }
     }
   }
@@ -35,11 +52,11 @@ export class Metropolis {
   block(bx, bz) {
     const key = `${bx},${bz}`;
     if (this.blocks.has(key)) { const block = this.blocks.get(key); this.blocks.delete(key); this.blocks.set(key, block); return block; }
-    const random = seededRandom(Math.imul(bx + 53, 73856093) ^ Math.imul(bz + 71, 19349663));
+    const random = blockRandom(bx, bz);
     const range = (a, b) => a + random() * (b - a), pick = a => a[Math.floor(random() * a.length)];
     const buildings = [], trees = [], props = [], features = [], colliders = [], occupied = new SpatialGrid();
     const district = outerDistrictAt(bx * 192, bz * 192);
-    const park = district.id === 'cypress' ? random() < .6 : random() < .13;
+    const park = parkBlock(bx, bz, random);
     const valid = box => Math.max(Math.abs(box.minX), Math.abs(box.minZ), Math.abs(box.maxX), Math.abs(box.maxZ)) < WORLD_LIMIT - 30 &&
       !(box.minX < 850 && box.maxX > -850 && box.minZ < 850 && box.maxZ > -850) && !this.onRoad(box) &&
       !occupied.query(box.minX - 3, box.minZ - 3, box.maxX + 3, box.maxZ + 3).length &&
@@ -83,16 +100,12 @@ export class Metropolis {
     return block;
   }
   area(minX, minZ, maxX, maxZ) {
-    const result = [];
-    // Covers the maximum street deformation plus a building's footprint at an edge.
-    for (let x = Math.floor((minX - 115) / 192); x <= Math.floor((maxX + 115) / 192); x++) {
-      for (let z = Math.floor((minZ - 85) / 192); z <= Math.floor((maxZ + 85) / 192); z++) {
-        if (Math.abs(x * 192) > WORLD_LIMIT + 192 || Math.abs(z * 192) > WORLD_LIMIT + 192) continue;
-        if (x >= -4 && x < 4 && z >= -4 && z < 4) continue;
-        result.push(this.block(x, z));
-      }
-    }
-    return result;
+    return Array.from(areaBlocks(minX, minZ, maxX, maxZ), ([x, z]) => this.block(x, z));
+  }
+  hasParkInArea(minX, minZ, maxX, maxZ) {
+    // Ground colors need only the first seeded choice, not every building/tree blueprint.
+    for (const [x, z] of areaBlocks(minX, minZ, maxX, maxZ)) if (parkBlock(x, z)) return true;
+    return false;
   }
   collidersIn(minX, minZ, maxX, maxZ) {
     return this.area(minX, minZ, maxX, maxZ).flatMap(b => b.colliders.filter(p => p.minX <= maxX && p.maxX >= minX && p.minZ <= maxZ && p.maxZ >= minZ));

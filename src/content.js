@@ -1,22 +1,9 @@
-import { OUTER_DISTRICTS, outerDistrictAt } from './world-config.js';
-import { streetPoint } from './metropolis.js';
+import { MASTER_DISTRICTS, districtAt as masterDistrictAt, createMasterPlan, terrainHeight, SHOWCASE, nearestOnSegment } from './master-plan.js';
 // Authored world content. Coordinates are shared by the simulation, journal and map.
-export const DISTRICTS = [
-  { id: 'neon', name: 'Neon Quarter', x: 0, z: 32, color: '#deff7a', description: 'Street kitchens, pirate radio and the people the network forgot.' },
-  { id: 'exchange', name: 'North Exchange', x: 0, z: -90, color: '#89baff', description: 'The old financial district. Its security still follows orders from a dead server.' },
-  { id: 'chrome', name: 'Chrome Heights', x: 85, z: 15, color: '#b8a0ff', description: 'Helix keeps immaculate records here. Especially of people it wants to erase.' },
-  { id: 'lower', name: 'Lower East', x: -85, z: 15, color: '#ffaf89', description: 'A clinic, a few stubborn businesses, and a neighborhood that looks after its own.' },
-  { id: 'gardens', name: 'Glass Gardens', x: -210, z: 0, color: '#7de5ad', description: 'Community greenhouses grow real food under an artificial sun.' },
-  { id: 'freight', name: 'Freightworks', x: 210, z: 0, color: '#ffc077', description: 'Cargo yards and repair shops. Nothing stays broken here for very long.' },
-  { id: 'docks', name: 'Rustwater Docks', x: 0, z: 210, color: '#76e0e8', description: 'The last boats out. Smugglers trade in memories as often as machinery.' },
-  { id: 'ridge', name: 'Relay Ridge', x: 0, z: -215, color: '#f393c9', description: 'A forgotten broadcast array, still listening for someone to answer.' },
-  ...OUTER_DISTRICTS,
-];
+export const DISTRICTS = MASTER_DISTRICTS.map(d => ({ ...d, color: `#${d.color.toString(16).padStart(6, '0')}` }));
 
 export function districtAt(x, z) {
-  if (Math.max(Math.abs(x), Math.abs(z)) > 285) return outerDistrictAt(x, z);
-  const id = z < -150 ? 'ridge' : z > 150 ? 'docks' : x < -150 ? 'gardens' : x > 150 ? 'freight' : z < -54 ? 'exchange' : x > 50 ? 'chrome' : x < -50 ? 'lower' : 'neon';
-  return DISTRICTS.find(d => d.id === id);
+  return DISTRICTS.find(d => d.id === masterDistrictAt(x, z).id);
 }
 
 export const CONTACTS = [
@@ -69,12 +56,25 @@ export const MEMORIES = [
 ].map(([id, name, x, z, author, text]) => object(id, name, 'memory', x, z, text, { author }));
 
 export const CACHES = [[8, 91], [-8, -47], [-64, -92], [64, 104], [-118, 65], [122, -113], [-239, 12], [-180, -42], [190, 42], [238, -43], [-32, 185], [42, -192]].map(([x, z], i) => object(`cache-${i}`, 'Salvage cache', 'cache', x, z, 'Abandoned supplies: credits, components and a chance to keep going.'));
-export const REGIONAL_STOPS = [-4608, -3072, -1536, 0, 1536, 3072, 4608].flatMap((x, ix) =>
-  [-4608, -3072, -1536, 0, 1536, 3072, 4608].flatMap((z, iz) => {
-    if (x === 0 && z === 0 || (ix + iz) % 2 !== 0) return [];
-    const p = streetPoint(x, z), district = outerDistrictAt(p.x, p.z);
-    return [object(`metro-region-${ix}-${iz}`, `${district.name} / ${ix + 1}${iz + 1}`, 'transit', p.x + 16, p.z + 16, 'Regional night tram. Discover this stop on foot to add it to your transit network.', { roadX: x, roadZ: z })];
-  }));
+const masterPlan = createMasterPlan();
+function roadside(x, z, offset = 4) {
+  let best;
+  for (const road of masterPlan.roads) {
+    if (road.level !== 0 || road.kind !== 'road') continue;
+    for (let i = 1; i < road.points.length; i++) {
+      const a = road.points[i - 1], b = road.points[i], hit = nearestOnSegment(x, z, a, b);
+      if (!best || hit.distance < best.distance) {
+        const length = Math.hypot(b.x - a.x, b.z - a.z), side = road.width / 2 + offset;
+        best = { ...hit, x: hit.x - (b.z - a.z) / length * side, z: hit.z + (b.x - a.x) / length * side };
+      }
+    }
+  }
+  return { x: best.x, z: best.z, y: terrainHeight(best.x, best.z) };
+}
+export const REGIONAL_STOPS = DISTRICTS.map(d => {
+  const p = roadside(d.x, d.z + 75);
+  return object(`metro-district-${d.id}`, `${d.name} Station`, 'transit', p.x, p.z, 'Discover this station on foot, then use the night tram to travel between districts.', { y: p.y, district: d.id });
+});
 export const WORLD_OBJECTS = [...PLACES, ...MEMORIES, ...CACHES, ...REGIONAL_STOPS];
 export const placeById = id => WORLD_OBJECTS.find(p => p.id === id);
 
@@ -92,14 +92,14 @@ export const QUESTS = [
   { id: 'letters', kind: 'side', title: 'No return address', giver: 'cass', description: 'Cass has a letter for Orrin from someone the registry says is dead. Some messages deserve a human courier.', reward: 280, xp: 160, faction: 'community', steps: [step('talk', 'orrin', 'Hand Orrin the sealed letter'), step('talk', 'cass', 'Tell Cass the letter arrived')] },
   { id: 'voices', kind: 'side', title: 'The things we keep', giver: 'mara', description: 'Find three memory fragments around Vesper. Mara will weave them into a broadcast for the missing.', reward: 420, xp: 220, faction: 'community', steps: [step('memories', 'memories', 'Collect 3 memory fragments', 3), step('talk', 'mara', 'Share the voices with Mara')] },
   { id: 'freight', kind: 'side', title: 'Unclaimed cargo', giver: 'rook', description: 'Security drones have sealed the freight yard. Clear them out and recover the manifest for Rook.', reward: 600, xp: 280, faction: 'community', steps: [step('kill', 'freight', 'Disable the freight yard patrol', 3), step('interact', 'freight-manifest', 'Recover the shipment manifest'), step('talk', 'rook', 'Return the manifest to Rook')] },
-  { id: 'survey', kind: 'side', title: 'Every corner of the city', giver: 'sable', description: 'Sable wants to map the city as it actually exists. Visit all sixteen districts, then report what you found.', reward: 700, xp: 350, faction: 'community', steps: [step('districts', 'districts', `Discover all ${DISTRICTS.length} districts`, DISTRICTS.length), step('talk', 'sable', 'Share your field notes with Sable')] },
+  { id: 'survey', kind: 'side', title: 'Every layer of the city', giver: 'sable', description: 'Map the city beyond its corporate plans. Visit all thirteen districts, from the northern hills to Blackwater Bay.', reward: 700, xp: 350, faction: 'community', steps: [step('districts', 'districts', `Discover all ${DISTRICTS.length} districts`, DISTRICTS.length), step('talk', 'sable', 'Share your field notes with Sable')] },
   { id: 'night-run', kind: 'contract', title: 'The night mail', giver: 'board', description: 'Carry a neighborhood dispatch to the east-side dropbox, then return to the job board. Available again after each completed route.', reward: 180, xp: 70, repeatable: true, steps: [step('interact', 'parcel', 'Deliver the dispatch to the courier dropbox'), step('interact', 'board', 'Collect payment at the job board')] },
 ];
 export const questById = id => QUESTS.find(q => q.id === id);
 
 export const ENCOUNTERS = [
-  { id: 'exchange', name: 'Exchange sentries', positions: [[-3, -94], [5, -103], [-5, -114]] },
-  { id: 'docks', name: 'Rustwater blockade', positions: [[-9, 216], [5, 226], [-20, 220]] },
+  { id: 'exchange', name: 'Citadel sentries', positions: [[-3, -94], [5, -103], [-5, -114]] },
+  { id: 'docks', name: 'Void Port blockade', positions: [[-9, 216], [5, 226], [-20, 220]] },
   { id: 'ridge', name: 'Crown security', positions: [[-7, -238], [8, -246], [17, -238]] },
   { id: 'freight', name: 'Freight lockdown', positions: [[213, -15], [221, -28], [236, -17]] },
   { id: 'street', name: 'Rogue patrol', positions: [[70, 4], [-60, -30], [13, 85]] },
@@ -115,3 +115,84 @@ export const ENDINGS = {
   order: { name: 'A promise in writing', text: 'Sable negotiates a public charter inside Helix. The patrols stand down and every deleted resident is restored. The city gets stability, with an independent witness listening for the first broken promise.' },
   together: { name: 'A thousand small lights', text: 'You divide the network among neighborhood relays. The clinic, gardens and docks each hold a key. ECHO becomes a chorus of local voices. Vesper will never again have a single switch someone can turn off.' },
 };
+
+// The story now lives in the master plan. Keep stable IDs so existing chapter,
+// inventory and dialogue progress survives the replacement of the old map.
+const deck = id => masterPlan.supports.find(s => s.id === id);
+const onDeck = (id, x, z) => ({ x: x + (id.startsWith('eastpoint-') ? SHOWCASE.x - 2550 : 0), z: z + (id.startsWith('eastpoint-') ? SHOWCASE.z - 600 : 0), y: deck(id).maxY });
+const ground = (x, z) => ({ x, z, y: terrainHeight(x, z) });
+const eastpointGround = (x, z) => ground(x + SHOWCASE.x - 2550, z + SHOWCASE.z - 600);
+const inDistrict = (id, dx = 0, dz = 0) => {
+  const d = DISTRICTS.find(d => d.id === id);
+  return roadside(d.x + dx, d.z + dz, 6);
+};
+const layout = {
+  home: ground(SHOWCASE.spawn.x, SHOWCASE.spawn.z),
+  mara: onDeck('eastpoint-concourse', 2498, 680),
+  cass: onDeck('eastpoint-concourse', 2506, 712),
+  trace: onDeck('eastpoint-terrace', 2615, 697),
+  board: eastpointGround(2468, 675),
+  'metro-neon': ground(SHOWCASE.transit.x, SHOWCASE.transit.z),
+  sable: onDeck('citadel-concourse', 1265, -1050),
+  archive: onDeck('citadel-concourse', 1330, -1050),
+  jun: onDeck('stacks-garden', -380, -3740),
+  solar: onDeck('stacks-garden', -345, -3726),
+  'garden-relay': onDeck('stacks-garden', -420, -3757),
+  'garden-rest': onDeck('stacks-garden', -360, -3757),
+  'valve-west': onDeck('stacks-garden', -420, -3726),
+  'valve-east': onDeck('stacks-garden', -338, -3757),
+  imani: inDistrict('shadowmarket'),
+  rook: inDistrict('foundry'),
+  orrin: inDistrict('void-port'),
+  echo: inDistrict('north-ridge'),
+  blackbox: inDistrict('void-port', 70, 110),
+  'breaker-west': inDistrict('north-ridge', -130, -90),
+  'breaker-east': inDistrict('north-ridge', 130, -90),
+  uplink: inDistrict('north-ridge', 0, -240),
+  medicine: inDistrict('foundry', -140, 80),
+  'freight-manifest': inDistrict('foundry', 140, 100),
+  parcel: inDistrict('east-reach', -150, 50),
+  'metro-north': ground(1134, -934),
+  'metro-garden': ground(-456, -3624),
+  'metro-freight': inDistrict('foundry', -70, 60),
+  'metro-dock': inDistrict('void-port', -80, 80),
+  'metro-ridge': inDistrict('north-ridge', -90, 70),
+  'lore-radio': onDeck('eastpoint-concourse', 2506, 653),
+  'lore-clinic': inDistrict('shadowmarket', 100, 40),
+  'lore-helix': onDeck('citadel-concourse', 1295, -1050),
+  'lore-garden': onDeck('stacks-garden', -400, -3744),
+  'lore-freight': inDistrict('foundry', 70, -70),
+  'lore-dock': inDistrict('void-port', -120, -90),
+  'lore-ridge': inDistrict('north-ridge', 110, 90),
+  'lore-vex': inDistrict('core', 60, 60),
+};
+for (const p of [...WORLD_OBJECTS, ...CONTACTS]) {
+  const position = layout[p.id] ?? (p.type === 'cache' ? inDistrict(DISTRICTS[Number(p.id.split('-')[1]) % DISTRICTS.length].id, 160, -160) : null);
+  if (position) Object.assign(p, position, { district: districtAt(position.x, position.z).id });
+}
+for (const p of WORLD_OBJECTS) {
+  if (p.y < terrainHeight(p.x, p.z) + 3) continue;
+  const rampId = p.district === 'stacks' ? 'stacks-garden-access' : p.district === 'citadel' ? 'citadel-concourse-access' : p.x > SHOWCASE.x + 40 ? 'eastpoint-east-walk-ramp' : 'eastpoint-west-walk-ramp';
+  p.approach = masterPlan.supports.find(s => s.id === rampId);
+}
+Object.assign(placeById('home'), { name: 'Eastpoint hideout', description: 'Your shelter beneath the interchange. Rest here to restore health, armor and ammunition.', arrivalOffset: { x: 0, z: 7 } });
+Object.assign(placeById('trace'), { name: 'Skybridge relay', description: 'Cross the Upper Market skybridge to recover the relay’s last transmission.' });
+Object.assign(placeById('metro-neon'), { name: 'Eastpoint station' });
+Object.assign(placeById('metro-north'), { name: 'Citadel station' });
+Object.assign(placeById('metro-garden'), { name: 'Stacks garden station' });
+Object.assign(placeById('metro-dock'), { name: 'Void Port station' });
+const encounterHomes = { exchange: 'archive', docks: 'blackbox', ridge: 'uplink', freight: 'freight-manifest', street: 'medicine' };
+for (const encounter of ENCOUNTERS) {
+  const p = placeById(encounterHomes[encounter.id]);
+  encounter.positions = [[p.x - 10, p.z - 8], [p.x + 10, p.z + 6], [p.x, p.z - 18]];
+  encounter.heights = encounter.positions.map(([x, z]) => Math.max(terrainHeight(x, z), p.y));
+}
+const renamed = text => text.replaceAll('Vesper', 'Afterlight').replaceAll('North Exchange', 'Eastpoint skybridge').replaceAll('outside Kōji', 'on the Upper Market deck').replaceAll('Chrome Heights', 'the Citadel concourse').replaceAll('Glass Gardens', 'the Stacks terrace gardens').replaceAll('Rustwater', 'Void Port').replaceAll('Relay Ridge', 'North Ridge');
+for (const q of QUESTS) {
+  q.description = renamed(q.description);
+  for (const s of q.steps) s.text = renamed(s.text);
+}
+QUESTS[0].description = 'Mara is broadcasting from the Upper Market, eight metres above Eastpoint. Follow the signed pedestrian ramp south of the hideout, then cross the skybridge to trace her lost signal.';
+QUESTS[0].steps[1].text = 'Cross the skybridge and recover the relay transmission';
+for (const p of WORLD_OBJECTS) p.description = renamed(p.description);
+for (const ending of Object.values(ENDINGS)) ending.text = renamed(ending.text);

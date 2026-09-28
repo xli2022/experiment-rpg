@@ -25,7 +25,10 @@ export function beginJump(player) {
 
 export function stepJump(player, dt, groundY = 0) {
   player.groundY = groundY;
-  if (!player.jumpPhase && player.y > groundY + .04) { player.jumpPhase = 'fall'; player.jumpTime = 0; player.velocityY = 0; }
+  // Walking down a graded surface must not alternate between falling and
+  // landing just because a 30 FPS step spans more slope than a 120 FPS step.
+  // Airborne jumps still follow their complete arc; only grounded feet snap.
+  if (!player.jumpPhase && player.y > groundY + .35) { player.jumpPhase = 'fall'; player.jumpTime = 0; player.velocityY = 0; }
   if (!player.jumpPhase) { player.y = groundY; return; }
   if (player.jumpPhase === 'fall') {
     player.jumpTime += dt;
@@ -35,7 +38,7 @@ export function stepJump(player, dt, groundY = 0) {
     return;
   }
   if (player.jumpPhase === 'land') {
-    if (player.y > groundY + .04) { player.jumpPhase = 'fall'; player.jumpTime = 0; player.velocityY = 0; return; }
+    if (player.y > groundY + .35) { player.jumpPhase = 'fall'; player.jumpTime = 0; player.velocityY = 0; return; }
     player.y = groundY;
     player.jumpTime += dt;
     if (player.jumpTime >= JUMP.landing) { player.jumpPhase = ''; player.jumpTime = 0; }

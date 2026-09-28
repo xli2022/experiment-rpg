@@ -23,9 +23,38 @@ export function boxContainsPoint(x, z, box, inset = 0) {
 export function overlapsHeight(box, y = 0, height = 1.8, step = .25) {
   return (box.maxY ?? Infinity) > y + step && (box.minY ?? 0) < y + height - .02;
 }
-export function supportHeight(x, z, colliders, ceiling = Infinity) {
-  let height = 0;
-  for (const box of colliders) if (box.maxY <= ceiling + .02 && box.walkable !== false && boxContainsPoint(x, z, box)) height = Math.max(height, box.maxY);
+
+function surfaceFrame(box) {
+  const surface = box.surface ?? (box.a && box.b ? box : null);
+  if (!surface) return null;
+  const { a, b } = surface, dx = b.x - a.x, dz = b.z - a.z, length = Math.hypot(dx, dz);
+  if (length < 1e-8) return null;
+  return { a, length, tx: dx / length, tz: dz / length, slope: ((b.y ?? 0) - (a.y ?? 0)) / length,
+    crossSlope: surface.crossSlope ?? box.crossSlope ?? 0, width: surface.width ?? box.width ?? box.w,
+    thickness: Math.max(0, box.slabThickness ?? surface.slabThickness ?? .5), endOverlap: box.supportOverlap ?? surface.supportOverlap ?? .12 };
+}
+
+// Road endpoints describe the top of the slab. The broad-phase bounds may span
+// many vertical metres, so their maxY is never a valid ramp support height.
+export function surfaceHeightAt(x, z, box) {
+  const frame = surfaceFrame(box);
+  if (!frame) return boxContainsPoint(x, z, box) && Number.isFinite(box.maxY) ? box.maxY : null;
+  const dx = x - frame.a.x, dz = z - frame.a.z;
+  const along = dx * frame.tx + dz * frame.tz, across = -dx * frame.tz + dz * frame.tx;
+  // Rendered road boxes overlap at joins, with larger caps on wide/tight bends.
+  // Continue the slab's grade through that same extension so outer lanes cannot
+  // fall between segments or snap onto an incorrectly flattened cap.
+  if (along < -frame.endOverlap - 1e-7 || along > frame.length + frame.endOverlap + 1e-7 || Math.abs(across) > frame.width / 2 + 1e-7) return null;
+  return (frame.a.y ?? 0) + frame.slope * along + frame.crossSlope * across;
+}
+
+export function supportHeight(x, z, colliders, ceiling = Infinity, baseHeight = 0) {
+  let height = baseHeight;
+  for (const box of colliders) {
+    if (box.walkable === false) continue;
+    const top = surfaceHeightAt(x, z, box);
+    if (top !== null && top <= ceiling + .02) height = Math.max(height, top);
+  }
   return height;
 }
 
@@ -39,7 +68,9 @@ export function circleHitsBox(x, z, radius, box) {
 // Resolve movement in small steps so sprinting and fast cars cannot tunnel through walls.
 export function moveWithCollisions(position, dx, dz, radius, colliders, limit = WORLD_LIMIT) {
   if (!Array.isArray(colliders)) colliders = colliders.query(Math.min(position.x, position.x + dx) - radius, Math.min(position.z, position.z + dz) - radius, Math.max(position.x, position.x + dx) + radius, Math.max(position.z, position.z + dz) + radius);
-  colliders = colliders.filter(box => overlapsHeight(box, position.y ?? 0, position.bodyHeight ?? 1.8));
+  // Height is resolved against the actual terrain/road support by the caller.
+  // Ramp slabs therefore never act as the tall walls of their bounding boxes.
+  colliders = colliders.filter(box => !box.supportOnly && overlapsHeight(box, position.y ?? 0, position.bodyHeight ?? 1.8));
   const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / Math.max(radius * 0.65, 0.2)));
   const sx = dx / steps, sz = dz / steps;
   let collided = false;
@@ -56,11 +87,12 @@ export function moveWithCollisions(position, dx, dz, radius, colliders, limit = 
 }
 
 export function carCollider(car) {
-  return orientedBox(car.x, car.z, 2.34, 4.74, car.yaw, 1.85, 0, { walkable: false });
+  const y = car.y ?? 0;
+  return orientedBox(car.x, car.z, 2.34, 4.74, car.yaw, y + 1.85, y, { walkable: false });
 }
 
 export function findExitPosition(car, colliders, radius = 0.48) {
-  const obstacles = [carCollider(car), ...colliders.filter(box => overlapsHeight(box))];
+  const obstacles = [carCollider(car), ...colliders.filter(box => !box.supportOnly && overlapsHeight(box, car.y ?? 0))];
   // Try both doors, then front/back. Never deposit a player inside a collider.
   const offsets = [[-2.8, 0], [2.8, 0], [0, 4.3], [0, -4.3], [-3.4, 3], [3.4, 3]];
   for (const [x, z] of offsets) {
@@ -68,6 +100,7 @@ export function findExitPosition(car, colliders, radius = 0.48) {
       x: car.x + x * Math.cos(car.yaw) + z * Math.sin(car.yaw),
       z: car.z - x * Math.sin(car.yaw) + z * Math.cos(car.yaw),
     };
+    if (car.y !== undefined) p.y = car.y;
     if (Math.abs(p.x) < WORLD_LIMIT - radius && Math.abs(p.z) < WORLD_LIMIT - radius &&
         !obstacles.some(b => circleHitsBox(p.x, p.z, radius, b))) return p;
   }
@@ -86,6 +119,21 @@ export function stepVehicle(car, throttle, steering, handbrake, dt) {
 }
 
 export function rayBoxDistance(origin, direction, box, maxDistance = Infinity) {
+  const frame = surfaceFrame(box);
+  if (frame) {
+    const dx = origin.x - frame.a.x, dz = origin.z - frame.a.z;
+    const along = dx * frame.tx + dz * frame.tz, alongDirection = direction.x * frame.tx + direction.z * frame.tz;
+    const across = -dx * frame.tz + dz * frame.tx, acrossDirection = -direction.x * frame.tz + direction.z * frame.tx;
+    // A shear flattens the inclined slab without changing the ray parameter.
+    // This gives its real top, underside and edge hits instead of phantom cover
+    // filling the full vertical bounds beneath an elevated approach.
+    return rayBoxDistance(
+      { x: across, y: origin.y - (frame.a.y ?? 0) - frame.slope * along - frame.crossSlope * across, z: along },
+      { x: acrossDirection, y: direction.y - frame.slope * alongDirection - frame.crossSlope * acrossDirection, z: alongDirection },
+      { minX: -frame.width / 2, maxX: frame.width / 2, minZ: -frame.endOverlap, maxZ: frame.length + frame.endOverlap, minY: -frame.thickness, maxY: 0 },
+      maxDistance,
+    );
+  }
   if (box.w !== undefined) {
     const p = boxCoordinates(origin.x, origin.z, box), c = Math.cos(box.yaw ?? 0), s = Math.sin(box.yaw ?? 0);
     origin = { x: p.x, y: origin.y, z: p.z };

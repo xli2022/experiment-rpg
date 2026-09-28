@@ -4,7 +4,9 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { createCity, addSky } from './city.js';
+import { addSky } from './city.js';
+import { createVerticalCity } from './vertical-city.js';
+import { terrainHeight, SHOWCASE } from './master-plan.js';
 import { createDrone } from './models.js';
 import { Input } from './input.js';
 import { GameAudio } from './audio.js';
@@ -15,15 +17,17 @@ import { beginJump, stepJump } from './jump.js';
 import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from './physics.js';
 import { MOVEMENT, footVelocity } from './locomotion.js';
 import { findClimbFace, startClimb, dropClimb, stepClimb } from './climbing.js';
-import { Campaign, freshProgress, readSave, writeSave } from './campaign.js';
-import { WORLD_OBJECTS, REGIONAL_STOPS, ENCOUNTERS, districtAt, placeById } from './content.js';
-import { streetPoint } from './metropolis.js';
-import { expandCity, createWorldLife } from './world.js';
+import { Campaign, freshProgress, readSave, writeSave, WORLD_REVISION } from './campaign.js';
+import { WORLD_OBJECTS, DISTRICTS, ENCOUNTERS, districtAt, placeById } from './content.js';
+import { createWorldLife } from './world.js';
 import { RPGUI } from './rpg-ui.js';
 import { createNPCPortraits } from './npc-appearance.js';
 import { DialogueVoice } from './voice.js';
 import { WorldStream, RENDER_PROFILES, ResolutionGovernor } from './world-stream.js';
-import { createCityScenery } from './city-scenery.js';
+import { createShadows } from './shadows.js';
+import { createContactShadows } from './contact-shadows.js';
+import { createTraffic } from './traffic.js';
+import { findSpawnPosition } from './spawn.js';
 import './npc.css';
 
 const $ = id => document.getElementById(id);
@@ -31,18 +35,19 @@ const canvas = $('world');
 const storage = { getItem: key => window.localStorage.getItem(key), setItem: (key, value) => window.localStorage.setItem(key, value) };
 const saved = readSave(storage), campaign = new Campaign(saved.progress);
 const state = { started: false, paused: false, mapOpen: false, modal: null, health: 100, armor: campaign.maxArmor, ammo: 24, reloading: 0, cooldown: 0, damageAt: -100, time: campaign.data.elapsed };
-const player = { x: -2.5, y: 0, z: 30, yaw: 0, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, pushTime: 0 };
+const arrival = placeById('home');
+const player = { x: arrival.x, y: arrival.y ?? 0, z: arrival.z, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: arrival.y ?? 0, climb: null, climbCandidate: null, pushTime: 0 };
 let renderer, composer, bloom, city, character, hud, input, scene, camera, crowd, worldLife, rpgUI;
-let worldStream, sky;
+let worldStream, sky, shadows, traffic, contactShadows;
 const resolution = new ResolutionGovernor();
 const frameCosts = { updateMs: 0, renderMs: 0 };
 let driving = null, nearestCar = null, quality = 'high', animationId;
-let cameraYaw = -.025, cameraPitch = .19, fps = 60, lastFrame = performance.now(), lastUI = 0, shotRecoil = 0;
+let cameraYaw = SHOWCASE.cameraYaw, cameraPitch = SHOWCASE.cameraPitch, fps = 60, lastFrame = performance.now(), lastUI = 0, shotRecoil = 0;
 const audio = new GameAudio(), drones = [], effects = [];
 const voice = new DialogueVoice({ storage });
 const raycaster = new THREE.Raycaster(), vector = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
 const tempPoint = new THREE.Vector3(), muzzlePoint = new THREE.Vector3(), droneSphere = new THREE.Sphere(new THREE.Vector3(), 1.02);
-let contactShadow, damageFlashUntil = 0, hitUntil = 0, lastSavedAt = 0, savedRevision = -1, saveWarningShown = false;
+let damageFlashUntil = 0, hitUntil = 0, lastSavedAt = 0, savedRevision = -1, saveWarningShown = false;
 
 function showError(error) {
   console.error(error); $('loading').classList.add('hidden'); $('error').classList.remove('hidden');
@@ -56,7 +61,7 @@ async function init() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.18;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.info.autoReset = false;
-  scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x1b2940, .0048);
+  scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x1b2940, .0035);
   sky = addSky(scene);
   worldStream = new WorldStream(scene); scene.userData.worldStream = worldStream;
   camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .12, 760);
@@ -68,45 +73,41 @@ async function init() {
   environment.dispose(); pmrem.dispose();
   // Wait briefly for the local UI font before drawing the permanent shop textures.
   await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 1000))]);
-  $('loading-text').textContent = 'LOADING VESPER CITY AND CHARACTERS...';
+  $('loading-text').textContent = 'BUILDING AFTERLIGHT / STREETS, SKYWAYS & STORIES...';
   const characterAssets = await loadCharacterAssets();
-  const beforeCity = new Set(scene.children);
-  city = createCity(scene); expandCity(scene, city);
-  const carRoots = new Set(city.cars.map(c => c.root));
-  worldStream.capture(scene.children.filter(o => !beforeCity.has(o) && !carRoots.has(o) && o !== city.rain && o !== city.motes && !o.userData.resident));
-  createCityScenery(scene, city, worldStream);
-  const carTemplates = [...city.cars];
-  for (const [i, stop] of REGIONAL_STOPS.entries()) {
-    const template = carTemplates[i % carTemplates.length], root = template.root.clone(true);
-    const p = streetPoint(stop.roadX, stop.roadZ - 32), q = streetPoint(stop.roadX, stop.roadZ - 30);
-    const x = p.x + 3.5, z = p.z, yaw = Math.atan2(q.x - p.x, q.z - p.z);
-    const wheels = template.wheels.map(w => root.children[template.root.children.indexOf(w)]);
-    root.position.set(x, .04, z); root.rotation.y = yaw; scene.add(root);
-    city.cars.push({ root, wheels, x, z, yaw, speed: 0, spawn: { x, z, yaw } });
-  }
-  crowd = createCrowd(scene, characterAssets.citizen); character = createCharacter(characterAssets.player); scene.add(character.root);
+  city = createVerticalCity(scene, worldStream, WORLD_OBJECTS);
+  crowd = createCrowd(scene, characterAssets.citizen, city); character = createCharacter(characterAssets.player); scene.add(character.root);
   worldLife = createWorldLife(scene, characterAssets.citizen, campaign);
   const portraits = createNPCPortraits(renderer, worldLife.avatars);
-  const resume = saved.position ?? placeById(campaign.data.rest);
-  if (saved.loaded && resume && !nearbyColliders(resume.x, resume.z, 2).some(box => overlapsHeight(box, resume.y ?? 0) && circleHitsBox(resume.x, resume.z, .43, box))) {
-    player.x = resume.x; player.z = resume.z; player.y = resume.y ?? 0;
-    player.groundY = supportHeight(player.x, player.z, nearbyColliders(player.x, player.z, 2), player.y + .2);
+  const spawn = refugeArrival(placeById(campaign.data.rest)) ?? refugeArrival(arrival);
+  if (!spawn) throw new Error('No clear refuge arrival is available.');
+  Object.assign(player, spawn, { groundY: spawn.y });
+  const resume = saved.worldRevision === WORLD_REVISION ? saved.position : null;
+  if (saved.loaded && resume && !nearbyColliders(resume.x, resume.z, 2).some(box => !box.supportOnly && overlapsHeight(box, resume.y ?? 0) && circleHitsBox(resume.x, resume.z, .43, box))) {
+    player.x = resume.x; player.z = resume.z; player.y = Math.max(resume.y ?? 0, terrainHeight(resume.x, resume.z));
+    player.groundY = groundAt(player.x, player.z, player.y + .5);
   }
-  const shadowCanvas = document.createElement('canvas'); shadowCanvas.width = shadowCanvas.height = 64;
-  const ctx = shadowCanvas.getContext('2d'), gradient = ctx.createRadialGradient(32, 32, 2, 32, 32, 32);
-  gradient.addColorStop(0, '#00000099'); gradient.addColorStop(1, '#00000000'); ctx.fillStyle = gradient; ctx.fillRect(0, 0, 64, 64);
-  contactShadow = new THREE.Mesh(new THREE.PlaneGeometry(1.8, 1.8), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(shadowCanvas), transparent: true, depthWrite: false })); contactShadow.rotation.x = -Math.PI / 2; scene.add(contactShadow);
+  if (saved.loaded && saved.worldRevision !== WORLD_REVISION) saved.warning = 'AFTERLIGHT REBUILT // Your story is preserved. Welcome to Eastpoint and the vertical city.';
   ENCOUNTERS.forEach(encounter => encounter.positions.forEach(([x, z], i) => {
-    const model = createDrone(); model.root.position.set(x, 3.1, z); scene.add(model.root);
+    const homeY = encounter.heights?.[i] ?? terrainHeight(x, z);
+    const model = createDrone(); model.root.position.set(x, homeY + 3.1, z); scene.add(model.root);
     const id = `${encounter.id}-${i}`, dead = campaign.data.kills.includes(id); model.root.visible = !dead;
-    drones.push({ ...model, id, group: encounter.id, homeX: x, homeZ: z, health: dead ? 0 : 100, dead, phase: i * 2.3, fireTimer: 2 + i * .5, engaged: false });
+    drones.push({ ...model, id, group: encounter.id, homeX: x, homeY, homeZ: z, health: dead ? 0 : 100, dead, phase: i * 2.3, fireTimer: 2 + i * .5, engaged: false });
   }));
+  traffic = createTraffic(scene, city);
+  shadows = createShadows(renderer, scene, moon, { dynamicRoots: [
+    ...city.cars.map(c => c.root), traffic.root, character.root,
+    ...crowd.people.map(p => p.root), ...Object.values(worldLife.avatars).map(a => a.root),
+    ...drones.map(d => d.root),
+  ] });
+  contactShadows = createContactShadows(scene);
   hud = new HUD(city, campaign);
   input = new Input(canvas, { interact, reload, jump, climb: toggleClimb, fire: shoot, map: toggleMap, journal: toggleJournal, medkit: useMedkit, pause: togglePause, blur: () => { voice.stop(); if (state.started && !state.paused) setPause(true); }, audio: () => audio.init() });
   rpgUI = new RPGUI(campaign, { voice, portraits, mapView: city.mapView, position: () => player, open: openModal, close: closeMenus, notify: (text) => hud.notify(text), changed: campaignChanged, medkit: useMedkit, health: () => state.health, upgraded: () => { state.armor = campaign.maxArmor; }, travel: fastTravel, newStory });
   quality = input.touch ? 'low' : 'high'; $('quality').value = quality;
   setQuality(quality);
   setupUI(); updateCamera(.016, true); updateCharacter(.016);
+  traffic.update(0, player, driving, camera, crowd.people);
   worldStream.update(camera, player, performance.now() / 1000, true);
   if (saved.loaded) $('start-button').innerHTML = 'CONTINUE YOUR STORY <span>↗</span>';
   renderer.compile(scene, camera);
@@ -115,16 +116,17 @@ async function init() {
   // Read-only diagnostics are exposed only in Vite's development mode.
   if (import.meta.env.DEV) window.__AFTERLIGHT__ = { snapshot: () => ({
     started: state.started, paused: state.paused, modal: state.modal, health: state.health, armor: state.armor, ammo: state.ammo, reloading: state.reloading,
-    voice: voice.snapshot(), cast: Object.keys(worldLife.avatars), crowdArchetypes: crowd.archetypes,
-    position: { x: player.x, y: player.y, z: player.z }, driving: driving ? { x: driving.x, z: driving.z, speed: driving.speed, yaw: driving.yaw } : null,
+    voice: voice.snapshot(), sound: { enabled: audio.enabled, state: audio.context?.state ?? 'idle' }, cast: Object.keys(worldLife.avatars), crowdArchetypes: crowd.archetypes,
+    position: { x: player.x, y: player.y, z: player.z }, driving: driving ? { x: driving.x, y: driving.y, z: driving.z, speed: driving.speed, yaw: driving.yaw } : null,
     traversal: { groundY: player.groundY, climb: player.climb && { mode: player.climb.mode, roofY: player.climb.roofY, phase: player.climb.phase, blocked: player.climb.blocked }, candidate: player.climbCandidate, nearby: nearbyColliders(player.x, player.z, 3) },
     yaw: cameraYaw, pitch: cameraPitch, fps, quality, touch: input.touch, drawCalls: renderer.info.render.calls,
     rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
-    performance: { ...frameCosts, scale: resolution.scale, activeCrowd: crowd.active, streaming: { ...worldStream.stats }, blueprints: city.metropolis.blocks.size },
-    city: { span: 11000, areaKm2: 121, districts: 16, coreBuildings: city.plan.buildings.length + 64, coreTrees: city.plan.trees.length, buildingTypes: 8 },
+    performance: { ...frameCosts, scale: resolution.scale, activeCrowd: crowd.active, streaming: { ...worldStream.stats }, blueprints: city.metropolis.blocks.size }, population: crowd.snapshot(),
+    shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(),
+    city: { span: 11000, areaKm2: 121, districts: DISTRICTS.length, roads: city.plan.roads.length, vertical: true },
     character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: crowd.count, crowdDrawCalls: crowd.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
     camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
-    cars: city.cars.map(c => ({ x: c.x, z: c.z })), drones: drones.map(d => { const projected = d.root.position.clone().project(camera); return { x: d.root.position.x, y: d.root.position.y, z: d.root.position.z, health: d.health, dead: d.dead, screen: { x: projected.x, y: projected.y, z: projected.z } }; }),
+    cars: city.cars.map(c => ({ x: c.x, y: c.y, z: c.z, trafficId: c.trafficId })), drones: drones.map(d => { const projected = d.root.position.clone().project(camera); return { x: d.root.position.x, y: d.root.position.y, z: d.root.position.z, health: d.health, dead: d.dead, screen: { x: projected.x, y: projected.y, z: projected.z } }; }),
     colliders: city.colliders, objective: objective(), campaign: structuredClone(campaign.data), interaction: worldLife.nearest(player)?.id ?? null, renderer: renderer.capabilities.isWebGL2 ? 'WebGL2' : 'WebGL',
   }) };
 }
@@ -138,10 +140,16 @@ function setupUI() {
   $('journal-button').addEventListener('click', toggleJournal);
   $('medkit-button').addEventListener('click', () => { useMedkit(); canvas.focus(); });
   $('new-game-button').addEventListener('click', () => rpgUI.confirmNewStory());
-  $('sound-button').addEventListener('click', () => {
-    const enabled = audio.toggle(); const button = $('sound-button');
+  const syncSoundButton = () => {
+    const enabled = audio.enabled, button = $('sound-button');
     button.setAttribute('aria-pressed', String(enabled)); button.setAttribute('aria-label', enabled ? 'Mute sound effects' : 'Enable sound effects');
     button.innerHTML = enabled ? '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Zm4 3a6 6 0 0 1 0 8m3-11a10 10 0 0 1 0 14"/></svg>' : '<svg viewBox="0 0 24 24"><path d="M11 5 6 9H3v6h3l5 4V5Zm5 4 5 6m0-6-5 6"/></svg>';
+  };
+  syncSoundButton();
+  $('sound-button').addEventListener('click', () => {
+    audio.toggle();
+    if (state.started) audio.init();
+    syncSoundButton();
     if (state.started && !state.paused) canvas.focus();
   });
   $('quality').addEventListener('change', e => setQuality(e.target.value));
@@ -169,7 +177,7 @@ function setupUI() {
 function start() {
   state.started = true; state.paused = false; document.body.classList.add('playing'); $('welcome').classList.add('hidden');
   input.setEnabled(true); audio.init();
-  hud.notify(saved.warning ?? (saved.loaded ? 'WELCOME BACK // Your story continues. J for your field journal.' : 'MARA: Vex. Outside Kōji. We need to talk. // E to interact · J for your journal'), 7);
+  hud.notify(saved.warning ?? (saved.loaded ? 'WELCOME BACK // Your story continues. J for your field journal.' : 'MARA: Vex. Upper Market, one level up. We need to talk. // E to interact · J for your journal'), 7);
   saveProgress();
 }
 const modalIds = ['pause', 'city-map', 'journal', 'dialogue', 'service'];
@@ -205,13 +213,14 @@ function toggleJournal() {
 function setQuality(value) {
   quality = value;
   resolution.reset(); worldStream.setQuality(quality);
+  shadows.setQuality(quality); traffic.setQuality(quality); crowd.setQuality(quality);
   if (quality === 'high' && !composer) {
     composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera));
     bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .31, .55, 1.03); composer.addPass(bloom); composer.addPass(new OutputPass());
   } else if (quality === 'low' && composer) {
     for (const pass of composer.passes) pass.dispose?.(); composer.dispose(); composer = bloom = null;
   }
-  scene.fog.density = quality === 'high' ? .0048 : .007;
+  scene.fog.density = quality === 'high' ? .0035 : .005;
   camera.far = quality === 'high' ? 720 : 600; camera.updateProjectionMatrix();
   sky.scale.setScalar(camera.far / 700);
   city.rain.geometry.setDrawRange(0, RENDER_PROFILES[quality].rain * 2);
@@ -222,11 +231,33 @@ function applyResolution() {
   if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight); }
 }
 function nearbyColliders(x, z, radius = 8, exclude = null) {
-  return city.spatial.near(x, z, radius).concat(city.cars.filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider));
+  return city.spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider));
+}
+function allCars() { return traffic ? city.cars.concat(traffic.cars) : city.cars; }
+function removeDrivableCar(car) {
+  scene.remove(car.root);
+  const geometries = new Set(); car.root.traverse(object => { if (object.isMesh) geometries.add(object.geometry); });
+  for (const geometry of geometries) geometry.dispose();
+  // Car materials are cached and shared with the remaining traffic.
+  city.cars.splice(city.cars.indexOf(car), 1);
+}
+function groundAt(x, z, ceiling = Infinity) { return supportHeight(x, z, city.spatial.near(x, z, 2), ceiling, terrainHeight(x, z)); }
+function refugeArrival(refuge) {
+  const offset = refuge.arrivalOffset ?? { x: 0, z: -2 };
+  return findSpawnPosition({ x: refuge.x + offset.x, y: refuge.y ?? terrainHeight(refuge.x, refuge.z), z: refuge.z + offset.z }, nearbyColliders, groundAt);
 }
 
 function objective() {
-  return campaign.objective(player);
+  const goal = campaign.objective(player), ramp = goal.approach;
+  if (ramp && player.y < goal.y - 2 && Math.hypot(player.x - goal.x, player.z - goal.z) < 250) {
+    const ascending = player.y > terrainHeight(player.x, player.z) + .8 || Math.hypot(player.x - ramp.a.x, player.z - ramp.a.z) < 9;
+    const length = Math.hypot(ramp.b.x - ramp.a.x, ramp.b.z - ramp.a.z);
+    // Approach from beyond the low end, instead of aiming through its side rail.
+    const entry = { x: ramp.a.x + (ramp.a.x - ramp.b.x) / length * 8, z: ramp.a.z + (ramp.a.z - ramp.b.z) / length * 8 };
+    const target = ascending ? ramp.b : { ...entry, y: terrainHeight(entry.x, entry.z) };
+    return { ...goal, ...target, label: ramp.name, text: `${ascending ? 'Follow the ramp up' : 'Reach the pedestrian ramp'} → ${goal.label}` };
+  }
+  return goal;
 }
 function saveProgress() {
   if (!state.started) return;
@@ -251,21 +282,26 @@ function useMedkit() {
 function newStory() {
   if (driving) driving.speed = 0;
   driving = null; campaign.data = freshProgress(); campaign.pin = null; campaign.messages = []; campaign.changed();
-  for (const car of city.cars) { Object.assign(car, car.spawn, { speed: 0 }); car.root.position.set(car.x, .04, car.z); car.root.rotation.y = car.yaw; }
+  for (const car of [...city.cars]) removeDrivableCar(car);
   for (const drone of drones) { drone.dead = false; drone.health = 100; drone.root.visible = true; drone.engaged = false; drone.fireTimer = 2; }
-  state.time = 0; state.damageAt = -100; state.started = true; respawn(); player.x = -2.5; player.z = 30;
+  state.time = 0; state.damageAt = -100; state.started = true; respawn();
+  traffic.reset(); shadows.invalidate();
   closeMenus(); document.body.classList.add('playing'); $('welcome').classList.add('hidden'); updateCamera(.016, true);
   rpgUI.selectedQuest = 'dead-air'; rpgUI.tab = 'quests'; saveProgress();
-  hud.notify('A NEW SIGNAL // Mara is waiting outside Kōji. Your story starts here.', 6);
+  hud.notify('A NEW SIGNAL // Mara is waiting on the Upper Market. Your story starts here.', 6);
 }
 function fastTravel(id) {
   if (!campaign.data.transit.includes(id)) return 'Discover this platform first.';
   if (driving) return 'Exit your vehicle before taking the tram.';
   if (state.time - state.damageAt < 10 || drones.some(d => !d.dead && d.engaged && Math.hypot(d.root.position.x - player.x, d.root.position.z - player.z) < 30)) return 'Lose the patrols and stay clear of combat for 10 seconds.';
   const stop = placeById(id);
+  const arrival = findSpawnPosition({ x: stop.x, y: stop.y ?? terrainHeight(stop.x, stop.z), z: stop.z + 2 }, nearbyColliders, groundAt);
+  if (!arrival) return 'The destination platform is blocked. Try another station or clear its arrival area.';
   resetTraversal();
-  player.x = stop.x; player.z = stop.z + 2; player.y = 0; player.vx = player.vz = player.speed = player.velocityY = 0; player.jumpPhase = '';
+  Object.assign(player, arrival); player.groundY = player.y;
+  player.vx = player.vz = player.speed = player.velocityY = 0; player.jumpPhase = '';
   state.time += 90; cameraYaw = 0; updateCharacter(.016); updateCamera(.016, true); input.clear();
+  traffic.reset(); shadows.invalidate();
   worldStream.update(camera, player, performance.now() / 1000, true);
   hud.notify(`NIGHT TRAM // ${stop.name}`, 4); saveProgress(); return true;
 }
@@ -282,7 +318,7 @@ const terminalReplies = {
   'valve-west': 'PRESSURE RESTORED // The western beds are receiving water.',
   'valve-east': 'IRRIGATION STABLE // Both lines are flowing. Report back to Jun.',
   parcel: 'DELIVERY RECEIVED // A paper message slips through the slot. Collect payment at the neighborhood job board.',
-  'freight-manifest': 'MANIFEST RECOVERED // These “abandoned” crates belong to residents of the Neon Quarter. Return the records to Rook.',
+  'freight-manifest': 'MANIFEST RECOVERED // These “abandoned” crates belong to residents of the East Reach. Return the records to Rook.',
 };
 function useWorldObject(place) {
   if (campaign.pin === place.id) campaign.pin = null;
@@ -310,16 +346,19 @@ function interact() {
     const exit = findExitPosition(driving, others);
     if (!exit) { hud.notify('Both doors are blocked. Move the car into the street.', 3); return; }
     resetTraversal();
-    player.x = exit.x; player.z = exit.z; player.y = 0; player.velocityY = 0; player.yaw = driving.yaw;
+    player.x = exit.x; player.z = exit.z; player.y = groundAt(exit.x, exit.z, (exit.y ?? driving.y) + .6); player.groundY = player.y; player.velocityY = 0; player.yaw = driving.yaw;
     driving.speed = 0; driving = null; character.root.visible = true; state.cooldown = .3;
     player.vx = player.vz = player.speed = 0; player.jumpPhase = '';
     hud.notify(input.touch ? 'Weapon ready. Aim with the right side; tap the crosshair to fire.' : 'Back on foot. Left click to fire. Right click to aim.', 3);
   } else {
     const place = worldLife.nearest(player);
     if (place) { useWorldObject(place); return; }
-    nearestCar = findNearestCar(); if (!nearestCar) { hud.notify('Approach a person, glowing terminal, cache or vehicle. E to interact.', 3); return; }
+    nearestCar = findNearestCar(); if (!nearestCar) {
+      const nearTraffic = traffic.cars.some(car => Math.abs(player.y - car.y) < 2 && Math.hypot(player.x - car.x, player.z - car.z) < 9);
+      hud.notify(nearTraffic ? 'Hit a traffic car three times to stop it, then approach to take the wheel.' : 'Approach a person, glowing terminal, cache or stopped vehicle. E to interact.', 3); return;
+    }
     resetTraversal();
-    driving = nearestCar; driving.speed = 0; player.x = driving.x; player.z = driving.z; player.y = 0; player.velocityY = 0;
+    driving = nearestCar; driving.speed = 0; player.x = driving.x; player.z = driving.z; player.y = driving.y; player.velocityY = 0;
     player.vx = player.vz = player.speed = 0; player.jumpPhase = '';
     cameraYaw = driving.yaw; cameraPitch = .22; character.root.visible = false;
     hud.notify('ARCHER GT // WASD to drive. Space to handbrake. E to exit.', 3);
@@ -327,9 +366,9 @@ function interact() {
   input.firing = false; input.aiming = false;
 }
 function findNearestCar() {
-  if (player.y > 1.1 || player.climb) return null;
+  if (player.climb) return null;
   let best = null, distance = 4.5;
-  for (const car of city.cars) { const d = Math.hypot(player.x - car.x, player.z - car.z); if (d < distance) { best = car; distance = d; } }
+  for (const car of city.cars) { const d = Math.hypot(player.x - car.x, player.z - car.z); if (Math.abs(player.y - car.y) < 1.6 && d < distance) { best = car; distance = d; } }
   return best;
 }
 function jump() {
@@ -357,13 +396,15 @@ function reload() {
   state.reloading = character.clips.Reload.duration; input.firing = false; audio.reload();
 }
 function respawn() {
+  const refuge = placeById(campaign.data.rest);
+  const spawn = refugeArrival(refuge) ?? refugeArrival(arrival);
+  if (!spawn) { hud.notify('The refuge approach is blocked. Clear a space before recovering here.', 4); return; }
   if (driving) driving.speed = 0;
   resetTraversal();
-  const refuge = placeById(campaign.data.rest);
-  driving = null; player.x = refuge.x; player.z = refuge.z - 2; player.y = 0; player.velocityY = 0; player.yaw = 0;
+  driving = null; Object.assign(player, spawn); player.groundY = player.y; player.velocityY = 0; player.yaw = -Math.PI / 2;
   player.vx = player.vz = player.speed = 0; player.jumpPhase = ''; player.jumpTime = 0;
-  cameraYaw = -.025; cameraPitch = .19; state.health = 100; state.armor = campaign.maxArmor; state.ammo = 24; state.reloading = 0; state.cooldown = .5; state.damageAt = -100;
-  for (const drone of drones) { drone.engaged = false; drone.root.position.set(drone.homeX, 3, drone.homeZ); }
+  cameraYaw = -Math.PI / 2; cameraPitch = .12; state.health = 100; state.armor = campaign.maxArmor; state.ammo = 24; state.reloading = 0; state.cooldown = .5; state.damageAt = -100;
+  for (const drone of drones) { drone.engaged = false; drone.root.position.set(drone.homeX, drone.homeY + 3, drone.homeZ); }
   character.root.visible = true; input.clear(); updateCamera(.016, true);
   worldStream.update(camera, player, performance.now() / 1000, true);
   hud.notify(`BACK ON YOUR FEET // ${refuge.name}. Your story progress is safe.`, 4); saveProgress();
@@ -389,39 +430,54 @@ function damageDrone(drone, amount) {
     sparks(drone.root.position, 0xff8c6f, 28); campaign.recordKill(drone.id, drone.group); campaignChanged();
   }
 }
+function hitTrafficCar(car, point) {
+  const result = traffic.hitCar(car);
+  if (!result.hit) return;
+  hitUntil = state.time + .13; audio.hit(); sparks(point, 0xbfe3d7, 6);
+  if (result.car) {
+    city.cars.push(result.car); scene.add(result.car.root);
+    hud.notify(input.touch ? 'VEHICLE STOPPED // Approach and tap USE to take the wheel.' : 'VEHICLE STOPPED // Approach and press E to take the wheel.', 4);
+  } else hud.notify(`VEHICLE HIT // ${result.hitsRemaining} more ${result.hitsRemaining === 1 ? 'hit' : 'hits'} to stop it.`, 1.4);
+}
 function shoot() {
   if (!state.started || state.paused || driving || player.climb || state.cooldown > 0 || state.reloading > 0) return;
   if (state.ammo === 0) { reload(); return; }
   state.ammo--; state.cooldown = .2; shotRecoil = 1; character.flash.visible = true; characterShot(character); audio.shot();
   raycaster.setFromCamera(new THREE.Vector2(0, .02), camera); const ray = raycaster.ray;
-  let hitDistance = Math.min(150, rayObstructionDistance(ray.origin, ray.direction, 150, city.spatial, city.cars)), hitDrone = null;
+  let hitDistance = Math.min(150, rayObstructionDistance(ray.origin, ray.direction, 150, city.spatial, city.cars)), hitDrone = null, hitCar = null;
+  for (const car of traffic.cars) {
+    const distance = rayBoxDistance(ray.origin, ray.direction, carCollider(car), hitDistance);
+    if (distance < hitDistance) { hitDistance = distance; hitCar = car; }
+  }
   for (const drone of drones) {
     if (drone.dead) continue;
     droneSphere.center.copy(drone.root.position);
     if (ray.intersectSphere(droneSphere, tempPoint)) {
       const distance = tempPoint.distanceTo(ray.origin);
-      if (distance < hitDistance) { hitDistance = distance; hitDrone = drone; }
+      if (distance < hitDistance) { hitDistance = distance; hitDrone = drone; hitCar = null; }
     }
   }
   // A small touch aim assist compensates for thumbs obscuring a tiny distant target.
-  if (!hitDrone && input.touch) {
+  if (!hitDrone && !hitCar && input.touch) {
     for (const drone of drones) {
       if (drone.dead) continue;
       vector.copy(drone.root.position).project(camera);
       const distance = drone.root.position.distanceTo(ray.origin);
       if (vector.z < 1 && Math.hypot(vector.x, vector.y - .02) < .11 && distance < hitDistance) {
         direction.subVectors(drone.root.position, ray.origin).normalize();
-        if (rayObstructionDistance(ray.origin, direction, distance, city.spatial, city.cars) === Infinity) { hitDrone = drone; hitDistance = distance; break; }
+        if (rayObstructionDistance(ray.origin, direction, distance, city.spatial, allCars()) === Infinity) { hitDrone = drone; hitDistance = distance; break; }
       }
     }
   }
   const endpoint = hitDrone ? hitDrone.root.position.clone() : ray.at(hitDistance, new THREE.Vector3());
   character.muzzle.getWorldPosition(muzzlePoint);
   direction.subVectors(endpoint, muzzlePoint); const length = direction.length(); direction.normalize();
-  const muzzleBlock = rayObstructionDistance(muzzlePoint, direction, length, city.spatial, city.cars);
-  if (muzzleBlock < length - .1) { endpoint.copy(muzzlePoint).addScaledVector(direction, muzzleBlock); hitDrone = null; }
+  const muzzleBlock = rayObstructionDistance(muzzlePoint, direction, length, city.spatial, allCars(), hitCar);
+  if (muzzleBlock < length - .1) { endpoint.copy(muzzlePoint).addScaledVector(direction, muzzleBlock); hitDrone = null; hitCar = null; }
   tracer(muzzlePoint, endpoint);
-  if (hitDrone) damageDrone(hitDrone, campaign.damage); else if (hitDistance < 150 || muzzleBlock < length) sparks(endpoint, 0xf9e8b7, 5);
+  if (hitDrone) damageDrone(hitDrone, campaign.damage);
+  else if (hitCar) hitTrafficCar(hitCar, endpoint);
+  else if (hitDistance < 150 || muzzleBlock < length) sparks(endpoint, 0xf9e8b7, 5);
 }
 
 function updatePlayer(dt) {
@@ -432,14 +488,23 @@ function updatePlayer(dt) {
     const previousSpeed = driving.speed;
     const colliders = nearbyColliders(driving.x, driving.z, 6, driving);
     const collision = moveWithCollisions(driving, delta.x, delta.z, 1.6, colliders);
+    const floor = groundAt(driving.x, driving.z, driving.y + .75);
+    if (floor >= driving.y - .8) { driving.y = floor; driving.velocityY = 0; }
+    else { driving.velocityY = (driving.velocityY ?? 0) - dt * 22; driving.y = Math.max(floor, driving.y + driving.velocityY * dt); }
     if (collision) {
       driving.speed *= -.14;
       if (Math.abs(previousSpeed) > 14 && state.time - state.damageAt > .7) damagePlayer(Math.min(16, Math.abs(previousSpeed) * .3));
+      // A fatal impact respawns on foot and clears driving immediately.
+      if (!driving) return;
     }
-    driving.root.position.set(driving.x, .04 + Math.sin(state.time * 35) * Math.abs(driving.speed) * .0005, driving.z);
-    driving.root.rotation.y = driving.yaw;
+    driving.root.position.set(driving.x, driving.y + .04 + Math.sin(state.time * 35) * Math.abs(driving.speed) * .0005, driving.z);
+    const frontY = groundAt(driving.x - Math.sin(driving.yaw) * 1.5, driving.z - Math.cos(driving.yaw) * 1.5, driving.y + 1);
+    const rearY = groundAt(driving.x + Math.sin(driving.yaw) * 1.5, driving.z + Math.cos(driving.yaw) * 1.5, driving.y + 1);
+    const rightY = groundAt(driving.x + Math.cos(driving.yaw), driving.z - Math.sin(driving.yaw), driving.y + 1);
+    const leftY = groundAt(driving.x - Math.cos(driving.yaw), driving.z + Math.sin(driving.yaw), driving.y + 1);
+    driving.root.rotation.set(clamp(Math.atan2(frontY - rearY, 3), -.3, .3), driving.yaw, clamp(Math.atan2(rightY - leftY, 2), -.15, .15), 'YXZ');
     for (const wheel of driving.wheels) wheel.rotation.x -= driving.speed * dt / .44;
-    player.x = driving.x; player.z = driving.z; player.yaw = driving.yaw;
+    player.x = driving.x; player.y = driving.y; player.z = driving.z; player.yaw = driving.yaw; player.groundY = floor;
     if (Math.abs(look.x) < .001 && Math.abs(driving.speed) > 1.8) cameraYaw += angleDelta(cameraYaw, driving.yaw) * (1 - Math.exp(-2.1 * dt));
     audio.update(driving.speed, !state.paused);
     for (const drone of drones) if (!drone.dead && drone.root.position.distanceTo(driving.root.position) < 3.5 && Math.abs(driving.speed) > 9) damageDrone(drone, 100);
@@ -459,7 +524,7 @@ function updatePlayer(dt) {
       player.speed = Math.hypot(player.x - beforeX, player.z - beforeZ) / dt;
       if (amount > .08 && !input.aiming && !input.firing) player.yaw += angleDelta(player.yaw, Math.atan2(-delta.x, -delta.z)) * (1 - Math.exp(-MOVEMENT.turn * dt));
       if (input.aiming || input.firing) player.yaw += angleDelta(player.yaw, cameraYaw) * (1 - Math.exp(-MOVEMENT.turn * dt));
-      const groundY = supportHeight(player.x, player.z, nearbyColliders(player.x, player.z, 2), player.y + .25);
+      const groundY = groundAt(player.x, player.z, player.y + .35);
       stepJump(player, dt, groundY);
     }
     player.climbCandidate = player.climb ? null : findClimbFace(player, colliders);
@@ -474,7 +539,7 @@ function updatePlayer(dt) {
   }
   const district = districtAt(player.x, player.z);
   if (campaign.discover(district.id)) rpgUI.announceDistrict(district);
-  if (!driving && player.y < 2) for (const place of WORLD_OBJECTS) if (place.type === 'transit' && Math.hypot(player.x - place.x, player.z - place.z) < 6) campaign.unlockTransit(place.id);
+  if (!driving) for (const place of WORLD_OBJECTS) if (place.type === 'transit' && Math.abs(player.y - place.y) < 2 && Math.hypot(player.x - place.x, player.z - place.z) < 6) campaign.unlockTransit(place.id);
   campaignChanged();
   if (state.time - lastSavedAt > 12) saveProgress();
 }
@@ -483,7 +548,26 @@ function updateCharacter(dt) {
   character.root.position.set(player.x, player.y + .05, player.z); character.root.rotation.y = player.yaw;
   const height = Math.max(0, player.y - player.groundY);
   animateCharacter(character, input?.aiming || input?.firing, dt, { speed: player.speed, climb: player.climb, jumpPhase: player.jumpPhase, jumpTime: player.jumpTime, height, groundHeight: player.groundY, verticalSpeed: player.velocityY, pitch: cameraPitch, reloading: state.reloading });
-  contactShadow.position.set(player.x, player.groundY + .03, player.z); contactShadow.visible = !driving && !player.climb; contactShadow.material.opacity = 1 / (1 + height * .5);
+}
+
+function updateContactShadows() {
+  const items = [];
+  for (const car of city.cars) if (car.root.visible && car.root.parent) {
+    items.push({ x: car.x, z: car.z, y: car.y + .055, yaw: car.yaw, pitch: car.root.rotation.x, roll: car.root.rotation.z, width: 3.2, length: 6 });
+  }
+  for (const car of traffic.cars) items.push({ x: car.x, z: car.z, y: car.y + .055, yaw: car.yaw, pitch: car.pitch, roll: car.roll, width: 3.2, length: 6 });
+  if (!driving && !player.climb) {
+    const height = Math.max(0, player.y - player.groundY);
+    items.push({ x: player.x, z: player.z, y: player.groundY + .055, width: 1.8, length: 1.8, opacity: 1 / (1 + height * .5) });
+  }
+  for (const { root } of crowd.people) if (root.visible && root.parent) {
+    items.push({ x: root.position.x, z: root.position.z, y: Math.max(.055, root.position.y + .015), width: 1.6, length: 1.6 });
+  }
+  for (const { root } of Object.values(worldLife.avatars)) if (root.visible && root.parent?.visible && root.parent.parent === scene) {
+    root.getWorldPosition(tempPoint);
+    items.push({ x: tempPoint.x, z: tempPoint.z, y: root.parent.position.y + .015, width: 1.6, length: 1.6 });
+  }
+  contactShadows.update(items);
 }
 
 function updateCamera(dt, snap = false) {
@@ -500,7 +584,7 @@ function updateCamera(dt, snap = false) {
   for (const box of city.spatial.along(cameraTarget, direction, length)) obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, { ...box, w: box.w === undefined ? undefined : box.w + .5, d: box.d === undefined ? undefined : box.d + .5, minX: box.minX - .25, maxX: box.maxX + .25, minZ: box.minZ - .25, maxZ: box.maxZ + .25 }, length));
   if (obstruction < length) desiredCamera.copy(cameraTarget).addScaledVector(direction, Math.max(.6, obstruction - .35));
   if (snap) camera.position.copy(desiredCamera); else camera.position.lerp(desiredCamera, 1 - Math.exp(-12 * dt));
-  const groundCorrection = Math.max(0, .55 - camera.position.y);
+  const groundCorrection = Math.max(0, terrainHeight(camera.position.x, camera.position.z) + .55 - camera.position.y);
   camera.position.y += groundCorrection;
   camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + shotRecoil * .045, cameraTarget.z);
   camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62, 8, dt); camera.updateProjectionMatrix();
@@ -529,7 +613,7 @@ function updateDrones(dt) {
     const targetZ = awake && drone.engaged ? player.z - 10 + Math.cos(drone.phase * .6) * 3 : drone.homeZ + Math.cos(drone.phase * .32) * 2.7;
     const moveX = damp(pos.x, targetX, .55, dt) - pos.x, moveZ = damp(pos.z, targetZ, .55, dt) - pos.z;
     moveWithCollisions(pos, moveX, moveZ, .9, city.spatial);
-    pos.y = 2.9 + Math.sin(drone.phase * 1.8) * .35;
+    pos.y = drone.homeY + 2.9 + Math.sin(drone.phase * 1.8) * .35;
     drone.root.rotation.y = awake ? Math.atan2(-(player.x - pos.x), -(player.z - pos.z)) : drone.phase * .3;
     drone.root.rotation.z = Math.sin(drone.phase * 1.2) * .045;
     for (const rotor of drone.rotors) rotor.rotation.y += dt * 42;
@@ -538,7 +622,7 @@ function updateDrones(dt) {
       if (drone.fireTimer <= 0) {
         drone.fireTimer = 2.1 + Math.random() * .6;
         direction.subVectors(targetPosition, pos).normalize();
-        const visible = rayObstructionDistance(pos, direction, distance, city.spatial, city.cars, driving) === Infinity;
+        const visible = rayObstructionDistance(pos, direction, distance, city.spatial, allCars(), driving) === Infinity;
         if (visible) { drone.engaged = true; tracer(pos, targetPosition, 0xff4967, .13); damagePlayer(driving ? 3 : 6); }
       }
     }
@@ -565,7 +649,7 @@ function updateWeather(dt) {
     let y = positions.getY(i) - dt * 15; if (y < 0) y = 37;
     positions.setY(i, y); positions.setY(i + 1, y + .52);
   }
-  positions.needsUpdate = true; city.rain.position.set(player.x, 0, player.z); city.motes.position.set(player.x, 0, player.z); city.motes.rotation.y += dt * .012;
+  positions.needsUpdate = true; city.rain.position.set(player.x, player.y, player.z); city.motes.position.set(player.x, player.y, player.z); city.motes.rotation.y += dt * .012;
 }
 
 function frame(now) {
@@ -576,17 +660,26 @@ function frame(now) {
   fps = damp(fps, Math.min(144, 1 / Math.max(rawDt, .001)), 2, dt);
   if (!state.paused) {
     state.time += dt;
+    traffic.update(dt, player, driving, camera, crowd.people);
     if (state.started) updatePlayer(dt);
     if (!state.started) updateCharacter(dt);
     updateCamera(dt); updateDrones(dt); updateEffects(dt); updateWeather(dt); crowd.update(dt, player, camera, RENDER_PROFILES[quality].actors); worldLife.update(dt, state.time, player, RENDER_PROFILES[quality].actors, camera);
   }
   sky.position.copy(camera.position);
   worldStream.update(camera, player, now / 1000);
+  // Retire distant abandoned takeovers only after they are outside the visible
+  // car range. Nearby cars and the vehicle being driven never disappear.
+  if (city.cars.length > 8) for (const car of [...city.cars]) {
+    if (city.cars.length <= 8) break;
+    if (car !== driving && Math.hypot(player.x - car.x, player.z - car.z) > 180) removeDrivableCar(car);
+  }
   for (const car of city.cars) {
     car.root.visible = car === driving || Math.hypot(player.x - car.x, player.z - car.z) < 135;
     if (car.root.visible && !car.root.parent) scene.add(car.root);
     if (!car.root.visible && car.root.parent) scene.remove(car.root);
   }
+  updateContactShadows();
+  shadows.update(now / 1000, player, state.paused, worldStream.stats.builds);
   const goal = objective(); hud.waypoint(camera, goal, player, vector, state.started && !state.paused);
   $('crosshair').classList.toggle('aim', !!input.aiming);
   if (now - lastUI > 85) {

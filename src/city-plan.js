@@ -2,6 +2,7 @@ import { seededRandom, orientedBox } from './physics.js';
 import { WORLD_LIMIT, OUTER_DISTRICTS, outerDistrictAt } from './world-config.js';
 import { SpatialGrid } from './spatial-grid.js';
 import { buildingColliders } from './architecture.js';
+import { samplePolyline, nearestRoadPoint, REGIONAL_INNER_EDGE, REGIONAL_GATEWAY_ROADS } from './roads.js';
 
 export const BUILDING_TYPES = ['terrace', 'apartment', 'office', 'warehouse', 'factory', 'civic', 'greenhouse', 'market'];
 export const typeMix = {
@@ -56,29 +57,38 @@ export function createCityPlan(reserved = []) {
   const random = seededRandom(219831), range = (a, b) => a + random() * (b - a), pick = a => a[Math.floor(random() * a.length)];
   const roads = [], buildings = [], trees = [], props = [], colliders = [];
   const occupied = new SpatialGrid(), roadGrid = new SpatialGrid();
-  const road = (name, control, width = 14, closed = false) => {
-    const points = sampleRoad(control, closed);
-    roads.push({ name, points, width });
+  const road = (name, control, width = 14, closed = false, smooth = true) => {
+    const points = smooth ? sampleRoad(control, closed) : samplePolyline(control, 6, closed);
+    const route = { name, points, width, closed }; roads.push(route);
     for (let i = 1; i < points.length; i++) {
       const a = points[i - 1], b = points[i], pad = width / 2 + 3;
       roadGrid.add({ minX: Math.min(a.x, b.x) - pad, maxX: Math.max(a.x, b.x) + pad, minZ: Math.min(a.z, b.z) - pad, maxZ: Math.max(a.z, b.z) + pad, a, b, pad });
     }
+    return route;
   };
-  road('Bay Circuit', [[-700, 0], [-480, -560], [0, -650], [510, -550], [710, -20], [580, 540], [0, 700], [-540, 570]], 18, true);
+  // The original grid ended in bare ground at +/-145. A clear perimeter street
+  // joins every stub to the four existing district avenues.
+  road('Old Quarter Circuit', [[-145, -145], [145, -145], [145, 145], [-145, 145]], 14, true, false);
+  const bay = road('Bay Circuit', [[-700, 0], [-480, -560], [0, -650], [510, -550], [710, -20], [580, 540], [0, 700], [-540, 570]], 18, true);
   road('Neighborhood Way', [[-380, 20], [-320, -300], [-65, -355], [305, -320], [360, -30], [310, 345], [65, 390], [-340, 325]], 14, true);
-  road('Garden Crescent', [[-550, 35], [-435, -420], [-30, -500], [440, -440], [545, -20], [440, 440], [30, 535], [-440, 445]], 12, true);
+  const garden = road('Garden Crescent', [[-550, 35], [-435, -420], [-30, -500], [440, -440], [545, -20], [440, 440], [30, 535], [-440, 445]], 12, true);
+  const join = (x, z, target) => { const p = nearestRoadPoint({ x, z }, [target]); return [p.x, p.z]; };
   road('Sunset Avenue', [[-270, 0], [-360, 0], [-490, 65], [-700, 0]], 18);
   road('Foundry Avenue', [[210, 0], [226, 22], [256, 22], [280, 0], [350, 0], [465, -70], [710, -20]], 18);
   road('Signal Avenue', [[0, -230], [26, -250], [26, -283], [0, -330], [-70, -425], [0, -650]], 18);
   road('Waterfront Drive', [[0, 270], [0, 325], [100, 470], [0, 700]], 18);
   for (const side of [-1, 1]) {
-    road('Regional North–South Link', [[0, side * 700], [0, side * 768], [0, side * 816]], 18);
-    road('Regional East–West Link', [[side * 710, 0], [side * 768, 0], [side * 816, 0]], 18);
+    road('Regional North–South Link', [[0, side < 0 ? -650 : 700], [0, side * REGIONAL_INNER_EDGE]], 18);
+    road('Regional East–West Link', [[side < 0 ? -700 : 710, side < 0 ? 0 : -20], [side * REGIONAL_INNER_EDGE, 0]], 18);
   }
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    road(`${sx < 0 ? 'West' : 'East'} ${sz < 0 ? 'North' : 'South'} Connector`, [[sx * 192, sz * 270], [sx * 215, sz * 320], [sx * 325, sz * 400], [sx * 490, sz * 560]], 14);
-    road('Local Crescent', [[sx * 270, sz * 128], [sx * 330, sz * 155], [sx * 440, sz * 260], [sx * 610, sz * 300]], 11);
-    road('Park Lane', [[sx * 200, sz * 485], [sx * 220, sz * 570], [sx * 320, sz * 660]], 10);
+    road(`${sx < 0 ? 'West' : 'East'} ${sz < 0 ? 'North' : 'South'} Connector`, [[sx * 192, sz * 270], [sx * 215, sz * 320], [sx * 325, sz * 400], join(sx * 490, sz * 560, bay)], 14);
+    road('Local Crescent', [[sx * 270, sz * 192], [sx * 330, sz * 155], [sx * 440, sz * 260], join(sx * 610, sz * 300, bay)], 11);
+    road('Park Lane', [join(sx * 200, sz * 485, garden), [sx * 220, sz * 570], join(sx * 320, sz * 660, bay)], 10);
+  }
+  for (const r of REGIONAL_GATEWAY_ROADS) for (let i = 1; i < r.points.length; i++) {
+    const a = r.points[i - 1], b = r.points[i], pad = r.width / 2 + 3;
+    roadGrid.add({ a, b, pad, minX: Math.min(a.x, b.x) - pad, maxX: Math.max(a.x, b.x) + pad, minZ: Math.min(a.z, b.z) - pad, maxZ: Math.max(a.z, b.z) + pad });
   }
   const onRoad = (box, clearance = 0) => roadGrid.query(box.minX - clearance, box.minZ - clearance, box.maxX + clearance, box.maxZ + clearance)
     .some(s => segmentHitsBox(s.a, s.b, box, s.pad + clearance));

@@ -1,6 +1,7 @@
-import { STREETS } from './city.js';
 import { WORLD_OBJECTS, DISTRICTS, districtAt } from './content.js';
 import { MAP_SPAN, COLORS, SYMBOLS } from './world.js';
+import { formatCurrency } from './currency.js';
+import { coastX } from './master-plan.js';
 
 const $ = id => document.getElementById(id);
 export class HUD {
@@ -20,7 +21,7 @@ export class HUD {
     const ammo = state.reloading > 0 ? '—' : state.ammo;
     if (this.lastAmmo !== ammo) { n.ammo.textContent = ammo; this.ammoBars.forEach((bar, i) => bar.classList.toggle('empty', i >= state.ammo)); this.lastAmmo = ammo; }
     n['reload-hint'].innerHTML = state.reloading > 0 ? 'RELOADING...' : '<kbd>R</kbd> RELOAD';
-    n.credits.textContent = data.credits.toLocaleString(); n['cred-value'].textContent = data.xp; n.level.textContent = String(1 + Math.floor(data.xp / 500)).padStart(2, '0');
+    n.credits.textContent = data.credits.toLocaleString('en-US'); n['cred-value'].textContent = data.xp; n.level.textContent = String(1 + Math.floor(data.xp / 500)).padStart(2, '0');
     n.fps.textContent = Math.round(fps);
     const climbing = !!player.climb;
     if (this.lastDriving !== !!driving || this.lastClimbing !== climbing) {
@@ -48,21 +49,23 @@ export class HUD {
     }
     if (performance.now() > this.notificationUntil) n.notification.classList.add('hidden');
     const distance = Math.round(Math.hypot(player.x - objective.x, player.z - objective.z));
-    n['objective-distance'].textContent = objective.hidden ? 'CITY OPEN' : `${distance} M AWAY`;
+    const rise = Math.round((objective.y ?? player.y) - player.y);
+    n['objective-distance'].textContent = objective.hidden ? 'CITY OPEN' : `${distance} M AWAY${Math.abs(rise) > 3 ? ` / ${rise > 0 ? '↑' : '↓'} ${Math.abs(rise)} M` : ''}`;
     n['mission-title'].textContent = objective.pinned ? objective.label : objective.quest?.title ?? 'The city is yours';
     n['mission-description'].textContent = objective.pinned ? 'A place worth finding. Your stories are waiting in the journal.' : objective.quest?.description ?? 'There are still voices to hear and streets to explore.';
     n['objective-text'].textContent = objective.text;
-    n['mission-reward'].textContent = objective.quest ? `+ ${objective.quest.reward} CREDITS` : 'J / FIELD JOURNAL';
+    n['mission-reward'].textContent = objective.quest ? `+${formatCurrency(objective.quest.reward)}` : 'J / FIELD JOURNAL';
     const district = districtAt(player.x, player.z).name.toUpperCase();
     n.district.textContent = district; n['map-district'].textContent = district;
   }
   waypoint(camera, objective, player, vector, active) {
     const el = this.nodes.waypoint;
     if (!active || objective.hidden) { el.classList.add('hidden'); return; }
-    vector.set(objective.x, objective.y ?? 3.5, objective.z).project(camera);
+    vector.set(objective.x, (objective.y ?? 0) + 3.5, objective.z).project(camera);
     if (vector.z > 1 || vector.z < -1 || Math.abs(vector.x) > .88 || Math.abs(vector.y) > .83 || Math.hypot(player.x - objective.x, player.z - objective.z) < 4) { el.classList.add('hidden'); return; }
     el.classList.remove('hidden'); el.style.left = `${(vector.x * .5 + .5) * innerWidth}px`; el.style.top = `${(-vector.y * .5 + .5) * innerHeight}px`; el.style.transform = 'translate(-50%,-100%)';
-    this.nodes['waypoint-label'].textContent = objective.label; this.nodes['waypoint-distance'].textContent = `${Math.round(Math.hypot(player.x - objective.x, player.z - objective.z))} M`;
+    const rise = Math.round((objective.y ?? player.y) - player.y);
+    this.nodes['waypoint-label'].textContent = objective.label; this.nodes['waypoint-distance'].textContent = `${Math.round(Math.hypot(player.x - objective.x, player.z - objective.z))} M${Math.abs(rise) > 3 ? ` / ${rise > 0 ? '↑' : '↓'} ${Math.abs(rise)} M` : ''}`;
   }
   drawMap(player, yaw, drones, objective, expanded = false) {
     const ctx = expanded ? this.full : this.map, w = ctx.canvas.width, h = ctx.canvas.height;
@@ -91,10 +94,12 @@ export class HUD {
       } else { ctx.beginPath(); ctx.arc(x, y, place.type === 'contact' ? 4.5 : 3, 0, Math.PI * 2); ctx.fill(); }
     }
     for (const car of this.city.cars) {
+      if (expanded && scale < .12 && Math.hypot(player.x - car.x, player.z - car.z) > 300) continue;
       const [x, y] = point(car.x, car.z); ctx.fillStyle = '#80ded7'; ctx.save(); ctx.translate(x, y); ctx.rotate(-car.yaw); ctx.fillRect(-2.7, -4.5, 5.4, 9); ctx.restore();
     }
     for (const drone of drones) {
       if (drone.dead) continue;
+      if (expanded && scale < .12 && Math.hypot(player.x - drone.root.position.x, player.z - drone.root.position.z) > 300) continue;
       const [x, y] = point(drone.root.position.x, drone.root.position.z); ctx.fillStyle = '#ff647e'; ctx.beginPath(); ctx.arc(x, y, 3.5, 0, Math.PI * 2); ctx.fill();
     }
     const [px, py] = point(player.x, player.z);
@@ -102,8 +107,8 @@ export class HUD {
     ctx.fillStyle = '#dfff85'; ctx.strokeStyle = '#263d2b'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(6.5, 7); ctx.lineTo(0, 3); ctx.lineTo(-6.5, 7); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.restore();
     if (expanded) {
       ctx.font = '600 10px Barlow, Arial'; ctx.fillStyle = '#b5cbcc'; ctx.textAlign = 'center';
-      DISTRICTS.forEach((d, i) => { if (view.span > 2400 && i < 8) return; ctx.fillStyle = this.campaign.data.discovered.includes(d.id) ? '#bed5cc' : '#6f8a95'; ctx.fillText(d.name.toUpperCase(), ...point(d.x, d.z + (d.id === 'ridge' ? -65 : 40))); });
-      ctx.textAlign = 'left'; ctx.font = '10px Barlow, Arial'; ctx.fillStyle = '#7a999d'; ctx.fillText('N ↑', 20, 27); ctx.fillText(`${view.span >= MAP_SPAN ? '11 KM × 11 KM' : `${Math.round(view.span)} M VIEW`} / 16 DISTRICTS`, 20, h - 20);
+      DISTRICTS.forEach(d => { ctx.fillStyle = this.campaign.data.discovered.includes(d.id) ? '#bed5cc' : '#6f8a95'; ctx.fillText(d.name.toUpperCase(), ...point(d.x, d.z + 40)); });
+      ctx.textAlign = 'left'; ctx.font = '10px Barlow, Arial'; ctx.fillStyle = '#7a999d'; ctx.fillText('N ↑', 20, 27); ctx.fillText(`${view.span >= MAP_SPAN ? '11 KM × 11 KM' : `${Math.round(view.span)} M VIEW`} / ${DISTRICTS.length} DISTRICTS`, 20, h - 20);
     }
   }
   drawBaseMap(ctx, w, h, cx, cz, scale, expanded) {
@@ -116,24 +121,40 @@ export class HUD {
       const c = canvas.getContext('2d'), point = (px, pz) => [canvas.width / 2 + (px - x) * scale, canvas.height / 2 + (pz - z) * scale];
       const rx = canvas.width / 2 / scale, rz = canvas.height / 2 / scale;
       c.fillStyle = '#0a1822'; c.fillRect(0, 0, canvas.width, canvas.height);
-      c.strokeStyle = '#314955'; c.lineWidth = 16 * scale; c.beginPath();
-      for (const s of [...STREETS, -192, 192]) {
-        const extent = [-192, 0, 192].includes(s) ? 275 : 145;
-        c.moveTo(...point(s, s === 0 ? -230 : -extent)); c.lineTo(...point(s, extent)); c.moveTo(...point(-extent, s)); c.lineTo(...point(s === 0 ? 210 : extent, s));
-      }
-      c.stroke();
-      const segments = this.city.roadIndex.query(x - rx, z - rz, x + rx, z + rz).concat(this.city.metropolis.roadIndex.query(x - rx, z - rz, x + rx, z + rz));
-      for (const arterial of [false, true]) {
-        c.beginPath(); c.lineWidth = Math.max(.65, (arterial ? 18 : 11) * scale); c.strokeStyle = arterial ? '#506773' : '#263e4b';
+      c.fillStyle = '#092a3c'; c.beginPath();
+      c.moveTo(...point(6000, -6000));
+      for (let shore = -6000; shore <= 6000; shore += 120) c.lineTo(...point(coastX(shore), shore));
+      c.lineTo(...point(6000, 6000)); c.closePath(); c.fill();
+      const segments = this.city.roadIndex.query(x - rx, z - rz, x + rx, z + rz);
+      for (const layer of ['local', 'secondary', 'primary', 'expressway', 'ramp', 'pedestrian']) {
+        const minimumWidth = { expressway: 2, primary: 1.7, secondary: .85, local: .35 }[layer] ?? .65;
+        c.beginPath(); c.lineWidth = Math.max(minimumWidth, ({ expressway: 30, primary: 26, secondary: 21 }[layer] ?? 10) * scale);
+        c.strokeStyle = { local: '#344e59', secondary: '#6b9bc0', primary: '#b375a4', expressway: '#f18c65', ramp: '#e6ad79', pedestrian: '#7ad8c5' }[layer];
         for (const s of segments) {
-          if ((s.width >= 16) !== arterial || scale < .12 && !arterial) continue;
+          const roadClass = s.road?.class ?? s.class;
+          const kind = s.kind === 'pedestrian' || roadClass === 'pedestrian' ? 'pedestrian' : roadClass === 'ramp' ? 'ramp' : roadClass === 'expressway' ? 'expressway' : roadClass === 'primary' ? 'primary' : roadClass === 'secondary' && s.width >= 20 ? 'secondary' : 'local';
+          if (kind !== layer || scale < .12 && kind === 'pedestrian') continue;
           c.moveTo(...point(s.a.x, s.a.z)); c.lineTo(...point(s.b.x, s.b.z));
         }
         c.stroke();
       }
+      if (scale >= .12) for (const s of this.city.masterPlan.supports) {
+        c.strokeStyle = '#7ad8c5'; c.fillStyle = '#457c7699';
+        if (s.a) { c.lineWidth = Math.max(1, s.width * scale); c.beginPath(); c.moveTo(...point(s.a.x, s.a.z)); c.lineTo(...point(s.b.x, s.b.z)); c.stroke(); }
+        else { const [px, pz] = point(s.minX, s.minZ); c.fillRect(px, pz, s.width * scale, s.depth * scale); }
+      }
+      if (expanded && scale < .16) {
+        c.textAlign = 'center'; c.font = 'bold 10px Arial';
+        for (const interchange of this.city.masterPlan.interchanges) {
+          const [px, pz] = point(interchange.x, interchange.z);
+          c.fillStyle = '#091820'; c.strokeStyle = '#eeccb0'; c.lineWidth = 1.3; c.beginPath(); c.arc(px, pz, 8, 0, Math.PI * 2); c.fill(); c.stroke();
+          c.fillStyle = '#f5ead7'; c.fillText(interchange.number, px, pz + 3.5);
+        }
+        c.textAlign = 'left';
+      }
       if (rx < 1500 && rz < 1500) {
         const blocks = this.city.metropolis.area(x - rx, z - rz, x + rx, z + rz);
-        for (const f of [...this.city.plan.features, ...blocks.flatMap(b => b.features)]) {
+        for (const f of [...(this.city.plan.features ?? []), ...blocks.flatMap(b => b.features ?? [])]) {
           const [px, py] = point(f.x, f.z);
           c.fillStyle = f.type === 'garden' ? '#376455' : f.type === 'court' ? '#38626b' : '#685d50';
           c.fillRect(px - 20 * scale, py - 20 * scale, 40 * scale, 40 * scale);

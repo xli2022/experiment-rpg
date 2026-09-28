@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { material, createCar } from './models.js';
 import { seededRandom, WORLD_LIMIT, orientedBox } from './physics.js';
 import { buildingColliders } from './architecture.js';
+import { createTerrainMaterials } from './terrain-materials.js';
 
 export const BLOCKS = [-96, -32, 32, 96];
 export const STREETS = [-128, -64, 0, 64, 128];
@@ -41,13 +42,12 @@ function noiseTexture() {
     const v = 65 + rand() * 65; img.data[i] = v; img.data[i + 1] = v; img.data[i + 2] = v; img.data[i + 3] = 255;
   }
   ctx.putImageData(img, 0, 0);
-  const tex = new THREE.CanvasTexture(canvas); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(100, 100);
+  const tex = new THREE.CanvasTexture(canvas); tex.wrapS = tex.wrapT = THREE.RepeatWrapping; tex.repeat.set(100, 100); tex.anisotropy = 8;
   return tex;
 }
 
-export function signTexture(title, subtitle, color, vertical = false) {
-  const canvas = document.createElement('canvas'); canvas.width = vertical ? 256 : 1024; canvas.height = vertical ? 1024 : 384;
-  const ctx = canvas.getContext('2d'), w = canvas.width, h = canvas.height;
+export function drawSign(ctx, title, subtitle, color, vertical = false) {
+  const w = vertical ? 256 : 1024, h = vertical ? 1024 : 384;
   ctx.fillStyle = '#09131c'; ctx.fillRect(0, 0, w, h);
   ctx.fillStyle = color + '19'; ctx.fillRect(8, 8, w - 16, h - 16);
   ctx.strokeStyle = color; ctx.lineWidth = 4; ctx.strokeRect(12, 12, w - 24, h - 24);
@@ -61,6 +61,11 @@ export function signTexture(title, subtitle, color, vertical = false) {
     ctx.shadowBlur = 0; ctx.font = '28px "Barlow", sans-serif'; ctx.fillText(subtitle, w / 2, h * .77, w - 70);
     ctx.fillRect(35, h - 32, 95, 4); ctx.fillRect(w - 130, h - 32, 95, 4);
   }
+}
+
+export function signTexture(title, subtitle, color, vertical = false) {
+  const canvas = document.createElement('canvas'); canvas.width = vertical ? 256 : 1024; canvas.height = vertical ? 1024 : 384;
+  drawSign(canvas.getContext('2d'), title, subtitle, color, vertical);
   const tex = new THREE.CanvasTexture(canvas); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
   return tex;
 }
@@ -78,7 +83,8 @@ export function createCity(scene) {
   const concrete = material(0x202c3b, 0x070d18, .15);
   const roofMat = material(0x192331);
   const metal = material(0x334453, 0, 0, .45, .7);
-  const sidewalk = material(0x2c3b46, 0x102126, .16, .72, .25);
+  const terrain = createTerrainMaterials();
+  const sidewalk = terrain.paving; sidewalk.color.set(0x42515a);
   const curb = material(0x495253);
   const cyan = material(0x79e9e5, 0x1fbec9, 2.5);
   const pink = material(0xff549e, 0xdc126c, 2.4);
@@ -86,7 +92,9 @@ export function createCity(scene) {
   const white = material(0x9baaa3, 0x667c7e, .15);
   const noise = noiseTexture();
   noise.repeat.set(WORLD_LIMIT / 4, WORLD_LIMIT / 4);
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LIMIT * 2 + 400, WORLD_LIMIT * 2 + 400), new THREE.MeshStandardMaterial({ color: 0x202e3d, roughness: .55, metalness: .25, roughnessMap: noise, bumpMap: noise, bumpScale: .035 }));
+  // Dark bump noise must not multiply roughness: it made asphalt nearly mirror-smooth,
+  // producing sharp, shimmering light reflections as the driving camera moved.
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LIMIT * 2 + 400, WORLD_LIMIT * 2 + 400), new THREE.MeshStandardMaterial({ color: 0x202e3d, roughness: .86, metalness: 0, bumpMap: noise, bumpScale: .015 }));
   ground.userData.resident = true;
   ground.rotation.x = -Math.PI / 2; ground.position.y = -.02; ground.receiveShadow = true; scene.add(ground);
   const glow = glowTexture();
@@ -235,7 +243,7 @@ export function createCity(scene) {
   for (let i = 0; i < 160; i++) motesArray.set([range(-50, 50), range(.3, 9), range(-50, 50)], i * 3);
   motesGeometry.setAttribute('position', new THREE.BufferAttribute(motesArray, 3));
   const motes = new THREE.Points(motesGeometry, new THREE.PointsMaterial({ color: 0xc3ffe4, size: .055, transparent: true, opacity: .55, depthWrite: false })); scene.add(motes);
-  return { colliders, buildings, cars, mapInfo, rain, motes, signs, reflection };
+  return { colliders, buildings, cars, mapInfo, rain, motes, signs, reflection, ground };
 }
 
 export function addSky(scene) {

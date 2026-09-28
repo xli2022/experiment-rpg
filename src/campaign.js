@@ -1,9 +1,12 @@
 import { QUESTS, WORLD_OBJECTS, DISTRICTS, UPGRADES, ENCOUNTERS, ENDINGS, questById, placeById } from './content.js';
 import { WORLD_LIMIT } from './world-config.js';
 import { MOVEMENT } from './locomotion.js';
+import { formatCurrency } from './currency.js';
+import { terrainHeight } from './master-plan.js';
 
 export const SAVE_KEY = 'afterlight.last-signal.v1';
 export const SAVE_VERSION = 1;
+export const WORLD_REVISION = 5;
 const integer = (value, fallback = 0, max = 1000000) => Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : fallback;
 const uniqueKnown = (value, allowed) => Array.isArray(value) ? [...new Set(value.filter(v => allowed.includes(v)))] : [];
 const droneIds = ENCOUNTERS.flatMap(e => e.positions.map((_, i) => `${e.id}-${i}`));
@@ -12,7 +15,7 @@ export function freshProgress() {
   return {
     credits: 1250, xp: 0, salvage: 0, medkits: 2, upgrades: { damage: 0, armor: 0, sprint: 0 },
     reputation: { community: 0, helix: 0 }, quests: { 'dead-air': { status: 'active', step: 0, runs: 0 } },
-    tracked: 'dead-air', collected: [], discovered: ['neon'], transit: [], met: [], kills: [], cleared: [],
+    tracked: 'dead-air', collected: [], discovered: [placeById('home').district], transit: [], met: [], kills: [], cleared: [],
     choices: {}, ending: null, elapsed: 0, rest: 'home',
   };
 }
@@ -26,7 +29,7 @@ export function restoreProgress(raw) {
   for (const faction of ['community', 'helix']) data.reputation[faction] = integer(raw.reputation?.[faction], 0, 100);
   data.collected = uniqueKnown(raw.collected, WORLD_OBJECTS.filter(p => ['cache', 'memory'].includes(p.type)).map(p => p.id));
   data.discovered = uniqueKnown(raw.discovered, DISTRICTS.map(d => d.id));
-  if (!data.discovered.includes('neon')) data.discovered.unshift('neon');
+  if (!data.discovered.includes(placeById('home').district)) data.discovered.unshift(placeById('home').district);
   data.transit = uniqueKnown(raw.transit, WORLD_OBJECTS.filter(p => p.type === 'transit').map(p => p.id));
   data.met = uniqueKnown(raw.met, WORLD_OBJECTS.filter(p => p.type === 'contact').map(p => p.id));
   data.kills = uniqueKnown(raw.kills, droneIds);
@@ -52,8 +55,8 @@ export function readSave(storage) {
     const save = JSON.parse(text);
     if (save.version !== SAVE_VERSION || !save.progress || typeof save.progress !== 'object') throw new Error('Unsupported save');
     const p = save.position;
-    const position = p && Number.isFinite(p.x) && Number.isFinite(p.z) && Math.abs(p.x) < WORLD_LIMIT && Math.abs(p.z) < WORLD_LIMIT ? { x: p.x, z: p.z, ...(Number.isFinite(p.y) && p.y >= 0 && p.y < 200 ? { y: p.y } : {}) } : null;
-    return { progress: restoreProgress(save.progress), position, loaded: true };
+    const position = p && Number.isFinite(p.x) && Number.isFinite(p.z) && Math.abs(p.x) < WORLD_LIMIT && Math.abs(p.z) < WORLD_LIMIT ? { x: p.x, z: p.z, ...(Number.isFinite(p.y) && p.y >= -40 && p.y < 500 ? { y: p.y } : {}) } : null;
+    return { progress: restoreProgress(save.progress), position, worldRevision: save.worldRevision ?? 1, loaded: true };
   } catch {
     return { progress: freshProgress(), position: null, loaded: false, warning: 'Saved progress could not be loaded. This session starts fresh.' };
   }
@@ -61,7 +64,7 @@ export function readSave(storage) {
 
 export function writeSave(storage, progress, position) {
   try {
-    storage.setItem(SAVE_KEY, JSON.stringify({ version: SAVE_VERSION, progress, position: { x: position.x, z: position.z, ...(Number.isFinite(position.y) ? { y: position.y } : {}) } }));
+    storage.setItem(SAVE_KEY, JSON.stringify({ version: SAVE_VERSION, worldRevision: WORLD_REVISION, progress, position: { x: position.x, z: position.z, ...(Number.isFinite(position.y) ? { y: position.y } : {}) } }));
     return true;
   } catch { return false; }
 }
@@ -93,7 +96,7 @@ export class Campaign {
     p.status = 'complete'; p.runs++;
     this.data.credits += q.reward; this.data.xp += q.xp; this.data.medkits += q.medkits ?? 0;
     if (q.faction) this.data.reputation[q.faction] = Math.min(100, this.data.reputation[q.faction] + 10);
-    this.changed(`COMPLETED // ${q.title} · +${q.reward} credits · +${q.xp} XP`);
+    this.changed(`COMPLETED // ${q.title} · +${formatCurrency(q.reward)} · +${q.xp} XP`);
     if (q.next && !this.data.quests[q.next]) this.data.quests[q.next] = { status: 'active', step: 0, runs: 0 };
     if (this.data.tracked === id) this.data.tracked = q.next ?? QUESTS.find(other => this.status(other.id) === 'active')?.id ?? null;
   }
@@ -139,7 +142,7 @@ export class Campaign {
     const item = placeById(id);
     if (!item || !['cache', 'memory'].includes(item.type) || this.data.collected.includes(id)) return false;
     this.data.collected.push(id);
-    if (item.type === 'cache') { this.data.salvage += 3; this.data.credits += 65; this.changed('SALVAGE FOUND // +3 components · +65 credits'); }
+    if (item.type === 'cache') { this.data.salvage += 3; this.data.credits += 65; this.changed(`SALVAGE FOUND // +3 components · +${formatCurrency(65)}`); }
     else { this.data.xp += 60; this.changed(`MEMORY RECOVERED // ${item.name} · +60 XP`); }
     this.reconcile(); return true;
   }
@@ -155,11 +158,11 @@ export class Campaign {
   recordKill(id, group) {
     if (!droneIds.includes(id) || this.data.kills.includes(id)) return false;
     this.data.kills.push(id); this.data.credits += 75; this.data.xp += 35; this.data.salvage++;
-    this.changed('ROGUE DISABLED // +75 credits · +1 component');
+    this.changed(`ROGUE DISABLED // +${formatCurrency(75)} · +1 component`);
     const encounter = ENCOUNTERS.find(e => e.id === group);
     if (encounter && this.data.kills.filter(k => k.startsWith(`${group}-`)).length === encounter.positions.length && !this.data.cleared.includes(group)) {
       this.data.cleared.push(group); this.data.credits += 200; this.data.xp += 120;
-      this.changed(`STREETS RECLAIMED // ${encounter.name} · +200 credits`);
+      this.changed(`STREETS RECLAIMED // ${encounter.name} · +${formatCurrency(200)}`);
     }
     this.reconcile(); return true;
   }
@@ -190,19 +193,20 @@ export class Campaign {
   objective(player = { x: 0, z: 0 }) {
     if (this.pin) { const p = placeById(this.pin); if (p) return { ...p, label: p.name, text: 'Custom destination', pinned: true }; }
     const q = questById(this.data.tracked), step = q && this.current(q.id);
-    if (!step) return { x: 0, z: 0, hidden: true, label: 'Explore Vesper', text: 'Find stories, memories and unclaimed streets.' };
+    if (!step) return { x: 0, z: 0, hidden: true, label: 'Explore Afterlight', text: 'Find stories, memories and unclaimed streets.' };
     let target = step.target;
     if (step.type === 'choice') target = step.target === 'records' ? 'sable' : 'uplink';
     if (step.type === 'kill') {
       const encounter = ENCOUNTERS.find(e => e.id === step.target);
-      const remaining = encounter.positions.map(([x, z], i) => ({ x, z, id: `${encounter.id}-${i}` })).filter(d => !this.data.kills.includes(d.id));
+      const remaining = encounter.positions.map(([x, z], i) => ({ x, y: encounter.heights?.[i] ?? terrainHeight(x, z), z, id: `${encounter.id}-${i}` })).filter(d => !this.data.kills.includes(d.id));
       const nearest = remaining.sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0];
       if (nearest) return { ...nearest, label: encounter.name, text: `${step.text} (${this.progressCount(step)}/${step.count})`, quest: q };
     }
     if (['memories', 'salvage', 'districts'].includes(step.type)) {
       const candidates = step.type === 'districts' ? DISTRICTS.filter(d => !this.data.discovered.includes(d.id)) : WORLD_OBJECTS.filter(p => p.type === (step.type === 'memories' ? 'memory' : 'cache') && !this.data.collected.includes(p.id));
       const nearest = [...candidates].sort((a, b) => Math.hypot(player.x - a.x, player.z - a.z) - Math.hypot(player.x - b.x, player.z - b.z))[0];
-      return { ...(nearest ?? player), label: nearest?.name ?? 'Explore the city', text: `${step.text} (${this.progressCount(step)}/${step.count})`, quest: q };
+      const destination = nearest ?? player;
+      return { ...destination, y: destination.y ?? terrainHeight(destination.x, destination.z), label: nearest?.name ?? 'Explore the city', text: `${step.text} (${this.progressCount(step)}/${step.count})`, quest: q };
     }
     const place = placeById(target);
     return { ...(place ?? player), label: place?.name ?? q.title, text: step.text, quest: q };

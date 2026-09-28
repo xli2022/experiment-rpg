@@ -6,6 +6,9 @@ import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { WORLD_OBJECTS } from './content.js';
 import { buildingStructure } from './architecture.js';
 import { PUBLIC_SPACES, publicSpaceParts, publicSpaceColliders } from './public-spaces.js';
+import { createGroundGeometry } from './ground.js';
+import { createTerrainMaterials } from './terrain-materials.js';
+import { CORE_ROADS } from './roads.js';
 
 function palette() {
   const canvas = document.createElement('canvas'); canvas.width = 128; canvas.height = 256;
@@ -34,13 +37,29 @@ function palette() {
     facade,
     glass: new THREE.MeshStandardMaterial({ color: 0x5c858c, emissive: 0x152d3b, emissiveIntensity: .6, roughness: .35, metalness: .6 }),
     glow: new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false }),
-    road: new THREE.MeshStandardMaterial({ color: 0x263540, roughness: .8, metalness: .1 }),
+    road: new THREE.MeshStandardMaterial({ color: 0x263540, roughness: .86, metalness: 0 }),
   };
 }
 const districtColors = { sunset: 0xc8a892, cypress: 0x97b1a3, signal: 0x8396b1, civic: 0xc1beb0, foundry: 0x8c8274, southbank: 0x93a9b9, promenade: 0xacc3c0, lantern: 0xc39397 };
 
 export function createCityScenery(scene, city, stream) {
   const mats = palette(), plan = createCityPlan(WORLD_OBJECTS), metro = new Metropolis(WORLD_OBJECTS);
+  // One resident floor owns each location. Overlaid streamed tiles could expose a
+  // different-colored base or compete with it in the depth buffer while driving.
+  const terrain = createTerrainMaterials();
+  const groundTerrain = ['paving', 'grass'].map(kind => {
+    const material = terrain[kind].clone(); material.vertexColors = true;
+    material.onBeforeCompile = terrain[kind].onBeforeCompile;
+    material.customProgramCacheKey = terrain[kind].customProgramCacheKey;
+    return material;
+  });
+  const isGreen = (x, z) => metro.hasParkInArea(x, z, x + CHUNK_SIZE, z + CHUNK_SIZE) || x < -320 && z < -250 && z > -760;
+  city.ground.geometry.dispose();
+  city.ground.geometry = createGroundGeometry({ colorAt: (x, z) => {
+    return isGreen(x, z) ? 0x304d45 : 0x42545c;
+  }, surfaceAt: (x, z) => isGreen(x, z) ? 'grass' : 'paving' });
+  city.ground.rotation.set(0, 0, 0); city.ground.position.y = 0;
+  city.ground.material = [city.ground.material, ...groundTerrain];
   plan.features = [];
   // Pocket parks fill the original region's unused corners and repeat throughout
   // the metropolis. Keep story actors, driveable avenues and landmarks clear.
@@ -64,9 +83,9 @@ export function createCityScenery(scene, city, stream) {
   city.mapInfo.push(...plan.buildings);
   city.mapRoads = plan.roads; city.mapView = { x: 0, z: 0, span: 1200 };
   city.roadIndex = new SpatialGrid([], 96);
-  for (const road of plan.roads) for (let i = 1; i < road.points.length; i++) {
+  for (const road of [...CORE_ROADS, ...plan.roads]) for (let i = 1; i < road.points.length; i++) {
     const a = road.points[i - 1], b = road.points[i];
-    city.roadIndex.add({ a, b, width: road.width, minX: Math.min(a.x, b.x) - 14, maxX: Math.max(a.x, b.x) + 14, minZ: Math.min(a.z, b.z) - 14, maxZ: Math.max(a.z, b.z) + 14 });
+    city.roadIndex.add({ a, b, width: road.width, authored: road.authored, minX: Math.min(a.x, b.x) - 14, maxX: Math.max(a.x, b.x) + 14, minZ: Math.min(a.z, b.z) - 14, maxZ: Math.max(a.z, b.z) + 14 });
   }
   const inCell = (p, c) => Math.floor(p.x / CHUNK_SIZE) === c.cx && Math.floor(p.z / CHUNK_SIZE) === c.cz;
   const core = new Map();
@@ -178,15 +197,17 @@ export function createCityScenery(scene, city, stream) {
       for (const b of data.buildings) if (inCell(b, c)) building(b, add);
       for (const t of data.trees) if (inCell(t, c)) tree(t, add);
       for (const p of data.props) if (inCell(p, c)) prop(p, add);
-      for (const f of data.features) if (inCell(f, c)) for (const p of publicSpaceParts(f.type)) add(mats[p.mat], f.x + p.x, p.y, f.z + p.z, p.w, p.h, p.d, 0, p.tint, p.detail, p.shape);
+      for (const f of data.features) if (inCell(f, c)) for (const p of publicSpaceParts(f.type)) {
+        let mat = mats[p.mat];
+        if (p.mat === 'stone' && p.h < .13 && Math.min(p.w, p.d) >= 2) {
+          mat = p.y > .5 ? terrain.soil : f.type === 'garden' && p.w === 40 && p.d === 40 ? terrain.grass : terrain.paving;
+        }
+        add(mat, f.x + p.x, p.y, f.z + p.z, p.w, p.h, p.d, 0, p.tint, p.detail, p.shape);
+      }
     }
     const segments = city.roadIndex.query(c.x - 1, c.z - 1, c.x + CHUNK_SIZE + 1, c.z + CHUNK_SIZE + 1)
       .concat(metro.roadIndex.query(c.x - 30, c.z - 30, c.x + CHUNK_SIZE + 30, c.z + CHUNK_SIZE + 30));
-    for (const s of segments) if (inCell({ x: (s.a.x + s.b.x) / 2, z: (s.a.z + s.b.z) / 2 }, c)) roadSegment(s, add);
-    if (Math.max(Math.abs(c.x), Math.abs(c.z)) > 285) {
-      const green = blocks.some(b => b.park) || c.x < -320 && c.z < -250 && c.z > -760;
-      add(mats.stone, c.x + CHUNK_SIZE / 2, -.014, c.z + CHUNK_SIZE / 2, CHUNK_SIZE, .01, CHUNK_SIZE, 0, green ? 0x304d45 : 0x34444c);
-    }
+    for (const s of segments) if (!s.authored && inCell({ x: (s.a.x + s.b.x) / 2, z: (s.a.z + s.b.z) / 2 }, c)) roadSegment(s, add);
     // Perimeter fence is generated only in the boundary cells.
     for (let t = 0; t < CHUNK_SIZE; t += 12) for (const axis of ['x', 'z']) for (const sign of [-1, 1]) {
       const edge = sign * (WORLD_LIMIT - 1), x = axis === 'x' ? edge : c.x + t, z = axis === 'z' ? edge : c.z + t;

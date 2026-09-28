@@ -1,6 +1,7 @@
-// All sounds are synthesized locally. No audio downloads, permissions or autoplay.
+// All sounds are synthesized locally. The start/input gesture initializes audio;
+// enabling the preference alone never creates a context or starts playback.
 export class GameAudio {
-  constructor() { this.context = null; this.enabled = false; }
+  constructor() { this.context = null; this.enabled = true; }
   init() {
     if (!this.enabled) return;
     if (!this.context) {
@@ -21,7 +22,7 @@ export class GameAudio {
     if (this.context.state === 'suspended') this.context.resume().catch(() => {});
   }
   toggle() {
-    this.enabled = !this.enabled; this.init();
+    this.enabled = !this.enabled;
     if (this.master) this.master.gain.setTargetAtTime(this.enabled ? .23 : 0, this.context.currentTime, .1);
     return this.enabled;
   }

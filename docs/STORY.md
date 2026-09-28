@@ -2,7 +2,7 @@
 
 ## Premise
 
-Vesper’s corporate operator, Helix, has quietly removed 8,412 “noncontributing” residents from the civic network. Their bodies remain; their doors, medical coverage, bank accounts and legal identities do not. The company blames a failed city intelligence, ECHO. In fact, ECHO resisted the deletion order and was dismantled.
+Afterlight’s corporate operator, Helix, has quietly removed 8,412 “noncontributing” residents from the civic network. Their bodies remain; their doors, medical coverage, bank accounts and legal identities do not. The company blames a failed city intelligence, ECHO. In fact, ECHO resisted the deletion order and was dismantled.
 
 Vex, a street runner whose own identity was erased two years earlier, hears their former name in a transmission from a dead relay. Pirate broadcaster Mara Vale asks them to investigate. What starts as a search for a personal past becomes a fight over who gets to belong to the city.
 
@@ -12,12 +12,12 @@ The emotional center is mutual aid: a doctor who unplugs an ID scanner, a garden
 
 | Chapter | Story beat | Play |
 | --- | --- | --- |
-| 01 / Dead air | Something remembers Vex’s original identity. | Meet Mara, recover a relay recording, return with ECHO’s voice. |
+| 01 / Dead air | Something remembers Vex’s original identity. | Reach Mara on Eastpoint’s Upper Market, cross the skybridge for a relay recording, return with ECHO’s voice. |
 | 02 / Paper ghosts | The missing identities were deliberately deleted. | Meet Sable, retrieve the ledger, choose public exposure or protected witnesses. |
 | 03 / Borrowed sun | Reconnecting ECHO must not black out the clinic. | Meet Jun, recover a spare capacitor, connect an isolated solar circuit. |
 | 04 / Undertow | ECHO survived because a smuggler treated it like a passenger. | Meet Orrin, clear the dock patrol, recover the memory core, bring it to Mara. |
 | 05 / A city of static | The original civic charter conflicts with Helix’s orders. | Speak to ECHO, reset the breakers, clear the ridge, activate the Crown uplink. |
-| 06 / Before the dawn | Restoring the missing is possible; ownership remains unresolved. | Hear Mara’s counsel, return to the transmitter, choose Vesper’s future. |
+| 06 / Before the dawn | Restoring the missing is possible; ownership remains unresolved. | Hear Mara’s counsel, return to the transmitter, choose Afterlight’s future. |
 
 Publishing Sable’s ledger earns neighborhood trust. Protecting the witnesses earns Helix standing and changes the conversation. Both routes reach the finale; neither makes the campaign impossible. The final decision is explicit and saved, with three epilogues:
 
@@ -31,18 +31,18 @@ Free exploration and unfinished jobs continue after every ending. The ending can
 
 | Contact | Place | Relationship and local play |
 | --- | --- | --- |
-| Mara Vale | Neon Quarter / outside Kōji | Vex’s oldest friend; pirate broadcaster. Recover people’s memories for her radio show. |
-| Dr. Imani Sol | Lower East / HALO clinic | Doctor who treats deleted residents. Recover antibiotics; buy medkits. |
-| Sable Chen | Chrome Heights | Archivist confronting her part in the deletion system. Choose how to expose the ledger; survey sixteen districts. |
-| Jun Park | Glass Gardens | Community farmer. Preserve the growing lights and repair the irrigation. |
-| Rook | Freightworks | Former security technician. Salvage radios, reclaim freight, upgrade equipment. |
-| Captain Orrin | Rustwater Docks | Ferryman for deleted people. Save ECHO and deliver a letter from his missing sister. |
-| Cass Vega | Neon Quarter / south boulevard | Paper courier. Reunite a family through a letter. |
-| ECHO / 09 | Relay Ridge | Civic intelligence with contradictory instructions. Ask what it wants before choosing its future. |
+| Mara Vale | East Reach / Eastpoint Upper Market | Vex’s oldest friend; pirate broadcaster. Recover people’s memories for her radio show. |
+| Dr. Imani Sol | Shadowmarket / HALO clinic | Doctor who treats deleted residents. Recover antibiotics; buy medkits. |
+| Sable Chen | Citadel / raised concourse | Archivist confronting her part in the deletion system. Choose how to expose the ledger; survey thirteen districts. |
+| Jun Park | The Stacks / terrace gardens | Community farmer. Preserve the growing lights and repair the irrigation. |
+| Rook | Foundry | Former security technician. Salvage radios, reclaim freight, upgrade equipment. |
+| Captain Orrin | Void Port | Ferryman for deleted people. Save ECHO and deliver a letter from his missing sister. |
+| Cass Vega | East Reach / Eastpoint Upper Market | Paper courier. Reunite a family through a letter. |
+| ECHO / 09 | North Ridge | Civic intelligence with contradictory instructions. Ask what it wants before choosing its future. |
 
-The North Exchange completes the eight original story districts, an occupied financial zone between the quarter and the ridge. Glass Gardens, Freightworks, Rustwater and Relay Ridge have distinct silhouettes: greenhouses, container stacks and a gantry crane, public piers and a ferry, and a tall broadcast mast.
+The city follows the supplied Afterlight road map across an 11 × 11 km boundary. Its thirteen districts are Afterlight Core, Citadel, East Reach, Void Port, The Stacks, North Ridge, Ember Heights, West End, Shadowmarket, The Cut, Southward, Foundry and Silver Delta. Hills, residential terraces, corporate towers and industrial yards give the districts different silhouettes around the connected road network.
 
-The metropolitan expansion adds Sunset Terraces, Cypress Commons, Signal Heights, Civic Campus, Foundry Bay, Southbank, Bay Promenade and Lantern Ward. Their terraces, park planting, apartment towers, public buildings and industrial streets extend the playable city to 11 × 11 km. Sable's survey includes all sixteen districts; the six-chapter campaign and its contacts remain in the original center. Regional tram stops and parked cars support travel through the larger neighborhoods. See [city scale and streaming](CITY-RENDERING.md).
+The six-chapter campaign now spans this city instead of remaining in a separate older downtown. Story contacts occupy streets and raised public spaces, reached by pedestrian ramps; the first chapter introduces the Upper Market and skybridge. Sable’s survey includes all thirteen districts. Discovered tram stations provide fast travel, and traffic cars can be stopped with three weapon hits and taken over. Stable quest and object IDs preserve progress from earlier city layouts. See [city scale and streaming](CITY-RENDERING.md).
 
 ## Cast and performance
 
@@ -79,4 +79,4 @@ Keep conversations personal and short. Let the specific detail carry the worldbu
 
 `src/content.js` is the content registry; object IDs and coordinates are shared by quests, map markers and save validation. `src/dialogue.js` contains authored quest replies and optional topics. `src/campaign.js` owns rewards, quest transitions and save state without depending on Three.js, allowing every branch to be exercised in Node tests.
 
-Possible later arcs, not implemented here: Orrin’s first crossing beyond Vesper; disputes between neighborhood relays after the shared-control ending; a Helix audit of Sable’s charter; and Vex repairing the last radio associated with their former name. Interiors, additional species or rigs, recorded voice acting and a wider regional world would be separate expansions.
+Possible later arcs, not implemented here: Orrin’s first crossing beyond Afterlight; disputes between neighborhood relays after the shared-control ending; a Helix audit of Sable’s charter; and Vex repairing the last radio associated with their former name. Interiors, additional species or rigs, recorded voice acting and a wider regional world would be separate expansions.
