@@ -138,6 +138,7 @@ async function init() {
 function setupUI() {
   setupFullscreen($('fullscreen-button'), {
     notify: message => hud.notify(message, 5),
+    showHelp: showFullscreenHelp,
     restoreFocus: () => { if (state.started && !state.paused) canvas.focus({ preventScroll: true }); },
   });
   $('start-button').addEventListener('click', start);
@@ -181,6 +182,18 @@ function setupUI() {
     else if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
     else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
   });
+}
+function showFullscreenHelp({ installed = false } = {}) {
+  const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  $('service-kicker').textContent = 'DISPLAY / AFTERLIGHT';
+  $('service-title').textContent = installed ? 'Home Screen mode.' : 'Play without browser bars.';
+  $('service-content').innerHTML = installed
+    ? '<p class="service-note">Afterlight is already running as a Home Screen app. Your device controls the status bar and home indicator. Use the normal app switcher to leave the game.</p>'
+    : ios
+      ? '<p class="service-note">This browser cannot expand the game directly. Open it as a Home Screen app to hide Safari’s browser bars.</p><ol class="fullscreen-steps"><li>Open this page in <strong>Safari</strong>.</li><li>Tap <strong>Share</strong>, then <strong>Add to Home Screen</strong>.</li><li>Keep <strong>Open as Web App</strong> enabled if shown, tap <strong>Add</strong>, then launch <strong>Afterlight</strong> from its new icon.</li></ol><p class="service-note">The Home Screen app may have a separate save from this browser. Your current story remains saved here.</p>'
+      : '<p class="service-note">Fullscreen was blocked or is unavailable in this browser. Open the game directly in your mobile browser, outside an embedded preview, and try again.</p><p class="service-note">You can also use the browser menu to <strong>Install app</strong> or <strong>Add to Home Screen</strong>, then launch Afterlight from its icon. The installed app opens without browser bars where supported.</p>';
+  $('service-content').insertAdjacentHTML('beforeend', '<button class="rpg-button accent" data-action="close">Back to the game</button>');
+  openModal('service');
 }
 function start() {
   state.started = true; state.paused = false; document.body.classList.add('playing'); $('welcome').classList.add('hidden');
@@ -491,7 +504,7 @@ function shoot() {
 }
 
 function updatePlayer(dt) {
-  const axes = input.axes(), look = input.look(dt);
+  const axes = input.axes(), look = input.look();
   cameraYaw -= look.x; cameraPitch = clamp(cameraPitch + look.y, -.65, 1.03);
   if (driving) {
     const delta = stepVehicle(driving, axes.y, axes.x, input.keys.has('Space'), dt);

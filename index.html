@@ -4,9 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#090d18" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="Afterlight" />
     <meta name="description" content="Afterlight: The Last Signal. A cyberpunk RPG with thirteen districts, a branching story, local quests, and a city worth saving." />
     <title>AFTERLIGHT — The Last Signal</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="stylesheet" href="/src/style.css" />
     <link rel="stylesheet" href="/src/rpg.css" />
     <link rel="stylesheet" href="/src/mobile.css" />
@@ -73,12 +79,11 @@
         <h2>A city forgot.<br>You remember<span>.</span></h2>
         <p class="welcome-copy">Thirteen districts. Thousands of missing names.<br>Find the people behind the static.<br>Decide who gets to write the morning.</p>
         <button id="start-button" class="primary-button">ENTER THE CITY <span>↗</span></button>
-        <p class="start-hint"><span class="desktop-only">WASD to move · Mouse to look</span><span class="touch-only">Left stick to move · Right stick or drag to look</span></p>
+        <p class="start-hint"><span class="desktop-only">WASD to move · Mouse to look</span><span class="touch-only">Left stick to move · Drag the right side to look</span></p>
       </div>
       <div id="touch-controls" class="touch-controls hidden">
         <div id="look-zone" aria-label="Drag to look around"></div>
         <div id="joystick" class="virtual-stick" aria-label="Movement joystick"><div id="joystick-thumb" class="stick-thumb"></div><span class="joystick-label">MOVE</span></div>
-        <div id="look-joystick" class="virtual-stick" aria-label="Camera look joystick"><div id="look-thumb" class="stick-thumb"></div><span class="joystick-label">LOOK</span></div>
         <div class="touch-actions" aria-label="Game actions">
           <button id="touch-interact" aria-label="Talk, use, or enter vehicle"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4H4v16h5m3-12 4 4-4 4m-5-4h13"/></svg><span>USE</span></button>
           <button id="touch-climb" class="hidden" aria-label="Climb wall or release">CLIMB</button>

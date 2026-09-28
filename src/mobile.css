@@ -1,12 +1,14 @@
 /* Touch controls use screen-space sizes: no transforms shrinking hit targets. */
 #fullscreen-button:disabled{opacity:.4;cursor:default}
+.fullscreen-steps{padding-left:22px;font-size:13px;line-height:1.7;color:#b8cfce}
+.fullscreen-steps li{padding:5px 0 9px 5px}
+.fullscreen-steps strong{color:#e3f4b4}
 body.touch{
   --touch-left:calc(env(safe-area-inset-left, 0px) + 16px);
   --touch-right:calc(env(safe-area-inset-right, 0px) + 16px);
   --touch-bottom:calc(env(safe-area-inset-bottom, 0px) + 18px);
   --move-size:128px;
-  --look-size:116px;
-  --actions-bottom:calc(var(--touch-bottom) + var(--look-size) + 18px);
+  --actions-bottom:calc(var(--touch-bottom) + 6px);
   --status-bottom:calc(var(--actions-bottom) + 120px);
 }
 body.touch .top-actions{top:calc(env(safe-area-inset-top, 0px) + 12px);right:var(--touch-right);gap:4px}
@@ -32,7 +34,7 @@ body.touch .map-caption{font-size:8px;margin-top:5px;letter-spacing:0}
 body.touch .weather{display:none}
 
 body.touch #look-zone{left:40%;top:18%;z-index:0}
-body.touch #joystick,body.touch #look-joystick{
+body.touch #joystick{
   position:absolute;bottom:var(--touch-bottom);width:var(--move-size);height:var(--move-size);
   pointer-events:auto;touch-action:none;border-radius:50%;border:1px solid #c1e3d452;
   background:radial-gradient(circle at center,#8ed6c714 0 38%,transparent 39%),#09192380;
@@ -40,22 +42,17 @@ body.touch #joystick,body.touch #look-joystick{
   -webkit-tap-highlight-color:transparent;
 }
 body.touch #joystick{left:var(--touch-left)}
-body.touch #look-joystick{right:var(--touch-right);width:var(--look-size);height:var(--look-size);border-color:#7ee6e35c}
 body.touch .virtual-stick::before,body.touch .virtual-stick::after{content:'';position:absolute;display:block;background:#c1e3d417;pointer-events:none}
 body.touch .virtual-stick::before{left:10px;right:10px;top:50%;height:1px}
 body.touch .virtual-stick::after{top:10px;bottom:10px;left:50%;width:1px}
-body.touch #joystick-thumb,body.touch #look-thumb{
+body.touch #joystick-thumb{
   position:absolute;left:50%;top:50%;width:44px;height:44px;border-radius:50%;
   transform:translate(-50%,-50%);background:#c8ebdc30;border:1px solid #c9edcf99;
   box-shadow:0 2px 10px #0003;pointer-events:none;z-index:1;
 }
-body.touch #look-thumb{width:40px;height:40px;background:#7ee6e327;border-color:#7ee6e3aa}
 body.touch .joystick-label{position:absolute;left:0;right:0;bottom:10px;text-align:center;font-size:8px;font-weight:600;letter-spacing:1.5px;color:#c3d9d19c;pointer-events:none}
-body.touch #look-joystick .joystick-label{color:#9fdcd6b3}
-body.touch .virtual-stick.active{border-color:var(--acid);background-color:#16312aa6}
-body.touch #look-joystick.active{border-color:var(--cyan);background-color:#103238a6}
-body.touch .virtual-stick.active .stick-thumb{background:#d9ff864d;border-color:var(--acid)}
-body.touch #look-joystick.active .stick-thumb{background:#7ee6e359;border-color:var(--cyan)}
+body.touch #joystick.active{border-color:var(--acid);background-color:#16312aa6}
+body.touch #joystick.active #joystick-thumb{background:#d9ff864d;border-color:var(--acid)}
 
 body.touch .touch-actions{
   right:var(--touch-right);bottom:var(--actions-bottom);width:auto;height:auto;transform:none;
@@ -114,7 +111,7 @@ body.touch .map-navigation span{flex-basis:100%;margin-left:0}
 body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3px;margin-top:0;color:#aec6c8}
 
 @media(max-width:380px){
-  body.touch{--touch-left:calc(env(safe-area-inset-left, 0px) + 12px);--touch-right:calc(env(safe-area-inset-right, 0px) + 12px);--move-size:112px;--look-size:108px}
+  body.touch{--touch-left:calc(env(safe-area-inset-left, 0px) + 12px);--touch-right:calc(env(safe-area-inset-right, 0px) + 12px);--move-size:112px}
   body.touch .brand-mark,body.touch .brand-sub{display:none}
   body.touch .brand h1{font-size:18px;letter-spacing:1px}
   body.touch .top-actions{gap:3px}
@@ -127,11 +124,11 @@ body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3
 @media(max-height:700px) and (orientation:portrait){
   body.touch{--status-bottom:calc(var(--actions-bottom) + 115px)}
   body.touch .interaction{top:calc(env(safe-area-inset-top, 0px) + 196px);bottom:auto;left:50%;transform:translateX(-50%);max-width:calc(100% - 24px)}
-  body.touch .climb-panel,body.touch .climb-panel.near-wall{bottom:var(--status-bottom);width:150px;left:auto;right:var(--touch-right);transform:none}
+  body.touch .climb-panel,body.touch .climb-panel.near-wall{bottom:calc(var(--status-bottom) + 88px);width:150px;left:auto;right:var(--touch-right);transform:none}
   body.touch .climb-panel p{display:none}
 }
 @media(max-height:560px) and (orientation:landscape){
-  body.touch{--move-size:112px;--look-size:112px;--touch-bottom:calc(env(safe-area-inset-bottom, 0px) + 16px);--actions-bottom:calc(var(--touch-bottom) + var(--look-size) + 14px)}
+  body.touch{--move-size:112px;--touch-bottom:calc(env(safe-area-inset-bottom, 0px) + 16px)}
   body.touch .brand{top:calc(env(safe-area-inset-top, 0px) + 19px)}
   body.touch .mission-panel{top:calc(env(safe-area-inset-top, 0px) + 71px);width:190px}
   body.touch .mission-panel h2{font-size:19px;margin:5px 0}
@@ -140,7 +137,7 @@ body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3
   body.touch .minimap-button{height:clamp(44px,calc(100dvh - 320px),72px)}
   body.touch .map-caption{display:none}
   body.touch .player-panel{left:calc(var(--touch-left) + var(--move-size) + 18px);bottom:var(--touch-bottom);width:136px}
-  body.touch .weapon-panel,body.touch .driving-panel{right:calc(var(--touch-right) + var(--look-size) + 18px);bottom:var(--touch-bottom);width:112px}
+  body.touch .weapon-panel,body.touch .driving-panel{right:var(--touch-right);bottom:var(--status-bottom);width:112px}
   body.touch .medkit-hud{margin-top:6px}
   body.touch .interaction{top:auto;left:50%;bottom:calc(var(--touch-bottom) + 130px);transform:translateX(-50%);max-width:240px}
   body.touch .climb-panel,body.touch .climb-panel.near-wall{left:50%;right:auto;bottom:calc(var(--touch-bottom) + 125px);width:240px;transform:translateX(-50%)}

@@ -3,7 +3,7 @@ import { clamp } from './physics.js';
 export class Input {
   constructor(canvas, callbacks) {
     this.keys = new Set(); this.lookX = 0; this.lookY = 0; this.firing = false; this.aiming = false;
-    this.joyX = 0; this.joyY = 0; this.lookJoyX = 0; this.lookJoyY = 0; this.sensitivity = 1; this.dragging = false;
+    this.joyX = 0; this.joyY = 0; this.sensitivity = 1; this.dragging = false;
     this.enabled = false; this.canvas = canvas; this.callbacks = callbacks;
     canvas.tabIndex = 0;
     this.touch = matchMedia('(pointer: coarse)').matches;
@@ -89,7 +89,6 @@ export class Input {
       control(id, update, update, () => { setAxes(0, 0); thumb.style.transform = 'translate(-50%,-50%)'; });
     };
     stick('joystick', 'joystick-thumb', (x, y) => { this.joyX = x; this.joyY = -y; });
-    stick('look-joystick', 'look-thumb', (x, y) => { this.lookJoyX = x; this.lookJoyY = y; });
     let lx = 0, ly = 0;
     control('look-zone', e => { lx = e.clientX; ly = e.clientY; }, e => {
       this.lookX += (e.clientX - lx) * 1.8; this.lookY += (e.clientY - ly) * 1.8; lx = e.clientX; ly = e.clientY;
@@ -106,7 +105,7 @@ export class Input {
     try { const pending = this.canvas.requestPointerLock(); pending?.catch(() => {}); } catch { /* Drag-look remains available when pointer lock is blocked. */ }
   }
   clear() {
-    this.keys.clear(); this.firing = this.aiming = this.dragging = false; this.joyX = this.joyY = this.lookX = this.lookY = this.lookJoyX = this.lookJoyY = 0;
+    this.keys.clear(); this.firing = this.aiming = this.dragging = false; this.joyX = this.joyY = this.lookX = this.lookY = 0;
     this.resetTouch();
   }
   setEnabled(enabled) {
@@ -120,10 +119,9 @@ export class Input {
     const y = (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) + this.joyY;
     const length = Math.max(1, Math.hypot(x, y)); return { x: x / length, y: y / length };
   }
-  look(dt = 1 / 60) {
-    const elapsed = Number.isFinite(dt) ? clamp(dt, 0, .1) : 0;
-    const result = { x: (clamp(this.lookX, -350, 350) * .0024 + this.lookJoyX * 2.1 * elapsed) * this.sensitivity,
-      y: (clamp(this.lookY, -350, 350) * .002 + this.lookJoyY * 1.5 * elapsed) * this.sensitivity };
+  look() {
+    const result = { x: clamp(this.lookX, -350, 350) * .0024 * this.sensitivity,
+      y: clamp(this.lookY, -350, 350) * .002 * this.sensitivity };
     this.lookX = this.lookY = 0; return result;
   }
 }

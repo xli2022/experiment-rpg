@@ -19,7 +19,10 @@ function harness(t, { touch = false, requestLock, callbacks = {} } = {}) {
   }
   const canvas = element('CANVAS'), window = element(), nodes = new Map();
   const document = { ...element(), body: element('BODY'), pointerLockElement: null,
-    getElementById(id) { if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id); },
+    getElementById(id) {
+      if (id === 'look-joystick' || id === 'look-thumb') return null;
+      if (!nodes.has(id)) nodes.set(id, element()); return nodes.get(id);
+    },
     exitPointerLock() { this.pointerLockElement = null; },
   };
   let requests = 0;
@@ -127,24 +130,26 @@ test('movement has a quiet center, smooth partial speed, and bounded diagonal th
   assert.equal(stick.hasPointerCapture(1), false); assert.equal(stick.dataset.active, 'false');
 });
 
-test('movement, continuous camera steering, drag look, and firing retain independent fingers', t => {
+test('movement, drag look, and firing retain independent fingers without continuous camera drift', t => {
   let fires = 0;
   const { input, document } = harness(t, { touch: true, callbacks: { fire() { fires++; } } }); input.setEnabled(true);
-  const move = document.getElementById('joystick'), aim = document.getElementById('look-joystick');
+  const move = document.getElementById('joystick');
   const fire = document.getElementById('touch-fire'), drag = document.getElementById('look-zone');
   move.dispatch('pointerdown', { pointerId: 1, clientX: 50, clientY: 22 });
-  aim.dispatch('pointerdown', { pointerId: 2, clientX: 78, clientY: 50 });
+  drag.dispatch('pointerdown', { pointerId: 2, clientX: 10, clientY: 10 });
   fire.dispatch('pointerdown', { pointerId: 3 });
   assert.deepEqual(input.axes(), { x: 0, y: 1 }); assert.equal(input.firing, true); assert.equal(fires, 1);
-  const heldLook = input.look(1 / 60); assert.ok(heldLook.x > 0);
-  assert.deepEqual(input.look(1 / 60), heldLook, 'a held right stick turns without requiring more pointermove events');
-  drag.dispatch('pointerdown', { pointerId: 4, clientX: 10, clientY: 10 });
-  drag.dispatch('pointermove', { pointerId: 4, clientX: 20, clientY: 15 });
-  const mixedLook = input.look(1 / 60); assert.ok(mixedLook.x > heldLook.x && mixedLook.y > 0);
-  aim.dispatch('pointerdown', { pointerId: 5, clientX: 22, clientY: 50 });
-  aim.dispatch('pointerup', { pointerId: 5 }); assert.deepEqual(input.look(1 / 60), heldLook);
-  aim.dispatch('lostpointercapture', { pointerId: 2 });
-  assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 });
+  assert.deepEqual(input.look(), { x: 0, y: 0 }, 'holding a stationary finger does not rotate the camera');
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 20, clientY: 15 });
+  const look = input.look(); assert.ok(look.x > 0 && look.y > 0);
+  assert.deepEqual(input.look(), { x: 0, y: 0 }, 'each drag movement is consumed once');
+  drag.dispatch('pointerdown', { pointerId: 4, clientX: 100, clientY: 100 });
+  drag.dispatch('pointerup', { pointerId: 4 });
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 30, clientY: 20 });
+  assert.deepEqual(input.look(), look, 'another finger cannot change the drag origin or cancel its owner');
+  drag.dispatch('lostpointercapture', { pointerId: 2 });
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 90, clientY: 90 });
+  assert.deepEqual(input.look(), { x: 0, y: 0 });
   assert.deepEqual(input.axes(), { x: 0, y: 1 }); assert.equal(input.firing, true);
   fire.dispatch('pointercancel', { pointerId: 3 }); assert.equal(input.firing, false);
   assert.deepEqual(input.axes(), { x: 0, y: 1 });
@@ -176,34 +181,28 @@ test('held touch actions reject extra fingers and only their owner can release t
   }
 });
 
-test('camera-stick turn rate is independent of frame rate and shares look sensitivity', t => {
+test('drag look applies sensitivity, accumulates movement, and bounds abrupt input', t => {
   const { input, document } = harness(t, { touch: true }); input.setEnabled(true);
-  const stick = document.getElementById('look-joystick');
-  stick.dispatch('pointerdown', { pointerId: 1, clientX: 51, clientY: 51 });
-  assert.deepEqual(input.look(.1), { x: 0, y: 0 }, 'camera also has a quiet center');
-  stick.dispatch('pointermove', { pointerId: 1, clientX: 100, clientY: 100 });
-  const turns = [30, 60, 120].map(fps => {
-    const total = { x: 0, y: 0 };
-    for (let frame = 0; frame < fps; frame++) { const look = input.look(1 / fps); total.x += look.x; total.y += look.y; }
-    return total;
-  });
-  assert.ok(turns[0].x > 1 && turns[0].y > .5, 'held deflection makes a useful continuous turn');
-  for (const turn of turns) for (const axis of ['x', 'y']) assert.ok(Math.abs(turn[axis] - turns[0][axis]) < 1e-10);
-  assert.deepEqual(input.look(0), { x: 0, y: 0 }, 'a zero-duration update does not rotate the camera');
-  const normal = input.look(1 / 60); input.sensitivity = .5;
-  const half = input.look(1 / 60); assert.equal(half.x, normal.x / 2); assert.equal(half.y, normal.y / 2);
-  stick.dispatch('pointerup', { pointerId: 1 });
   const drag = document.getElementById('look-zone');
+  input.sensitivity = .5;
   drag.dispatch('pointerdown', { pointerId: 2, clientX: 0, clientY: 0 });
-  drag.dispatch('pointermove', { pointerId: 2, clientX: 10, clientY: 10 }); const halfDrag = input.look(1 / 60);
-  input.sensitivity = 1; drag.dispatch('pointermove', { pointerId: 2, clientX: 20, clientY: 20 }); const normalDrag = input.look(1 / 60);
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 10, clientY: 10 }); const halfDrag = input.look();
+  input.sensitivity = 1; drag.dispatch('pointermove', { pointerId: 2, clientX: 20, clientY: 20 }); const normalDrag = input.look();
   assert.equal(normalDrag.x, halfDrag.x * 2); assert.equal(normalDrag.y, halfDrag.y * 2);
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 25, clientY: 25 });
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 30, clientY: 30 });
+  assert.deepEqual(input.look(), normalDrag, 'multiple events in a frame retain their total motion');
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 5000, clientY: -5000 });
+  const bounded = input.look(); assert.ok(bounded.x > 0 && bounded.x < 1 && bounded.y < 0 && bounded.y > -1);
+  drag.dispatch('pointercancel', { pointerId: 2 });
+  drag.dispatch('pointermove', { pointerId: 2, clientX: 0, clientY: 0 });
+  assert.deepEqual(input.look(), { x: 0, y: 0 });
 });
 
 test('menu, blur, and hidden-page resets release all touch captures and reject stale gestures', t => {
   let blurs = 0, jumps = 0;
   const { input, document, window } = harness(t, { touch: true, callbacks: { blur() { blurs++; }, jump() { jumps++; } } });
-  const ids = ['joystick', 'look-joystick', 'look-zone', 'touch-fire', 'touch-jump'];
+  const ids = ['joystick', 'look-zone', 'touch-fire', 'touch-jump'];
   for (const reason of ['menu', 'blur', 'hidden']) {
     input.setEnabled(true);
     for (const [i, id] of ids.entries()) document.getElementById(id).dispatch('pointerdown', { pointerId: i + 1, clientX: 70, clientY: 20 });
@@ -218,7 +217,7 @@ test('menu, blur, and hidden-page resets release all touch captures and reject s
     }
     input.setEnabled(true);
     for (const [i, id] of ids.entries()) document.getElementById(id).dispatch('pointermove', { pointerId: i + 1, clientX: 100, clientY: 100 });
-    assert.deepEqual(input.axes(), { x: 0, y: 0 }); assert.deepEqual(input.look(.1), { x: 0, y: 0 });
+    assert.deepEqual(input.axes(), { x: 0, y: 0 }); assert.deepEqual(input.look(), { x: 0, y: 0 });
     assert.equal(input.firing, false); assert.equal(input.keys.has('Space'), false);
   }
   assert.equal(blurs, 2); assert.equal(jumps, 3);
