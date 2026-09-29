@@ -1,5 +1,6 @@
 import { boxCoordinates, circleHitsBox, clamp, overlapsHeight, surfaceHeightAt } from './physics.js';
 import { resetFall } from './jump.js';
+import { footprintVertices, polygonFaces } from './building-footprints.js';
 
 export const CLIMB = Object.freeze({ reach: 1.15, offset: .48, speed: 3.4, fast: 5.1, sideways: 2.3, mantleTime: .72 });
 const identity = box => box.id ?? `${box.minX}:${box.minZ}:${box.maxX}:${box.maxZ}:${box.maxY}`;
@@ -20,15 +21,21 @@ export function findClimbFace(player, boxes, yaw = player.yaw ?? 0, requireFacin
     if (!box.climbable || box.maxY - (box.minY ?? 0) < 2.5 || player.y > box.maxY - .5 || player.y + 1.7 < (box.minY ?? 0)) continue;
     const p = boxCoordinates(player.x, player.z, box), c = Math.cos(box.yaw ?? 0), s = Math.sin(box.yaw ?? 0);
     const cx = box.x ?? (box.minX + box.maxX) / 2, cz = box.z ?? (box.minZ + box.maxZ) / 2;
-    for (const axis of ['x', 'z']) for (const side of [-1, 1]) {
-      const half = (axis === 'x' ? p.w : p.d) / 2, width = axis === 'x' ? p.d : p.w;
-      const gap = p[axis] * side - half;
-      if (gap < .05 || gap > CLIMB.reach || Math.abs(p[axis === 'x' ? 'z' : 'x']) > width / 2 - .4) continue;
-      const nx = axis === 'x' ? side * c : side * s, nz = axis === 'x' ? -side * s : side * c;
+    const faces = box.faces ?? polygonFaces(footprintVertices('rectangle', p.w, p.d));
+    const worldFaces = faces.map((f, faceIndex) => {
+      const nx = f.nx * c + f.nz * s, nz = -f.nx * s + f.nz * c;
+      return { x: cx + f.x * c + f.z * s, z: cz - f.x * s + f.z * c,
+        nx, nz, tx: nz, tz: -nx, width: f.width, faceIndex };
+    });
+    for (const [index, face] of faces.entries()) {
+      const gap = (p.x - face.x) * face.nx + (p.z - face.z) * face.nz;
+      const along = (p.x - face.x) * face.nz - (p.z - face.z) * face.nx;
+      if (gap < .05 || gap > CLIMB.reach || Math.abs(along) > face.width / 2 - (box.faces ? 0 : .4)) continue;
+      const { nx, nz } = worldFaces[index];
       if (requireFacing && -Math.sin(yaw) * nx - Math.cos(yaw) * nz > -.3) continue;
       if (best && best.gap <= gap) continue;
-      const x = cx + nx * half, z = cz + nz * half, tx = nz, tz = -nx;
-      best = { x, z, nx, nz, tx, tz, width, gap, roofY: box.maxY, baseY: box.minY ?? 0, id: identity(box), u: (player.x - x) * tx + (player.z - z) * tz };
+      best = { ...worldFaces[index], gap, roofY: box.maxY, baseY: box.minY ?? 0, id: identity(box), u: along,
+        ...(box.faces ? { perimeterFaces: worldFaces } : {}) };
     }
   }
   return best;
@@ -72,16 +79,27 @@ export function stepClimb(player, axes, dt, boxes, fast = false) {
     if (t === 1) { player.climb = null; player.groundY = player.y = state.end.y; player.velocityY = 0; player.jumpPhase = ''; resetFall(player); return 'roof'; }
     return 'mantle';
   }
-  const u = clamp(state.u + axes.x * CLIMB.sideways * dt, -state.width / 2 + .5, state.width / 2 - .5);
+  let face = state, u = state.u + axes.x * CLIMB.sideways * dt;
+  if (state.perimeterFaces) {
+    const faces = state.perimeterFaces;
+    // Follow adjacent faces so round walls do not trap a shimmy in one tiny
+    // tessellation segment. Hexagonal corners use the same perimeter path.
+    for (let i = 0; i < faces.length && Math.abs(u) > face.width / 2; i++) {
+      const forward = u > 0, excess = u - (forward ? 1 : -1) * face.width / 2;
+      face = faces[(face.faceIndex + (forward ? -1 : 1) + faces.length) % faces.length];
+      u = (forward ? -1 : 1) * face.width / 2 + excess;
+    }
+  } else u = clamp(u, -state.width / 2 + .5, state.width / 2 - .5);
   const y = Math.max(state.baseY, player.y + axes.y * (fast ? CLIMB.fast : CLIMB.speed) * dt);
-  const x = state.x + state.tx * u + state.nx * CLIMB.offset, z = state.z + state.tz * u + state.nz * CLIMB.offset;
+  const x = face.x + face.tx * u + face.nx * CLIMB.offset, z = face.z + face.tz * u + face.nz * CLIMB.offset;
   state.blocked = blocked(x, y, z, boxes, state.id);
   state.speed = 0;
   if (!state.blocked) {
-    const dy = y - player.y, du = u - state.u;
+    const dy = y - player.y, du = face === state ? u - state.u : axes.x * CLIMB.sideways * dt;
     state.speed = Math.hypot(dy, du) / dt;
     state.phase += (dy || du) / .85;
-    player.x = x; player.z = z; player.y = y; state.u = u;
+    player.x = x; player.z = z; player.y = y; Object.assign(state, face, { u });
+    player.yaw = Math.atan2(state.nx, state.nz);
   }
   if (player.y <= state.baseY + .02 && axes.y < 0) { dropClimb(player); return 'ground'; }
   if (player.y >= state.roofY - 1.15 && axes.y > 0) {

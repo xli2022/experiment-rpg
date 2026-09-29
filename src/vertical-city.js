@@ -3,7 +3,10 @@ import { signTexture } from './city.js';
 import { createTerrainMaterials } from './terrain-materials.js';
 import { buildingSign, createBuildingSignMaterial } from './building-signs.js';
 import { createInfrastructureIndex, geometryVolume, infrastructureIntersections, roadSolidRecipes, supportSolidRecipe } from './infrastructure-clearance.js';
-import { buildingStructure } from './architecture.js';
+import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetails } from './building-design.js';
+import { createFacadeMaterial, facadeUV } from './building-materials.js';
+import { DISTRICT_ARCHITECTURE, sampleArchitecture, buildingUseAtHeight } from './district-architecture.js';
+import { footprintShape } from './building-footprints.js';
 import { segmentHitsBox } from './city-plan.js';
 import { seededRandom, orientedBox, boxCoordinates } from './physics.js';
 import { SpatialGrid } from './spatial-grid.js';
@@ -11,6 +14,7 @@ import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { createMasterPlan, districtAt, terrainHeight, TERRAIN_GRID, WATER_LEVEL, isWater, SHOWCASE } from './master-plan.js';
 import { CITY_SCALE, atEastpoint } from './world-scale.js';
 import { wayfindingSigns } from './wayfinding.js';
+import { pocketVegetation, treeParts, shrubParts, treeCollider } from './vegetation.js';
 
 const BLOCK_SIZE = 192, CACHE_LIMIT = 160;
 const center = segment => ({ x: (segment.a.x + segment.b.x) / 2, y: (segment.a.y + segment.b.y) / 2, z: (segment.a.z + segment.b.z) / 2 });
@@ -22,17 +26,17 @@ const colors = { concrete: 0x657780, dark: 0x263745, rail: 0x77939c, cyan: 0x74d
 
 function districtStyle(district) {
   const id = district.id.toLowerCase();
-  if (id.includes('citadel')) return { types: ['office', 'office', 'civic'], low: 70, high: 160, tint: 0x7e9fab, accent: colors.cyan, density: .93 };
-  if (id.includes('core')) return { types: ['office', 'apartment', 'market'], low: 35, high: 112, tint: 0x9099ab, accent: colors.pink, density: .92 };
-  if (id.includes('stack')) return { types: ['apartment', 'apartment', 'market'], low: 32, high: 92, tint: 0x80a69b, accent: 0x9bdec6, density: .95 };
-  if (id.includes('ember')) return { types: ['terrace', 'apartment', 'civic'], low: 15, high: 52, tint: 0xba9383, accent: colors.amber, density: .85 };
-  if (id.includes('shadow')) return { types: ['market', 'apartment', 'terrace'], low: 12, high: 50, tint: 0x93869e, accent: 0xcf95df, density: .96 };
-  if (id.includes('cut')) return { types: ['market', 'terrace', 'warehouse'], low: 8, high: 28, tint: 0xa78c7c, accent: 0xe49c75, density: .88 };
-  if (id.includes('port') || id.includes('delta')) return { types: ['warehouse', 'warehouse', 'factory'], low: 10, high: 25, tint: 0x7f969f, accent: 0xe4b475, density: .58, freight: true };
-  if (id.includes('foundry') || id.includes('ridge')) return { types: ['factory', 'warehouse', 'apartment'], low: 14, high: 40, tint: 0x8a9492, accent: 0xd4a17c, density: .75, freight: true };
-  if (id.includes('east')) return { types: ['apartment', 'office', 'market'], low: 32, high: 94, tint: 0x8ca5a6, accent: colors.cyan, density: .91 };
-  if (id.includes('south')) return { types: ['apartment', 'terrace', 'civic'], low: 18, high: 57, tint: 0xa5ad91, accent: 0xcecc90, density: .8 };
-  return { types: ['terrace', 'apartment', 'market'], low: 18, high: 60, tint: 0x989fb1, accent: colors.pink, density: .86 };
+  if (id.includes('citadel')) return { types: ['office', 'office', 'civic'], tint: 0x7e9fab, accent: colors.cyan, density: .93 };
+  if (id.includes('core')) return { types: ['office', 'apartment', 'market'], tint: 0x9099ab, accent: colors.pink, density: .92 };
+  if (id.includes('stack')) return { types: ['apartment', 'apartment', 'market'], tint: 0x80a69b, accent: 0x9bdec6, density: .95 };
+  if (id.includes('ember')) return { types: ['terrace', 'apartment', 'civic'], tint: 0xba9383, accent: colors.amber, density: .85 };
+  if (id.includes('shadow')) return { types: ['market', 'apartment', 'terrace'], tint: 0x93869e, accent: 0xcf95df, density: .96 };
+  if (id.includes('cut')) return { types: ['market', 'terrace', 'warehouse'], tint: 0xa78c7c, accent: 0xe49c75, density: .88 };
+  if (id.includes('port') || id.includes('delta')) return { types: ['warehouse', 'warehouse', 'factory'], tint: 0x7f969f, accent: 0xe4b475, density: .58, freight: true };
+  if (id.includes('foundry') || id.includes('ridge')) return { types: ['factory', 'warehouse', 'apartment'], tint: 0x8a9492, accent: 0xd4a17c, density: .75, freight: true };
+  if (id.includes('east')) return { types: ['apartment', 'office', 'market'], tint: 0x8ca5a6, accent: colors.cyan, density: .91 };
+  if (id.includes('south')) return { types: ['apartment', 'terrace', 'civic'], tint: 0xa5ad91, accent: 0xcecc90, density: .8 };
+  return { types: ['terrace', 'apartment', 'market'], tint: 0x989fb1, accent: colors.pink, density: .86 };
 }
 
 function roadFrame(segment) {
@@ -86,40 +90,20 @@ function showcaseBuildings(plan, reserved) {
   return anchors.flatMap(([authoredX, authoredZ, w, d, h, type], i) => {
     const { x, z } = atEastpoint(authoredX, authoredZ);
     w *= CITY_SCALE; d *= CITY_SCALE;
+    const district = districtAt(x, z), id = `eastpoint-anchor:${i}`;
+    const { footprint } = sampleArchitecture(district.id, seededRandom(hash(`${id}:architecture`)));
+    if (footprint !== 'rectangle') w = d = Math.min(w, d);
+    const [low, high] = DISTRICT_ARCHITECTURE[district.id].heightRange;
+    h = Math.max(low, Math.min(high, h));
     const box = orientedBox(x, z, w + 2, d + 2);
     if (plan.reserveBox(box, 2) || reserved.some(p => p.x > box.minX - 6 && p.x < box.maxX + 6 && p.z > box.minZ - 6 && p.z < box.maxZ + 6)) return [];
     const grades = groundTop({ x, z, w, d });
-    return [{ id: `eastpoint-anchor:${i}`, x, z, y: grades.max + .12, ground: grades.min, w, d, h, yaw: 0, type, district: 'east-reach', variation: .2 + (i % 4) * .2, tint: i % 2 ? 0x93a6a8 : 0x7f9ca9, accent: i % 2 ? colors.amber : colors.cyan, anchor: true }];
+    return [{ id, x, z, y: grades.max + .12, ground: grades.min, w, d, h, footprint, yaw: 0, type, district: district.id, variation: .2 + (i % 4) * .2, tint: i % 2 ? 0x93a6a8 : 0x7f9ca9, accent: i % 2 ? colors.amber : colors.cyan, anchor: true }];
   });
 }
 
 function buildingBoxes(p) {
-  if (p.anchor) return verticalBuildingParts(p).filter(part => !part.trim).map((part, i) => {
-    const point = localPoint(p, part.x, part.z);
-    return orientedBox(point.x, point.z, part.w, part.d, p.yaw, p.y + part.y + part.h / 2, i ? p.y + part.y - part.h / 2 : p.ground, { id: `building:${p.id}:${i}`, climbable: true });
-  });
-  const id = `building:${p.id}`, boxes = [orientedBox(p.x, p.z, p.w + .8, p.d + .8, p.yaw, p.y + p.h + .5, p.ground, { id, climbable: true })];
-  for (const [i, part] of buildingStructure(p).entries()) if (part.rooftop) {
-    const point = localPoint(p, part.x, part.z);
-    boxes.push(orientedBox(point.x, point.z, part.w, part.d, p.yaw, p.y + part.y + part.h / 2, p.y + part.y - part.h / 2, { id: `${id}:roof:${i}`, climbable: part.h > 2 }));
-  }
-  return boxes;
-}
-
-function verticalBuildingParts(p) {
-  if (!p.anchor) {
-    const parts = buildingStructure(p);
-    // Industrial wall detail belongs to the main shell, not just the close-up
-    // loading doors on its front. Side/rear walls keep it at every visible LOD.
-    if (['warehouse', 'factory'].includes(p.type)) parts[0] = { ...parts[0], mat: 'industrial' };
-    return parts;
-  }
-  const tiers = [[1, 1, 0, .28], [.72, .76, .28, .76], [.48, .53, .76, 1]];
-  return tiers.flatMap(([w, d, bottom, top], i) => [
-    { x: 0, z: 0, y: p.h * (bottom + top) / 2, w: p.w * w, d: p.d * d, h: p.h * (top - bottom), mat: 'facade', tint: p.tint },
-    { x: 0, z: 0, y: p.h * top + .3, w: p.w * w + .8, d: p.d * d + .8, h: .6, mat: 'stone', tint: 0x536c7b },
-    { x: 0, z: p.d * d / 2 + .08, y: p.h * top - .15, w: p.w * w * .91, d: .1, h: .18, mat: 'glow', tint: i === 1 ? colors.amber : p.accent, trim: true },
-  ]);
+  return buildingVolumeColliders(p);
 }
 
 function elevated(segment) {
@@ -280,21 +264,30 @@ export class VerticalMetropolis {
         const t = (distance - route.distances[lo - 1]) / length;
         const street = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: a.y + (b.y - a.y) * t };
         if (Math.abs(street.y - terrainHeight(street.x, street.z)) > 1.1) continue;
-        const district = districtAt(street.x, street.z), style = districtStyle(district), variation = random();
+        const style = districtStyle(districtAt(street.x, street.z)), variation = random();
         if (variation > style.density) continue;
-        const type = style.types[Math.floor(random() * style.types.length)];
+        const useChoice = random();
         const w = range(style.freight ? 31 : 26, Math.min(style.freight ? 45 : 49, route.spacing / CITY_SCALE - 8)) * CITY_SCALE;
-        const d = range(style.freight ? 31 : 24, style.freight ? 44 : 39) * CITY_SCALE;
+        let d = range(style.freight ? 31 : 24, style.freight ? 44 : 39) * CITY_SCALE;
+        const streetArchitecture = sampleArchitecture(districtAt(street.x, street.z).id, seededRandom(hash(`${id}:architecture`)));
+        // Reserve enough depth for the full frontage diameter. Inscribing a
+        // circle in the old shallow rectangle needlessly widens rooftop gaps.
+        if (streetArchitecture.footprint !== 'rectangle') d = Math.max(d, w);
         const setback = range(style.freight ? 10 : 6.5, style.freight ? 15 : 10) * CITY_SCALE;
         const nx = (b.z - a.z) / length, nz = -(b.x - a.x) / length, offset = road.width / 2 + setback + d / 2;
         const x = street.x + side * nx * offset, z = street.z + side * nz * offset, yaw = Math.atan2(-side * nx, -side * nz);
         if (!inBounds({ x, z }, minX, minZ, maxX, maxZ)) continue;
-        let h = range(style.low, style.high);
-        if (type === 'market') h = range(7, 15);
-        if (type === 'terrace') h = Math.min(h, 26);
-        if (type === 'warehouse') h = range(8, 16);
-        const p = { id, x, z, w, d, h, yaw, type, district: district.id, variation, tint: style.tint, accent: style.accent,
+        // Resolve architecture at the actual lot center, including lots across
+        // a district boundary from their street and authored landmark towers.
+        const district = districtAt(x, z), buildingStyle = districtStyle(district);
+        const architecture = sampleArchitecture(district.id, seededRandom(hash(`${id}:architecture`)));
+        const type = buildingUseAtHeight(buildingStyle.types[Math.floor(useChoice * buildingStyle.types.length)], architecture.h);
+        const p = { id, x, z, w, d, ...architecture, yaw, type, district: district.id, variation, tint: buildingStyle.tint, accent: buildingStyle.accent,
           street: { ...street, roadId: road.id, width: road.width }, setback, priority: hash(`${id}:priority`) };
+        if (p.footprint !== 'rectangle') {
+          p.w = p.d = Math.min(w, d);
+          p.setback += (d - p.d) / 2;
+        }
         const footprint = orientedBox(x, z, w + 2, d + 2, yaw);
         // Rear yards and side passages belong to their building's lot. Include
         // them in overlap rejection, not in the solid collision footprint.
@@ -315,7 +308,7 @@ export class VerticalMetropolis {
   block(bx, bz) {
     const key = `${bx},${bz}`;
     if (this.blocks.has(key)) { const block = this.blocks.get(key); this.blocks.delete(key); this.blocks.set(key, block); return block; }
-    const buildings = [], trees = [], props = [], features = [], colliders = [], infrastructure = [];
+    const buildings = [], trees = [], shrubs = [], props = [], features = [], colliders = [], infrastructure = [];
     const minX = bx * BLOCK_SIZE, minZ = bz * BLOCK_SIZE, maxX = minX + BLOCK_SIZE, maxZ = minZ + BLOCK_SIZE;
     for (const p of this.anchors) {
       if (!inBounds(p, bx * BLOCK_SIZE, bz * BLOCK_SIZE, (bx + 1) * BLOCK_SIZE, (bz + 1) * BLOCK_SIZE)) continue;
@@ -340,8 +333,8 @@ export class VerticalMetropolis {
           props.push({ ...yard, y, kind: 'cargo', yaw: p.yaw, tint: p.variation > .5 ? 0x879388 : 0x926f61 });
           colliders.push(orientedBox(yard.x, yard.z, 6.2, 2.5, p.yaw, y + 2.5, y));
         } else {
-          trees.push({ ...yard, y, size: .8 + p.variation * .4, type: 'broadleaf' });
-          colliders.push(orientedBox(yard.x, yard.z, .5, .5, 0, y + 5, y, { walkable: false }));
+          const tree = { ...yard, id: `yard:${p.id}`, y, size: .8 + p.variation * .4, type: p.variation < .52 ? 'cypress' : 'broadleaf', source: 'yard' };
+          trees.push(tree); colliders.push(treeCollider(tree));
         }
       }
     }
@@ -368,7 +361,11 @@ export class VerticalMetropolis {
         if (!isWater(x, z) && streetlightFits(lamp, this.infrastructureIndex)) props.push(lamp);
       }
     }
-    const block = { bx, bz, buildings, trees, props, features, colliders, infrastructure, park: false };
+    const planting = pocketVegetation({ minX, minZ, maxX, maxZ, plan: this.plan, lots, anchors: this.anchors,
+      reserved: this.reserved, infrastructure: this.infrastructureIndex });
+    trees.push(...planting.trees); shrubs.push(...planting.shrubs); features.push(...planting.beds);
+    colliders.push(...planting.trees.map(treeCollider));
+    const block = { bx, bz, buildings, trees, shrubs, props, features, colliders, infrastructure, park: false };
     this.blocks.set(key, block); this.generated++;
     while (this.blocks.size > CACHE_LIMIT) this.blocks.delete(this.blocks.keys().next().value);
     return block;
@@ -431,36 +428,18 @@ function industrialWallMaterial() {
   atlas.magFilter = THREE.LinearFilter; atlas.minFilter = THREE.LinearMipmapLinearFilter;
   atlas.generateMipmaps = true; atlas.anisotropy = 4; atlas.needsUpdate = true;
   const material = new THREE.MeshStandardMaterial({ color: 0xffffff, map: atlas, roughness: .96, metalness: .02 });
-  material.onBeforeCompile = shader => { shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
+  material.onBeforeCompile = shader => { shader.vertexShader = `attribute vec2 facadeSpan;\n${shader.vertexShader}`.replace('#include <uv_vertex>', `#include <uv_vertex>
     #ifdef USE_INSTANCING
-      float wallWidth = abs(normal.x) > 0.5 ? length(instanceMatrix[2].xyz) : length(instanceMatrix[0].xyz);
+      float wallWidth = dot(facadeSpan, vec2(length(instanceMatrix[0].xyz), length(instanceMatrix[2].xyz)));
       vMapUv *= vec2(wallWidth / 8.0, length(instanceMatrix[1].xyz) / 6.0);
     #endif`); };
-  material.customProgramCacheKey = () => 'industrial-wall-metres-v1';
+  material.customProgramCacheKey = () => 'industrial-wall-metres-v2';
   return material;
 }
 
 function palette() {
-  const size = 128, height = 256, data = new Uint8Array(size * height * 4);
-  for (let y = 0; y < height; y++) for (let x = 0; x < size; x++) {
-    const pane = x % 24 > 4 && x % 24 < 17 && y % 24 > 4 && y % 24 < 17;
-    const lit = (Math.floor(x / 24) * 7 + Math.floor(y / 24) * 3) % 11 > 3;
-    const rgb = pane ? lit ? [190, 195, 174] : [32, 58, 68] : [110, 126, 132], at = (y * size + x) * 4;
-    data.set([...rgb, 255], at);
-  }
-  const atlas = new THREE.DataTexture(data, size, height); atlas.colorSpace = THREE.SRGBColorSpace;
-  atlas.wrapS = atlas.wrapT = THREE.RepeatWrapping; atlas.magFilter = THREE.LinearFilter; atlas.minFilter = THREE.LinearMipmapLinearFilter;
-  atlas.generateMipmaps = true; atlas.anisotropy = 4; atlas.needsUpdate = true;
-  const facade = new THREE.MeshStandardMaterial({ color: 0xffffff, map: atlas, emissiveMap: atlas, emissive: 0xb7c4c6, emissiveIntensity: .23, roughness: .9, metalness: .04 });
-  facade.onBeforeCompile = shader => { shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', `#include <uv_vertex>
-    #ifdef USE_INSTANCING
-      float frontage = abs(normal.x) > 0.5 ? length(instanceMatrix[2].xyz) : length(instanceMatrix[0].xyz);
-      vec2 scaleFacade = vec2(frontage / 13.0, length(instanceMatrix[1].xyz) / 32.0);
-      vMapUv *= scaleFacade; vEmissiveMapUv *= scaleFacade;
-    #endif`); };
-  facade.customProgramCacheKey = () => 'vertical-facade-metres-v1';
   const materials = {
-    facade,
+    facade: createFacadeMaterial(),
     industrial: industrialWallMaterial(),
     stone: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: .96, metalness: .02 }),
     glass: new THREE.MeshStandardMaterial({ color: 0x456875, emissive: 0x0e2530, emissiveIntensity: .3, roughness: .73, metalness: .12 }),
@@ -490,6 +469,7 @@ function addWeather(scene) {
 export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   const masterPlan = createMasterPlan(), metropolis = new VerticalMetropolis(masterPlan, reservedWorldObjects), mats = palette(), terrain = createTerrainMaterials({ vertexColors: true });
   const buildingSigns = createBuildingSignMaterial();
+  terrain.grass.vertexColors = false;
   // Pedestrian structures reuse the existing paving map on their actual slab,
   // keeping texture scale stable without adding a second coplanar top surface.
   const pedestrianPaving = terrain.paving.clone(); pedestrianPaving.name = 'vertical-pedestrian-paving';
@@ -516,53 +496,26 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     along(origin, direction, distance) { const x = origin.x + direction.x * distance, z = origin.z + direction.z * distance; return this.query(Math.min(origin.x, x) - .5, Math.min(origin.z, z) - .5, Math.max(origin.x, x) + .5, Math.max(origin.z, z) + .5); },
   };
   function buildBuilding(p, add) {
-    const part = (mat, lx, ly, lz, w, h, d, tint, detail = true, shape = 'box') => {
-      // Continuous amber trim reads as a stray line across the skyline.
-      // Keep the architectural bands themselves, without their luminous overlay.
-      if (mat === mats.glow && tint === colors.amber) return;
-      const point = localPoint(p, lx, lz); add(mat, point.x, p.y + ly, point.z, w, h, d, p.yaw, tint, detail, shape);
+    const design = buildingDesign(p), volumes = buildingVolumes(p, design);
+    const tint = new THREE.Color(design.color).lerp(new THREE.Color(p.tint), .22).getHex();
+    const part = (piece, detail = false) => {
+      const point = localPoint(p, piece.x, piece.z);
+      add(mats[piece.mat], point.x, p.y + piece.y, point.z, piece.w, piece.h, piece.d, p.yaw + (piece.yaw ?? 0),
+        piece.tint ?? tint, detail, piece.shape ?? 'box', 0, 0, piece.mat === 'facade' ? facadeUV(design.surface, design.windowLighting) : null,
+        piece.mat === 'facade' ? design.windowSeed : null);
     };
-    const tint = new THREE.Color(p.tint).offsetHSL((p.variation - .5) * .035, 0, (p.variation - .5) * .15).getHex();
-    part(mats.stone, 0, -(p.y - p.ground) / 2, 0, p.w + 1.7, p.y - p.ground + .18, p.d + 1.7, colors.concrete, false);
-    for (const piece of verticalBuildingParts(p)) part(mats[piece.mat], piece.x, piece.y, piece.z, piece.w, piece.h, piece.d, piece.tint ?? tint, false);
+    part({ mat: 'stone', x: 0, z: 0, y: -(p.y - p.ground) / 2, w: p.w + 1.7,
+      h: p.y - p.ground + .18, d: p.d + 1.7, tint: colors.concrete, shape: footprintShape(p.footprint) });
+    for (const volume of volumes) {
+      part(volume);
+      if (volume.cap) part({ ...volume, mat: 'stone', y: volume.y + volume.h / 2 + .25, h: .5, tint: design.trim });
+      if (volume.planter) part({ ...volume, shape: 'crown', y: volume.y + volume.h / 2 + .25,
+        w: volume.w * .46, h: .32, d: volume.d * .46, tint: 0x799660 }, true);
+    }
+    for (const piece of buildingDetails(p, design, volumes)) part(piece, piece.detail);
     const sign = p.sign;
     add(mats.stone, sign.x - Math.sin(sign.yaw) * .13, sign.y, sign.z - Math.cos(sign.yaw) * .13, sign.w + .24, sign.h + .2, .18, sign.yaw, colors.dark, false);
     add(buildingSigns, sign.x, sign.y, sign.z, sign.w, sign.h, 1, sign.yaw, undefined, false, 'plane', 0, 0, sign.uv);
-    // Setbacks and faceted crowns break up the skyline without separate models.
-    if (p.h > 58 && !p.anchor) {
-      part(mats.stone, 0, p.h * .27, 0, p.w + 1.15, .8, p.d + 1.15, colors.dark, false);
-      part(mats.stone, 0, p.h * .69, 0, p.w + .8, .7, p.d + .8, colors.dark, false);
-      // Keep the frame at the corners; full-depth side strips hide the windows.
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-        part(mats.stone, sx * (p.w / 2 - .05), p.h / 2, sz * (p.d / 2 - .05), .7, p.h, .7, tint, false);
-      }
-      part(mats.glow, 0, p.h + .54, 0, p.w * .72, .1, p.d * .72, p.accent, false);
-    }
-    const front = p.d / 2;
-    part(mats.glass, 0, 1.7, front + .13, p.w * .72, 3.1, .22);
-    part(mats.stone, 0, 3.8, front + .9, p.w * .88, .35, 2.4, colors.dark);
-    part(mats.glow, 0, 4.05, front + 2.1, p.w * .58, .18, .13, p.accent);
-    for (let i = -1; i <= 1; i++) part(mats.stone, i * p.w * .3, 1.7, front + .27, .18, 3.4, .3, tint);
-    if (['apartment', 'terrace'].includes(p.type)) {
-      for (let y = 7; y < Math.min(p.h - 2, 34); y += 6) {
-        part(mats.stone, 0, y, front + .55, p.w * .87, .25, 1.7, colors.concrete);
-        part(mats.stone, 0, y + .65, front + 1.22, p.w * .87, .65, .15, colors.dark);
-        for (const side of [-1, 1]) part(mats.stone, side * p.w * .35, y + .5, front + .55, .65, .8, .65, 0x5c806a);
-      }
-    } else if (p.type === 'office') {
-      for (const side of [-1, 1]) part(mats.glow, side * p.w * (p.anchor ? .29 : .4), p.h * .56, front * (p.anchor ? .76 : 1) + .06, .18, p.h * (p.anchor ? .4 : .73), .1, p.accent);
-      part(mats.stone, 0, p.h + 12, 0, .32, 15, .32, colors.rail, false);
-      part(mats.glow, 0, p.h + 19.7, 0, .42, .42, .42, 0xe28c85, false);
-    } else if (['warehouse', 'factory'].includes(p.type)) {
-      for (const x of [-.3, 0, .3]) part(mats.glass, x * p.w, 2.6, front + .15, p.w * .24, 5, .2);
-      for (let x = -p.w / 2; x < p.w / 2; x += 4.5) part(mats.stone, x, p.h / 2, front + .08, .18, p.h, .18, colors.dark);
-    } else if (p.type === 'market') {
-      for (let i = -2; i <= 2; i++) {
-        part(mats.stone, i * p.w * .18, 3.1, front + 1.4, p.w * .16, .18, 2.5, i % 2 ? tint : p.accent);
-        part(mats.glow, i * p.w * .18, 4.8, front + .17, p.w * .12, .65, .16, p.accent);
-      }
-    }
-    part(mats.stone, -p.w * .33, 1, -p.d / 2 - .4, 1.4, 2, .8, colors.dark);
   }
   function buildRoad(s, add) {
     const f = roadFrame(s); if (f.flatLength < .01) return;
@@ -601,13 +554,17 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     }
   }
   stream.populate = cell => {
-    const add = (mat, x, y, z, w, h, d, yaw = 0, tint, detail = false, shape = 'box', pitch = 0, roll = 0, uvRect = null) => stream.add(mat, x, y, z, w, h, d, yaw, tint, detail, shape, cell, pitch, roll, uvRect);
+    const add = (mat, x, y, z, w, h, d, yaw = 0, tint, detail = false, shape = 'box', pitch = 0, roll = 0, uvRect = null, windowSeed = null) => stream.add(mat, x, y, z, w, h, d, yaw, tint, detail, shape, cell, pitch, roll, uvRect, windowSeed);
     for (const block of metropolis.area(cell.x, cell.z, cell.x + CHUNK_SIZE, cell.z + CHUNK_SIZE)) {
       for (const p of block.buildings) if (inCell(p, cell)) buildBuilding(p, add);
-      for (const p of block.trees) if (inCell(p, cell)) {
-        add(mats.stone, p.x, p.y + 2.5 * p.size, p.z, .5 * p.size, 5 * p.size, .5 * p.size, 0, 0x696459, false, 'trunk');
-        add(mats.stone, p.x, p.y + 5.1 * p.size, p.z, 1.5 * p.size, 1.9 * p.size, 1.5 * p.size, 0, 0x557c6d, false, 'crown');
-        add(mats.stone, p.x, p.y + .22, p.z, 3.4, .4, 3.4, 0, 0x667d7d, true);
+      for (const p of block.trees) if (inCell(p, cell)) for (const part of treeParts(p)) {
+        add(mats.stone, part.x, part.y, part.z, part.w, part.h, part.d, 0, part.tint, part.detail, part.shape);
+      }
+      for (const p of block.shrubs) if (inCell(p, cell)) for (const part of shrubParts(p)) {
+        add(mats.stone, part.x, part.y, part.z, part.w, part.h, part.d, 0, part.tint, part.detail, part.shape);
+      }
+      for (const p of block.features) if (inCell(p, cell)) {
+        add(terrain.grass, p.x, p.y, p.z, p.w, p.h, p.d, 0, p.tint, false, p.shape, p.pitch, p.roll);
       }
       for (const p of block.props) if (inCell(p, cell)) {
         if (p.kind === 'lamp') {
@@ -627,7 +584,9 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
           if (p.w > 1) add(mats.stone, p.x, p.maxY + .1, p.z, 9, .6, 2.4, p.yaw, 0x627984, false);
         } else if (p.kind === 'planter') {
           add(mats.stone, p.x, p.y, p.z, p.w, .7, p.d, 0, 0x5d7378, false);
-          add(mats.stone, p.x, p.maxY + .35, p.z, (p.w - .4) / 2, .425, (p.d - .4) / 2, 0, 0x567e67, true, 'crown');
+          add(mats.stone, p.x, p.maxY + .35, p.z, (p.w - .4) / 2, .425, (p.d - .4) / 2, 0, 0x567e67, false, 'crown');
+          for (const side of [-1, 1]) add(mats.stone, p.x, p.maxY + .47, p.z + side * p.d * .27,
+            (p.w - .5) * .42, .55, p.d * .16, 0, side > 0 ? 0x79955e : 0x63876d, true, 'crown');
         } else if (p.kind === 'kiosk') {
           add(mats.stone, p.x, p.y, p.z, p.w, 3.2, p.d, 0, 0x435e68, false);
           add(mats.stone, p.x - .5, p.maxY + .16, p.z, p.w + 2, .28, p.d + .6, 0, 0x9a8b83, false);

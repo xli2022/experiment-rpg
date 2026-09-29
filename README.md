@@ -50,7 +50,8 @@ Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western 
 - **A varied, voiced cast.** Women, men and a nonbinary gardener have individual facial shapes, builds, skin tones, hairstyles, outfits, portraits and personalities. A pool of up to twenty-six pedestrians draws from sixteen visual archetypes: twelve human designs, a walking service robot, a utility mech, and two alien variants. Active counts follow district, quality and available space. Every named contact has personal conversation topics, characteristic job replies and individual reactions to all three endings.
 - **Seven side stories and a repeatable delivery contract.** Recover medical supplies, repair irrigation, reunite a family, rebuild radios, reclaim stolen freight, collect memories, and survey the city. Multiple quests can be active together; track one in the journal.
 - **Vertical exploration.** Most building walls can be climbed, including rotated facades. Ascend, descend, shimmy, jump away and pull onto clear rooftops. A parachute automatically opens during long falls, slowing your descent while you steer toward a roof or street. Walkable ramps connect the Upper Market, Citadel concourse and Stacks terrace gardens; equipment and taller penthouses add rooftop obstacles.
-- **Neighborhood variety.** Buildings face real streets, with district-specific towers, residential slabs, terraces, markets, factories and warehouses. Every building carries a street-facing sign matched to its use, from neon shops to residential nameplates and freight depots. Textured non-road ground, facade details and street furniture distinguish neighborhoods while leaving roads clear.
+- **Neighborhood variety.** Each region has a consistent rectangular, circular or hexagonal footprint and its own average building height, from low neighborhoods to skyscraper districts. Afterlight Core mixes all three shapes and the full height range. Stepped towers, balcony blocks, row houses, civic halls and industrial sheds retain varied finishes, mostly-lit or mostly-dark random windows, roof gardens and street-facing tenant signs. See the [district architecture settings](docs/CITY-RENDERING.md#district-architecture).
+- **Greener neighborhoods.** Clustered broadleaf trees, slender evergreens, flowering shrubs and grass beds fill suitable open spaces. Residential districts get denser planting, freight districts stay sparser, and roof gardens and public planters have fuller foliage. Roads, entrances and story destinations stay clear.
 - **Exploration with rewards.** Discover districts, recover eight written memory fragments, search twelve salvage caches, and clear five drone patrol groups. Cleared patrols stay cleared, including after loading a save.
 - **Equipment and supplies.** Buy medkits from Imani, Orrin or Rook. Rook installs three tiers each of weapon damage, armor and sprint upgrades in exchange for credits and salvage. Neighborhood trust earns discounts; the final choice changes patrol behavior or community prices.
 - **Nineteen transit stops and two refuges.** Discover a stop on foot, then select it on the map to take the tram. Travel requires leaving your car and escaping combat. Refuges restore health, armor and ammo and set your return point.
@@ -101,6 +102,7 @@ Health and armor slowly recover out of combat. Defeat returns you to your last r
 - `src/master-plan.js` / `src/world-scale.js` — compact runtime terrain, roads and shared coordinate transform
 - `src/authored-plan.js` / `src/neighborhood-plan.js` / `src/infill-plan.js` — original road graph, district streets and connected infill
 - `src/vertical-city.js` — current city geometry, street-facing buildings, raised spaces and collision
+- `src/building-design.js` / `src/building-materials.js` — deterministic building variants, shared massing/collision recipes and six instanced facade finishes
 - `src/building-signs.js` — building-specific tenants, street-facing placement and shared neon sign atlas
 - `src/infrastructure-clearance.js` / `src/wayfinding.js` — shared rendered slab volumes and bridge-safe wayfinding placement
 - `src/city.js` / `src/city-scenery.js` — shared batching, signs, scenery materials and retained legacy city helpers
@@ -121,7 +123,7 @@ Health and armor slowly recover out of combat. Defeat returns you to your last r
 - `src/jump.js` — shared jump arc and authored-animation timing
 - `src/physics.js` — oriented collision, height-aware movement, vehicle handling, and ray tests
 - `src/locomotion.js` / `src/climbing.js` / `src/climb-animation.js` — responsive movement, wall traversal and procedural hand/foot IK
-- `src/architecture.js` / `src/public-spaces.js` — shared structural geometry for rendering and collision, and neighborhood public spaces
+- `src/architecture.js` / `src/public-spaces.js` — retained legacy building geometry and neighborhood public spaces
 - `src/ui.js` / `src/style.css` — responsive HUD, minimap, and menus
 - `src/mobile.css` — touch controls and title/HUD layouts for compact screens
 - `src/audio.js` — locally synthesized weapon, vehicle, and interface audio

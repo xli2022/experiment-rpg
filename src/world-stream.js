@@ -1,9 +1,12 @@
 import * as THREE from 'three';
 import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { SHADOW_PROFILES } from './shadows.js';
+import { buildingBoxGeometry, buildingPrismGeometry } from './building-geometry.js';
 
 export const WORLD_GEOMETRY = {
-  box: new THREE.BoxGeometry(1, 1, 1),
+  box: buildingBoxGeometry(),
+  circle: buildingPrismGeometry('circle'),
+  hexagon: buildingPrismGeometry('hexagon'),
   plane: new THREE.PlaneGeometry(1, 1),
   crown: new THREE.IcosahedronGeometry(1, 0),
   trunk: new THREE.CylinderGeometry(.7, 1, 1, 6),
@@ -37,12 +40,12 @@ export class WorldStream {
     });
     return this.chunks.get(key);
   }
-  add(mat, x, y, z, w, h, d, yaw = 0, tint, detail = false, shape = 'box', owner = null, pitch = 0, roll = 0, uvRect = null) {
+  add(mat, x, y, z, w, h, d, yaw = 0, tint, detail = false, shape = 'box', owner = null, pitch = 0, roll = 0, uvRect = null, windowSeed = null) {
     const c = owner ?? this.cell(Math.floor(x / CHUNK_SIZE), Math.floor(z / CHUNK_SIZE));
     if (!owner) c.authored = true;
     // Long authored roads and buildings may cross several cells. Their owner must
     // remain visible/resident wherever any part of that geometry is still near us.
-    const radius = shape === 'box' || shape === 'plane' ? .5 : 1, cos = Math.abs(Math.cos(yaw)), sin = Math.abs(Math.sin(yaw));
+    const radius = ['box', 'plane', 'circle', 'hexagon'].includes(shape) ? .5 : 1, cos = Math.abs(Math.cos(yaw)), sin = Math.abs(Math.sin(yaw));
     const tiltPad = Math.abs(Math.sin(pitch)) * h * .5 + Math.abs(Math.sin(roll)) * h * .5;
     const rx = (cos * w + sin * d) * radius + tiltPad, rz = (sin * w + cos * d) * radius + tiltPad;
     const ry = h * (shape === 'crown' ? 1 : .5) + Math.abs(Math.sin(pitch)) * d * .5 + Math.abs(Math.sin(roll)) * w * .5;
@@ -54,7 +57,7 @@ export class WorldStream {
     const casts = !detail && !mat.isMeshBasicMaterial && h > .35;
     const key = `${mat.uuid}:${shape}:${casts ? 'solid' : 'flat'}`, recipes = c.recipes[detail ? 1 : 0];
     if (!recipes.has(key)) recipes.set(key, { mat, shape, entries: [] });
-    recipes.get(key).entries.push({ x, y, z, w, h, d, yaw, pitch, roll, tint, uvRect });
+    recipes.get(key).entries.push({ x, y, z, w, h, d, yaw, pitch, roll, tint, uvRect, windowSeed });
   }
   capture(objects) {
     for (const object of objects) {
@@ -68,10 +71,12 @@ export class WorldStream {
     const root = new THREE.Group(); root.name = `City ${c.key} ${level ? 'detail' : 'shell'}`;
     root.matrixAutoUpdate = false;
     for (const { mat, shape, entries } of c.recipes[level].values()) {
-      const atlas = entries.some(v => v.uvRect), geometry = atlas ? WORLD_GEOMETRY[shape].clone() : WORLD_GEOMETRY[shape];
+      const atlas = entries.some(v => v.uvRect), windows = entries.some(v => v.windowSeed != null);
+      const ownedGeometry = atlas || windows, geometry = ownedGeometry ? WORLD_GEOMETRY[shape].clone() : WORLD_GEOMETRY[shape];
       if (atlas) geometry.setAttribute('instanceUvRect', new THREE.InstancedBufferAttribute(new Float32Array(entries.flatMap(v => v.uvRect ?? [0, 0, 1, 1])), 4));
+      if (windows) geometry.setAttribute('instanceWindowSeed', new THREE.InstancedBufferAttribute(new Float32Array(entries.map(v => v.windowSeed ?? 0)), 1));
       const mesh = new THREE.InstancedMesh(geometry, mat, entries.length);
-      mesh.userData.ownedGeometry = atlas;
+      mesh.userData.ownedGeometry = ownedGeometry;
       mesh.receiveShadow = !mat.isMeshBasicMaterial;
       // Main silhouettes cast; lane paint and tiny facade trim don't need a
       // second draw. Shadow receivers keep their full visible detail.

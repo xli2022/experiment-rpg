@@ -6,9 +6,10 @@ import { terrainHeight } from '../../src/master-plan.js';
 
 function corners(box) {
   const c = Math.cos(box.yaw), s = Math.sin(box.yaw);
-  return [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, z]) => ({
-    x: box.x + x * box.w / 2 * c + z * box.d / 2 * s,
-    z: box.z - x * box.w / 2 * s + z * box.d / 2 * c,
+  const vertices = box.vertices ?? [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([x, z]) => ({ x: x * box.w / 2, z: z * box.d / 2 }));
+  return vertices.map(({ x, z }) => ({
+    x: box.x + x * c + z * s,
+    z: box.z - x * s + z * c,
   }));
 }
 
@@ -21,8 +22,8 @@ function pointToEdge(p, a, b) {
 // Measure the rotated roof perimeter, not its broad-phase bounding rectangle.
 export function roofGap(a, b) {
   const ac = corners(a), bc = corners(b);
-  return Math.min(...ac.flatMap(p => bc.map((q, i) => pointToEdge(p, q, bc[(i + 1) % 4]))),
-    ...bc.flatMap(p => ac.map((q, i) => pointToEdge(p, q, ac[(i + 1) % 4]))));
+  return Math.min(...ac.flatMap(p => bc.map((q, i) => pointToEdge(p, q, bc[(i + 1) % bc.length]))),
+    ...bc.flatMap(p => ac.map((q, i) => pointToEdge(p, q, ac[(i + 1) % ac.length]))));
 }
 
 export function nearestRoofPairs(buildings) {
@@ -52,6 +53,18 @@ export function traversalSpatial(blocks, plan) {
 
 function lineSpan(box, origin, direction) {
   const p = boxCoordinates(origin.x, origin.z, box), c = Math.cos(box.yaw), s = Math.sin(box.yaw);
+  if (box.faces) {
+    const dx = direction.x * c - direction.z * s, dz = direction.x * s + direction.z * c;
+    let enter = -Infinity, exit = Infinity;
+    for (const face of box.faces) {
+      const distance = (face.x - p.x) * face.nx + (face.z - p.z) * face.nz;
+      const velocity = dx * face.nx + dz * face.nz;
+      if (Math.abs(velocity) < 1e-8) { if (distance < .6) return null; }
+      else if (velocity > 0) exit = Math.min(exit, distance / velocity);
+      else enter = Math.max(enter, distance / velocity);
+    }
+    return enter < exit ? { enter, exit } : null;
+  }
   const axes = [[p.x, direction.x * c - direction.z * s, box.w / 2],
     [p.z, direction.x * s + direction.z * c, box.d / 2]];
   let enter = -Infinity, exit = Infinity;

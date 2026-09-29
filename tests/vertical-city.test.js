@@ -7,6 +7,8 @@ import { WorldStream } from '../src/world-stream.js';
 import { surfaceHeightAt, boxContainsPoint } from '../src/physics.js';
 import { SpatialGrid } from '../src/spatial-grid.js';
 import { CITY_SCALE } from '../src/world-scale.js';
+import { buildingVolumes } from '../src/building-design.js';
+import { footprintVertices, polygonFaces } from '../src/building-footprints.js';
 
 const worldPoint = (p, x, z) => ({ x: p.x + x * Math.cos(p.yaw) + z * Math.sin(p.yaw), z: p.z - x * Math.sin(p.yaw) + z * Math.cos(p.yaw) });
 
@@ -40,7 +42,9 @@ test('procedural districts regenerate identical collision blueprints with bounde
     const blocks = metro.area(d.x - 140, d.z - 140, d.x + 140, d.z + 140);
     const buildings = blocks.flatMap(b => b.buildings); total += buildings.length;
     for (const p of buildings) {
-      assert.ok(p.box.minY <= p.y && p.box.maxY > p.y + (p.anchor ? p.h * .27 : p.h));
+      const base = buildingVolumes(p)[0];
+      assert.ok(p.box.minY <= p.y);
+      assert.equal(p.box.maxY, p.y + base.y + base.h / 2 + .5, 'the climbable base ends at its actual first terrace');
       assert.ok(Number.isFinite(p.y) && p.h > 0);
       assert.equal(frontageBlocked(p.box, plan, 2), false, `${p.id} leaves roads and access ramps clear`);
     }
@@ -119,7 +123,7 @@ test('neighboring frontage lots never overlap and have stable ownership across b
   }
 });
 
-test('tall buildings expose their window facades on all four sides', () => {
+test('tall buildings expose their window facades around every footprint', () => {
   const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream);
   try {
     for (const [districtId, type] of [['core', 'office'], ['stacks', 'apartment'], ['citadel', 'civic']]) {
@@ -130,18 +134,15 @@ test('tall buildings expose their window facades on all four sides', () => {
       const cell = stream.cell(Math.floor(tower.x / 96), Math.floor(tower.z / 96));
       stream.build(cell, 0); stream.build(cell, 1); scene.updateMatrixWorld(true);
       const meshes = cell.groups.flatMap(group => group.children);
-      // Sample the upper stories, clear of podiums, balcony floors, corner
-      // columns and the horizontal bands. Windows must be the visible surface.
-      for (const axis of ['x', 'z']) for (const side of [-1, 1]) for (const offset of [-.25, 0, .25]) for (const level of [.5, .84]) {
-        const along = axis === 'x' ? 'z' : 'x', outwardSize = axis === 'x' ? tower.w : tower.d;
-        const localOrigin = new THREE.Vector3();
-        localOrigin[axis] = side * (outwardSize / 2 + 3);
-        localOrigin[along] = offset * (along === 'x' ? tower.w : tower.d);
-        const point = worldPoint(tower, localOrigin.x, localOrigin.z);
-        const origin = new THREE.Vector3(point.x, tower.y + tower.h * level, point.z);
-        const direction = new THREE.Vector3(); direction[axis] = -side; direction.applyAxisAngle(new THREE.Vector3(0, 1, 0), tower.yaw);
-        const hit = new THREE.Raycaster(origin, direction, 0, 5).intersectObjects(meshes, false)[0];
-        assert.equal(hit?.object.material.name, 'vertical-facade', `${tower.id} ${type} ${axis}${side} face at ${level} height, ${offset} width exposes its facade`);
+      // Follow every actual tier, including inset and offset upper floors.
+      // Probe between balcony floors and corner columns, at both shell/detail LOD.
+      for (const body of buildingVolumes(tower).filter(part => part.cap)) for (const face of polygonFaces(footprintVertices(body.shape, body.w, body.d))) for (const offset of [-.19, .11]) {
+        const point = worldPoint(tower, body.x + face.x + face.nx * .45 + face.nz * face.width * offset,
+          body.z + face.z + face.nz * .45 - face.nx * face.width * offset);
+        const origin = new THREE.Vector3(point.x, tower.y + body.y + body.h * .13, point.z);
+        const direction = new THREE.Vector3(-face.nx, 0, -face.nz).applyAxisAngle(new THREE.Vector3(0, 1, 0), tower.yaw);
+        const hit = new THREE.Raycaster(origin, direction, 0, .9).intersectObjects(meshes, false)[0];
+        assert.equal(hit?.object.material.name, 'vertical-facade', `${tower.id} ${type} tier at ${body.y} height, ${offset} width exposes its facade`);
       }
     }
   } finally { stream.dispose(); }
@@ -214,7 +215,7 @@ test('sloped road meshes follow their support height and stay batched by materia
   const x = (a.x + b.x) / 2, z = (a.z + b.z) / 2, y = (a.y + b.y) / 2;
   const cell = stream.cell(Math.floor(x / 96), Math.floor(z / 96)); stream.build(cell, 0); stream.build(cell, 1);
   const meshes = cell.groups.flatMap(group => group.children), matrix = new THREE.Matrix4(), point = new THREE.Vector3();
-  assert.ok(meshes.length <= 15, 'a chunk shares material draws across all buildings and roads');
+  assert.ok(meshes.length <= 25, 'a district-boundary chunk batches buildings and roads, with bounded grass and evergreen/tuft batches');
   let found = false;
   for (const mesh of meshes) {
     assert.ok(mesh.instanceMatrix.array.every(Number.isFinite));

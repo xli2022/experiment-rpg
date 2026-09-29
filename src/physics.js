@@ -1,4 +1,5 @@
 import { WORLD_LIMIT } from './world-config.js';
+import { footprintVertices, polygonFaces } from './building-footprints.js';
 export { WORLD_LIMIT } from './world-config.js';
 export const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 export const damp = (a, b, speed, dt) => a + (b - a) * (1 - Math.exp(-speed * dt));
@@ -11,6 +12,14 @@ export function orientedBox(x, z, w, d, yaw = 0, maxY = 1, minY = 0, extra = {})
   const sx = (c * w + s * d) / 2, sz = (s * w + c * d) / 2;
   return { x, z, w, d, yaw, minX: x - sx, maxX: x + sx, minZ: z - sz, maxZ: z + sz, minY, maxY, ...extra };
 }
+export function orientedPrism(x, z, w, d, yaw, maxY, minY, footprint = 'rectangle', extra = {}) {
+  const box = orientedBox(x, z, w, d, yaw, maxY, minY, { ...extra, footprint });
+  if (footprint !== 'rectangle') {
+    box.vertices = footprintVertices(footprint, w, d);
+    box.faces = polygonFaces(box.vertices);
+  }
+  return box;
+}
 export function boxCoordinates(x, z, box) {
   const cx = box.x ?? (box.minX + box.maxX) / 2, cz = box.z ?? (box.minZ + box.maxZ) / 2;
   const c = Math.cos(box.yaw ?? 0), s = Math.sin(box.yaw ?? 0), dx = x - cx, dz = z - cz;
@@ -18,6 +27,7 @@ export function boxCoordinates(x, z, box) {
 }
 export function boxContainsPoint(x, z, box, inset = 0) {
   const p = boxCoordinates(x, z, box);
+  if (box.faces) return box.faces.every(f => (p.x - f.x) * f.nx + (p.z - f.z) * f.nz <= -inset + 1e-9);
   return Math.abs(p.x) <= p.w / 2 - inset && Math.abs(p.z) <= p.d / 2 - inset;
 }
 export function overlapsHeight(box, y = 0, height = 1.8, step = .25) {
@@ -60,6 +70,17 @@ export function supportHeight(x, z, colliders, ceiling = Infinity, baseHeight = 
 
 export function circleHitsBox(x, z, radius, box) {
   const p = boxCoordinates(x, z, box);
+  if (box.faces) {
+    let inside = true, distance2 = Infinity;
+    for (const f of box.faces) {
+      const dx = p.x - f.x, dz = p.z - f.z, outward = dx * f.nx + dz * f.nz;
+      if (outward > radius) return false;
+      inside &&= outward <= 0;
+      const along = clamp(dx * f.nz - dz * f.nx, -f.width / 2, f.width / 2);
+      distance2 = Math.min(distance2, (dx - f.nz * along) ** 2 + (dz + f.nx * along) ** 2);
+    }
+    return inside || distance2 < radius * radius;
+  }
   const dx = p.x - clamp(p.x, -p.w / 2, p.w / 2);
   const dz = p.z - clamp(p.z, -p.d / 2, p.d / 2);
   return dx * dx + dz * dz < radius * radius;
@@ -138,6 +159,22 @@ export function rayBoxDistance(origin, direction, box, maxDistance = Infinity) {
     const p = boxCoordinates(origin.x, origin.z, box), c = Math.cos(box.yaw ?? 0), s = Math.sin(box.yaw ?? 0);
     origin = { x: p.x, y: origin.y, z: p.z };
     direction = { x: direction.x * c - direction.z * s, y: direction.y, z: direction.x * s + direction.z * c };
+    if (box.faces) {
+      let near = 0, far = maxDistance;
+      // Clip against the actual convex walls, roof and underside. Camera and
+      // projectile rays must pass through the unused corners of the lot.
+      const planes = box.faces.map(f => [f.nx, 0, f.nz, f.nx * f.x + f.nz * f.z]);
+      planes.push([0, 1, 0, box.maxY ?? 100], [0, -1, 0, -(box.minY ?? 0)]);
+      for (const [nx, ny, nz, offset] of planes) {
+        const distance = offset - nx * origin.x - ny * origin.y - nz * origin.z;
+        const velocity = nx * direction.x + ny * direction.y + nz * direction.z;
+        if (Math.abs(velocity) < 1e-8) { if (distance < -1e-9) return Infinity; }
+        else if (velocity < 0) near = Math.max(near, distance / velocity);
+        else far = Math.min(far, distance / velocity);
+        if (near > far + 1e-9) return Infinity;
+      }
+      return near;
+    }
     box = { minX: -p.w / 2, maxX: p.w / 2, minZ: -p.d / 2, maxZ: p.d / 2, minY: box.minY, maxY: box.maxY };
   }
   let near = 0, far = maxDistance;

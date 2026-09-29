@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { drawSign } from './city.js';
 import { terrainHeight } from './master-plan.js';
+import { footprintFrontage } from './building-footprints.js';
 
 // Reuse the original city's sign language, with tenants appropriate to each
 // building use. These 28 designs share one atlas throughout the entire city.
@@ -89,16 +90,15 @@ export function buildingSign(p, plan) {
   if (!street) throw new Error(`No street frontage for ${p.id}`);
   const c = Math.cos(p.yaw), s = Math.sin(p.yaw), dx = street.x - p.x, dz = street.z - p.z;
   const localX = dx * c - dz * s, localZ = dx * s + dz * c;
-  const sideX = Math.abs(localX) > Math.abs(localZ), side = Math.sign(sideX ? localX : localZ) || 1;
-  const normal = sideX ? { x: side, z: 0 } : { x: 0, z: side };
-  const faceWidth = sideX ? p.d : p.w, depth = (sideX ? p.w : p.d) / 2;
+  const face = footprintFrontage(p, { x: localX, z: localZ });
+  const normal = { x: face.nx, z: face.nz }, faceWidth = face.width;
   const residential = p.type === 'apartment' || p.type === 'terrace';
   const loading = ['warehouse', 'factory', 'market'].includes(p.type);
   const bottom = loading ? 5.3 : 4.3;
   const h = Math.min(residential ? 2.25 : 3.5, p.h - bottom - .55, faceWidth * .72 * 3 / 8), w = h * 8 / 3;
   // Above shop canopies/loading doors and below the first residential balcony.
   // A shallow physical backboard separates the plane from facade ribs/windows.
-  const offset = depth + .38, lx = normal.x * offset, lz = normal.z * offset;
+  const lx = face.x + normal.x * .38, lz = face.z + normal.z * .38;
   return { ...design, street, x: p.x + lx * c + lz * s, y: p.y + bottom + h / 2, z: p.z - lx * s + lz * c,
     yaw: p.yaw + Math.atan2(normal.x, normal.z), w, h, uv: signUV(design.tile) };
 }

@@ -1,3 +1,4 @@
+import { footprintVertices } from './building-footprints.js';
 import { WORLD_OBJECTS, DISTRICTS, districtAt } from './content.js';
 import { COLORS, SYMBOLS } from './world.js';
 import { formatCurrency } from './currency.js';
@@ -181,15 +182,18 @@ export class HUD {
         for (const f of [...(this.city.plan.features ?? []), ...blocks.flatMap(b => b.features ?? [])]) {
           const [px, py] = point(f.x, f.z);
           c.fillStyle = f.type === 'garden' ? '#376455' : f.type === 'court' ? '#38626b' : '#685d50';
-          c.fillRect(px - 20 * scale, py - 20 * scale, 40 * scale, 40 * scale);
+          const width = (f.w ?? 40) * scale, depth = (f.d ?? 40) * scale;
+          if (f.shape === 'circle') { c.beginPath(); c.ellipse(px, py, width / 2, depth / 2, 0, 0, Math.PI * 2); c.fill(); }
+          else c.fillRect(px - width / 2, py - depth / 2, width, depth);
         }
         const buildings = this.city.mapInfo.concat(blocks.flatMap(b => b.buildings));
         c.fillStyle = '#1f3944'; c.strokeStyle = '#3e5861'; c.lineWidth = .7;
         for (const b of buildings) {
           if (Math.abs(b.x - x) > rx + 40 || Math.abs(b.z - z) > rz + 40) continue;
           const [px, py] = point(b.x, b.z); c.save(); c.translate(px, py); c.rotate(-(b.yaw ?? 0));
-          c.fillRect(-b.w * scale / 2, -b.d * scale / 2, b.w * scale, b.d * scale);
-          if (scale > .5) c.strokeRect(-b.w * scale / 2, -b.d * scale / 2, b.w * scale, b.d * scale); c.restore();
+          c.beginPath();
+          footprintVertices(b.footprint, b.w * scale, b.d * scale).forEach((v, i) => i ? c.lineTo(v.x, v.z) : c.moveTo(v.x, v.z));
+          c.closePath(); c.fill(); if (scale > .5) c.stroke(); c.restore();
         }
       }
       c.restore();

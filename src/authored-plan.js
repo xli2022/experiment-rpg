@@ -1,5 +1,6 @@
 import { SpatialGrid } from './spatial-grid.js';
 import { addNeighborhoodStreets } from './neighborhood-plan.js';
+import { DISTRICT_ARCHITECTURE } from './district-architecture.js';
 
 // Generate the complete street graph in the original 11 km authoring frame.
 // master-plan.js transforms the completed graph into compact runtime units.
@@ -14,22 +15,22 @@ const mix = (a, b, t) => a + (b - a) * t;
 const smooth = t => (t = clamp(t, 0, 1), t * t * (3 - 2 * t));
 
 export const MASTER_DISTRICTS = [
-  ['core', 'Afterlight Core', 458, 553, 1050, 1050, 0xb98cac, [38, 165], .88, 'Dense neon canyons, stacked shopfronts and the old transit loop.'],
-  ['citadel', 'Citadel', 673, 466, 1000, 1150, 0x739db1, [70, 240], .76, 'Corporate towers and elevated public concourses.'],
-  ['east-reach', 'East Reach', 870, 592, 800, 950, 0x68aea9, [24, 105], .65, 'Commercial terraces overlooking Blackwater Bay.'],
-  ['void-port', 'Void Port', 839, 335, 800, 1350, 0x7d8b95, [12, 58], .48, 'Freight yards, cranes and long waterfront warehouses.'],
-  ['stacks', 'The Stacks', 484, 242, 1200, 900, 0x789b79, [40, 135], .88, 'Tall residential slabs linked by community terraces.'],
-  ['north-ridge', 'North Ridge', 196, 209, 1500, 700, 0x897589, [15, 62], .58, 'Old industrial streets on the high northern escarpment.'],
-  ['ember-heights', 'Ember Heights', 156, 410, 900, 1400, 0xb09574, [20, 78], .66, 'Stepped homes and commercial streets climbing the western hills.'],
-  ['west-end', 'West End', 118, 585, 850, 1050, 0x928caf, [22, 85], .68, 'Mixed workshops, apartments and local market streets.'],
-  ['shadowmarket', 'Shadowmarket', 168, 786, 1150, 950, 0x81658d, [18, 70], .85, 'Crowded low-city passages below the arterial viaducts.'],
-  ['cut', 'The Cut', 163, 950, 1300, 900, 0xaa7869, [10, 48], .76, 'Informal hillside workshops and close-packed housing.'],
-  ['southward', 'Southward', 425, 915, 1000, 1150, 0x8f9b71, [25, 95], .68, 'Residential courtyards and long, green neighborhood streets.'],
-  ['foundry', 'Foundry', 682, 891, 1000, 1200, 0x7e9298, [18, 72], .54, 'Working factories, heat towers and freight service roads.'],
-  ['silver-delta', 'Silver Delta', 881, 927, 900, 1100, 0x9a918b, [14, 64], .50, 'Coastal distribution halls and the southern expressway interchange.'],
-].map(([id, name, px, py, radiusX, radiusZ, color, heightRange, density, description]) => ({
+  ['core', 'Afterlight Core', 458, 553, 1050, 1050, 0xb98cac, .88, 'Dense neon canyons, stacked shopfronts and the old transit loop.'],
+  ['citadel', 'Citadel', 673, 466, 1000, 1150, 0x739db1, .76, 'Corporate towers and elevated public concourses.'],
+  ['east-reach', 'East Reach', 870, 592, 800, 950, 0x68aea9, .65, 'Commercial terraces overlooking Blackwater Bay.'],
+  ['void-port', 'Void Port', 839, 335, 800, 1350, 0x7d8b95, .48, 'Freight yards, cranes and long waterfront warehouses.'],
+  ['stacks', 'The Stacks', 484, 242, 1200, 900, 0x789b79, .88, 'Tall residential slabs linked by community terraces.'],
+  ['north-ridge', 'North Ridge', 196, 209, 1500, 700, 0x897589, .58, 'Old industrial streets on the high northern escarpment.'],
+  ['ember-heights', 'Ember Heights', 156, 410, 900, 1400, 0xb09574, .66, 'Stepped homes and commercial streets climbing the western hills.'],
+  ['west-end', 'West End', 118, 585, 850, 1050, 0x928caf, .68, 'Mixed workshops, apartments and local market streets.'],
+  ['shadowmarket', 'Shadowmarket', 168, 786, 1150, 950, 0x81658d, .85, 'Crowded low-city passages below the arterial viaducts.'],
+  ['cut', 'The Cut', 163, 950, 1300, 900, 0xaa7869, .76, 'Informal hillside workshops and close-packed housing.'],
+  ['southward', 'Southward', 425, 915, 1000, 1150, 0x8f9b71, .68, 'Residential courtyards and long, green neighborhood streets.'],
+  ['foundry', 'Foundry', 682, 891, 1000, 1200, 0x7e9298, .54, 'Working factories, heat towers and freight service roads.'],
+  ['silver-delta', 'Silver Delta', 881, 927, 900, 1100, 0x9a918b, .50, 'Coastal distribution halls and the southern expressway interchange.'],
+].map(([id, name, px, py, radiusX, radiusZ, color, density, description]) => ({
   id, name, ...fromReference(px, py), mapX: (px - 45) / 952 * 11, mapZ: (py - 135) / 980 * 11, radiusX, radiusZ, color,
-  baseColor: color, heightRange, density, description,
+  baseColor: color, ...DISTRICT_ARCHITECTURE[id], density, description,
 }));
 export const districts = MASTER_DISTRICTS;
 

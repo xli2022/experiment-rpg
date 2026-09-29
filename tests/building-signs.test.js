@@ -8,6 +8,7 @@ import { WorldStream, WORLD_GEOMETRY } from '../src/world-stream.js';
 import { WORLD_LIMIT } from '../src/world-config.js';
 import { WORLD_OBJECTS } from '../src/content.js';
 import { SpatialGrid } from '../src/spatial-grid.js';
+import { footprintVertices, polygonFaces } from '../src/building-footprints.js';
 import { createInfrastructureIndex, geometryVolume, infrastructureIntersections } from '../src/infrastructure-clearance.js';
 
 let worldAudit;
@@ -33,9 +34,11 @@ test('every generated building and landmark has a type-appropriate sign on its s
       const nx = Math.sin(sign.yaw), nz = Math.cos(sign.yaw), dx = sign.street.x - p.x, dz = sign.street.z - p.z;
       assert.ok((nx * dx + nz * dz) / Math.hypot(dx, dz) >= Math.SQRT1_2 - 1e-9, `${p.id} faces the street, not a rear yard`);
       const c = Math.cos(p.yaw), s = Math.sin(p.yaw), lx = (sign.x - p.x) * c - (sign.z - p.z) * s, lz = (sign.x - p.x) * s + (sign.z - p.z) * c;
-      const onSide = Math.abs(lx) > Math.abs(lz);
-      assert.ok(Math.abs(Math.abs(onSide ? lx : lz) - (onSide ? p.w : p.d) / 2 - .38) < 1e-8, 'sign is attached just outside its wall');
-      assert.ok(sign.w < (onSide ? p.d : p.w) && sign.h > 1, 'sign fits the frontage');
+      const faces = polygonFaces(footprintVertices(p.footprint, p.w, p.d));
+      const distance = Math.max(...faces.map(f => (lx - f.x) * f.nx + (lz - f.z) * f.nz));
+      assert.ok(Math.abs(distance - .38) < 1e-8, 'sign is attached just outside the actual wall perimeter');
+      const mounted = faces.find(f => Math.hypot(lx - f.x - f.nx * .38, lz - f.z - f.nz * .38) < 1e-8);
+      assert.ok(mounted && sign.w < (p.footprint === 'circle' ? p.w * .65 : mounted.width) && sign.h > 1, 'sign fits the frontage');
       assert.ok(sign.y - sign.h / 2 > p.y + 4 && sign.y + sign.h / 2 < p.y + p.h, 'sign clears the entrance and roof');
       if (['apartment', 'terrace'].includes(p.type)) assert.ok(sign.y + sign.h / 2 < p.y + 6.8, 'first balcony does not hide the residential nameplate');
       assert.ok(sign.uv.every(Number.isFinite) && sign.uv[0] >= 0 && sign.uv[1] >= 0 && sign.uv[0] + sign.uv[2] <= 1 && sign.uv[1] + sign.uv[3] <= 1);
