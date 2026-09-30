@@ -175,7 +175,6 @@ body.touch:not(.playing) .map-panel,
 body.touch:not(.playing) .player-panel,
 body.touch:not(.playing) .weapon-panel{display:none}
 body.touch:not(.playing) #journal-button{display:none}
-body.touch .welcome::before{inset:0}
 @media(max-width:900px), (max-height:560px){
   body:not(.playing) .map-panel,
   body:not(.playing) .player-panel,
@@ -188,7 +187,6 @@ body.touch .welcome::before{inset:0}
     overscroll-behavior:contain;scrollbar-width:thin;
   }
   .welcome>*{flex-shrink:0;max-width:100%}
-  .welcome::before{inset:0}
   .welcome-tag{margin:0 0 20px}
   .welcome-kicker{margin:0 0 12px}
   .welcome h2{font-size:clamp(32px,10vw,56px);line-height:1.04}
