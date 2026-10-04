@@ -123,7 +123,7 @@ export function expandCity(scene, city) {
   b.finish();
 }
 
-export function createWorldLife(scene, asset, game) {
+export function createWorldLife(scene, asset, game, humanBases = {}) {
   const objects = [], people = [], avatars = {};
   const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), bounds = new THREE.Sphere(new THREE.Vector3(), 3.5);
   const ringGeometry = new THREE.TorusGeometry(.66, .025, 5, 28);
@@ -142,11 +142,13 @@ export function createWorldLife(scene, asset, game) {
     const ring = new THREE.Mesh(ringGeometry, mat); ring.rotation.x = -Math.PI / 2; root.add(ring);
     let body;
     if (place.type === 'contact' && !place.terminal) {
-      const avatar = createNPC(asset, NPC_PROFILES[place.id]); avatars[place.id] = avatar;
-      body = avatar.root; body.position.y = .08; body.rotation.y = place.yaw ?? 0;
+      const profile = NPC_PROFILES[place.id], humanAsset = humanBases[profile.baseModel] ?? asset;
+      const avatar = createNPC(humanAsset, profile); avatars[place.id] = avatar;
+      avatar.root.userData.baseModel = humanAsset === asset ? 'citizen' : profile.baseModel;
+      body = avatar.root; body.position.y = .008 - WORLD_LABEL_LAYOUT.rootOffsetY; body.rotation.y = place.yaw ?? 0;
       const { mixer, action } = avatar;
-      if (action) { action.time = objects.length * .4 % action.getClip().duration; mixer.update(0); }
-      people.push({ body, mixer, place }); root.add(body);
+      if (action) { action.time = objects.length * .4 % action.getClip().duration; avatar.update(0); }
+      people.push({ body, mixer, avatar, place }); root.add(body);
     } else if (place.type === 'memory') {
       body = new THREE.Mesh(chipGeometry, new THREE.MeshBasicMaterial({ color })); body.position.y = 1; root.add(body);
     } else if (place.type === 'cache') {
@@ -183,10 +185,15 @@ export function createWorldLife(scene, asset, game) {
       }
       for (const p of people) {
         const distance = Math.hypot(player.x - p.place.x, player.z - p.place.z);
+        p.elapsed = (p.elapsed ?? 0) + dt;
         if (distance > radius || !p.body.parent?.visible) { p.body.visible = false; continue; }
-        p.body.visible = true; p.elapsed = (p.elapsed ?? 0) + dt;
-        if (distance < 20 || p.elapsed >= .1) { p.mixer.update(p.elapsed); p.elapsed = 0; }
-        if (Math.hypot(player.x - p.place.x, player.z - p.place.z) < 5) p.body.rotation.y = Math.atan2(-(player.x - p.place.x), -(player.z - p.place.z));
+        p.body.visible = true;
+        if (distance < 20 || p.elapsed >= .1) { p.avatar.update(p.elapsed); p.elapsed = 0; }
+        if (distance < 5) {
+          const yaw = Math.atan2(-(player.x - p.place.x), -(player.z - p.place.z));
+          const delta = Math.atan2(Math.sin(yaw - p.body.rotation.y), Math.cos(yaw - p.body.rotation.y));
+          p.body.rotation.y += delta * (1 - Math.exp(-5 * dt));
+        }
       }
     },
   };

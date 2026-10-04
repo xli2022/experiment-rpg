@@ -1,7 +1,24 @@
 {
   "source": "Robot.blend",
   "license": "CC0-1.0",
-  "author": "Quaternius",
+  "author": "Quaternius; Afterlight equipment and surface finish",
+  "geometryDetails": "recessed chest telemetry and sensor lamps",
+  "textures": {
+    "baseColor": [
+      1024,
+      1024
+    ],
+    "normal": [
+      512,
+      512
+    ],
+    "metallicRoughness": [
+      512,
+      512
+    ],
+    "materialCount": 5,
+    "embeddedImages": 3
+  },
   "sourceHeight": 4.496815,
   "minimumY": -0.020304,
   "idleBounds": {
@@ -13,13 +30,13 @@
     "max": [
       1.578764,
       4.476511,
-      1.346106
+      1.346107
     ]
   },
   "headingAdjustment": 3.141592653589793,
   "forward": "+Z",
-  "triangles": 3238,
-  "primitives": 3,
+  "triangles": 3990,
+  "primitives": 5,
   "bones": 43,
   "animations": {
     "Idle": 3.333333,
@@ -36,6 +53,6 @@
   "maxBakedPoseBoundsError": 1.43e-06,
   "recommendedHeight": 1.62,
   "estimatedWalkSpeed": 1.5038,
-  "bytes": 422196,
-  "maxExportedPoseBoundsError": 1.91e-06
+  "bytes": 943732,
+  "maxExportedPoseBoundsError": 2.38e-06
 }

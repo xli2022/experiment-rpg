@@ -159,6 +159,49 @@ test('animation transitions keep both body layers normalized and the gun attache
   for (const jumpPhase of ['start', 'air', 'land']) for (let i = 0; i < 20; i++) step({ speed: 0, jumpPhase, jumpTime: i / 60 });
 });
 
+test('new characters are posed before the first simulation frame', () => {
+  const model = createCharacter(actorAsset());
+  for (const layer of [model.lower, model.upper]) {
+    assert.equal(layer.Idle.getEffectiveWeight(), 1, 'an immediate render must see the authored idle');
+    assert.equal(Object.values(layer).reduce((sum, action) => sum + action.getEffectiveWeight(), 0), 1);
+  }
+  const initial = [...model.bones.values()].map(bone => bone.quaternion.clone());
+  animateCharacter(model, false, 0);
+  for (const [i, bone] of [...model.bones.values()].entries()) assert.deepEqual(bone.quaternion.toArray(), initial[i].toArray());
+});
+
+test('player surfaces preserve authored color textures and add correctly encoded material detail', () => {
+  const asset = actorAsset(), skinColor = new THREE.Texture(); skinColor.colorSpace = THREE.SRGBColorSpace;
+  for (const name of ['Skin', 'BootsAndGloves', 'Hardware', 'Jacket']) {
+    const material = new THREE.MeshStandardMaterial({ map: name === 'Skin' ? skinColor : null }); material.name = name;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material); mesh.name = name; asset.scene.add(mesh);
+  }
+  const model = createCharacter(asset);
+  for (const name of ['Skin', 'BootsAndGloves', 'Hardware', 'Jacket']) {
+    const material = model.body.getObjectByName(name).material;
+    assert.equal(material.map.colorSpace, THREE.SRGBColorSpace);
+    assert.equal(material.normalMap.colorSpace, THREE.NoColorSpace);
+    assert.equal(material.roughnessMap.colorSpace, THREE.NoColorSpace);
+    assert.equal(material.map.anisotropy, 4);
+  }
+  assert.equal(model.body.getObjectByName('Skin').material.map, skinColor, 'the original facial atlas is preserved');
+});
+
+test('long falls keep the airborne loop moving and preserve the final outgoing sample', () => {
+  const model = createCharacter(actorAsset()), duration = model.clips.JumpLoop.duration;
+  const firstTime = duration * 4.21, secondTime = duration * 4.68;
+  for (let frame = 0; frame < 100; frame++) animateCharacter(model, false, 1 / 60, {
+    jumpPhase: 'fall', jumpTime: firstTime, height: 25, verticalSpeed: -5,
+  });
+  const firstPose = [...model.bones.values()].map(bone => bone.quaternion.clone());
+  assert.ok(Math.abs(model.lower.JumpLoop.time - duration * .21) < 1e-6, 'airborne playback wraps after its authored duration');
+  animateCharacter(model, false, 1 / 60, { jumpPhase: 'fall', jumpTime: secondTime, height: 25, verticalSpeed: -5 });
+  assert.ok([...model.bones.values()].some((bone, index) => bone.quaternion.angleTo(firstPose[index]) > .01), 'the fall never freezes on its last key');
+  const outgoing = model.lower.JumpLoop.time;
+  animateCharacter(model, false, 1 / 60, { jumpPhase: 'land', jumpTime: 0, height: 0, verticalSpeed: 0 });
+  assert.equal(model.lower.JumpLoop.time, outgoing, 'landing fades from the last actual airborne pose');
+});
+
 test('parachute animation reaches the risers, stows the weapon and releases into landing', () => {
   const model = createCharacter(actorAsset());
   characterShot(model);

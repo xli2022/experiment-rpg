@@ -1,0 +1,58 @@
+{
+  "source": "Alien_Helmet.blend",
+  "license": "CC0-1.0",
+  "author": "Quaternius; Afterlight equipment and surface finish",
+  "geometryDetails": "ceremonial shoulder mantle, collar rings and ornamental brooch",
+  "textures": {
+    "baseColor": [
+      1024,
+      1024
+    ],
+    "normal": [
+      512,
+      512
+    ],
+    "metallicRoughness": [
+      512,
+      512
+    ],
+    "materialCount": 9,
+    "embeddedImages": 3
+  },
+  "sourceHeight": 3.100237,
+  "minimumY": -0.000468,
+  "idleBounds": {
+    "min": [
+      -0.786765,
+      -0.000468,
+      -0.581012
+    ],
+    "max": [
+      0.787637,
+      3.099769,
+      0.876081
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 23564,
+  "primitives": 9,
+  "bones": 45,
+  "animations": {
+    "Idle": 4.166667,
+    "Walk": 1.041667
+  },
+  "sourceAnimations": {
+    "Idle": "Alien_Idle",
+    "Walk": "Alien_Walk"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 7.2e-07,
+  "recommendedHeight": 1.9,
+  "estimatedWalkSpeed": 1.562,
+  "bytes": 2119380,
+  "maxExportedPoseBoundsError": 1.67e-06
+}

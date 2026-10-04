@@ -79,9 +79,9 @@ async function init() {
   $('loading-text').textContent = 'BUILDING AFTERLIGHT / STREETS, SKYWAYS & STORIES...';
   const characterAssets = await loadCharacterAssets();
   city = createVerticalCity(scene, worldStream, WORLD_OBJECTS);
-  crowd = createCrowd(scene, characterAssets.citizen, city, characterAssets.visitors); character = createCharacter(characterAssets.player); scene.add(character.root);
+  crowd = createCrowd(scene, characterAssets.citizen, city, characterAssets.visitors, characterAssets.humanBases); character = createCharacter(characterAssets.player); scene.add(character.root);
   parachute = createParachute(); character.root.add(parachute.root);
-  worldLife = createWorldLife(scene, characterAssets.citizen, campaign);
+  worldLife = createWorldLife(scene, characterAssets.citizen, campaign, characterAssets.humanBases);
   const portraits = createNPCPortraits(renderer, worldLife.avatars);
   const spawn = refugeArrival(placeById(campaign.data.rest)) ?? refugeArrival(arrival);
   if (!spawn) throw new Error('No clear refuge arrival is available.');
@@ -120,7 +120,8 @@ async function init() {
   // Read-only diagnostics are exposed only in Vite's development mode.
   if (import.meta.env.DEV) window.__AFTERLIGHT__ = { snapshot: () => ({
     started: state.started, paused: state.paused, modal: state.modal, health: state.health, armor: state.armor, ammo: state.ammo, reloading: state.reloading,
-    voice: voice.snapshot(), sound: { enabled: audio.enabled, state: audio.context?.state ?? 'idle' }, cast: Object.keys(worldLife.avatars), crowdArchetypes: crowd.archetypes,
+    voice: voice.snapshot(), sound: { enabled: audio.enabled, state: audio.context?.state ?? 'idle' }, cast: Object.keys(worldLife.avatars),
+    castBases: Object.fromEntries(Object.entries(worldLife.avatars).map(([id, avatar]) => [id, avatar.root.userData.baseModel])), crowdArchetypes: crowd.archetypes,
     position: { x: player.x, y: player.y, z: player.z }, driving: driving ? { x: driving.x, y: driving.y, z: driving.z, speed: driving.speed, yaw: driving.yaw } : null,
     traversal: { groundY: player.groundY, verticalSpeed: player.velocityY, parachute: player.parachute && { ...player.parachute }, climb: player.climb && { mode: player.climb.mode, roofY: player.climb.roofY, phase: player.climb.phase, blocked: player.climb.blocked }, candidate: player.climbCandidate, nearby: nearbyColliders(player.x, player.z, 3) },
     yaw: cameraYaw, pitch: cameraPitch, fps, quality, touch: input.touch, drawCalls: renderer.info.render.calls,

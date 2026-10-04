@@ -1,0 +1,39 @@
+{
+  "id": "tailored",
+  "height": 1.926016,
+  "referenceHeight": 1.9331,
+  "bones": 49,
+  "clips": [
+    "Idle",
+    "Walk",
+    "WalkFormal",
+    "Jog",
+    "Run",
+    "JumpStart",
+    "JumpLoop",
+    "JumpLand",
+    "ArmedIdle",
+    "Aim",
+    "AimUp",
+    "AimDown",
+    "Reload",
+    "Fire",
+    "Hit",
+    "Driving"
+  ],
+  "triangles": 24392,
+  "vertices": 12797,
+  "geometry": "Fuller female anatomy with authored elegant blouse and skirt",
+  "bodySource": "MakeHuman CC0 base.obj + female-face.target",
+  "garmentSource": "female_elegantsuit01 (MakeHuman CC0 authored garment, original UV and texture maps)",
+  "animation_source": "Quaternius Universal Animation Library Standard v3",
+  "motion_scale": 1.0665623991769917,
+  "motion_speeds": {
+    "Walk": 1.039898339197567,
+    "WalkFormal": 1.039898339197567,
+    "Jog": 5.71372713844817,
+    "Run": 8.799139793210182
+  },
+  "images": 9,
+  "bytes": 5132088
+}

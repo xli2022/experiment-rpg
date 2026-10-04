@@ -1,0 +1,139 @@
+{
+  "retrievedOn": "2026-10-03",
+  "timezone": "America/Los_Angeles",
+  "license": "CC0-1.0",
+  "licenseSource": "https://static.makehumancommunity.org/assets/assetpacks/makehuman_system_assets.html",
+  "archive": {
+    "source": "https://files2.makehumancommunity.org/asset_packs/makehuman_system_assets/makehuman_system_assets_cc0.zip",
+    "bytes": 280737770,
+    "sha256": "b542127a8e25547c7c29c19f2d1d2adb9a664c80396ecd694095dbc8028a0107"
+  },
+  "files": [
+    {
+      "file": "female_casualsuit01/female_casualsuit01.mhmat",
+      "bytes": 1404,
+      "sha256": "7bef35aade88daf9f4597f3b3c9a45be51cc51caf44012d12ac4e005c8087689",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01.mhmat"
+    },
+    {
+      "file": "female_casualsuit01/female_casualsuit01_ao.png",
+      "bytes": 2153148,
+      "sha256": "f97a31fb02b5f36802a08bfe22bffb1961240d4ecb20059540eec6516d753424",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01_ao.png"
+    },
+    {
+      "file": "female_casualsuit01/female_casualsuit01_diffuse.png",
+      "bytes": 3019656,
+      "sha256": "414d46afa55fba09ad0913484d57df2ba6b597dc8193595a13a12436137dc21b",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01_diffuse.png"
+    },
+    {
+      "file": "female_casualsuit01/female_casualsuit01.thumb",
+      "bytes": 31184,
+      "sha256": "138a4bfb756f0cdfc8116d3f0ebcc14e1e20472bb225ead986b0cc3a8b291212",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01.thumb"
+    },
+    {
+      "file": "female_casualsuit01/female_casualsuit01.mhclo",
+      "bytes": 150568,
+      "sha256": "8a17e4edceeb22ef30ce102ed05fb3463ca0eeb61addc7811f4867fde5963fa4",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01.mhclo"
+    },
+    {
+      "file": "female_casualsuit01/female_casualsuit01.obj",
+      "bytes": 175427,
+      "sha256": "b6cfaf08b291fe10ea312d37e98d5e328eced5828bdb6f96ecac6bf4ababe652",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01.obj"
+    },
+    {
+      "file": "female_casualsuit01/female_casualsuit01_normal.png",
+      "bytes": 5744103,
+      "sha256": "7bff7afbbc3f068e06f69abcddc8c2c9ce667ec181e0f2a918f8af78eba12610",
+      "archiveMember": "clothes/female_casualsuit01/female_casualsuit01_normal.png"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01_ao.png",
+      "bytes": 1350953,
+      "sha256": "0f89546c63ab16e2c1ba0556da7e07264b98b58e6200b043491f92f796b87673",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01_ao.png"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01.mhmat",
+      "bytes": 1408,
+      "sha256": "a0b1708efbff3c4ad96f8e7d8cc27fb1652719549455ce94b89bcf6294cfbed0",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01.mhmat"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01_diffuse.png",
+      "bytes": 1996561,
+      "sha256": "ebe6f2afcbaadbe56d5cee6e00bab45e97ce482f0be0e34491d16ca5f98b38ac",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01_diffuse.png"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01.obj",
+      "bytes": 174924,
+      "sha256": "3b46cef6d63968954dc00c39ede649d76c05e5d36fe9f9c677349c88fd424de9",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01.obj"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01_normal.png",
+      "bytes": 1549042,
+      "sha256": "ae3650bce6678cd67d025ab70e68b22683176aeaabc06d8e5b2129af99c762e9",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01_normal.png"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01.thumb",
+      "bytes": 50008,
+      "sha256": "ea5a3491d544888a7187ace16da98f093b498a19220b19a8c317f78fbf2697c6",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01.thumb"
+    },
+    {
+      "file": "female_elegantsuit01/female_elegantsuit01.mhclo",
+      "bytes": 151008,
+      "sha256": "8ed657dbc49466e6a485993cfdcfd7b6ac30a0f44408dfd38de7a649477d8928",
+      "archiveMember": "clothes/female_elegantsuit01/female_elegantsuit01.mhclo"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01.obj",
+      "bytes": 302272,
+      "sha256": "d8ef4bf71aa6bd386958921c17e0eed263ef63abc8b50a2c8be6d482f6e1d3f7",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01.obj"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01.thumb",
+      "bytes": 33917,
+      "sha256": "fad50094363c841033ae160982bd5570f40140b6381a5a69562a9cbdf0898e7a",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01.thumb"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01_diffuse.png",
+      "bytes": 3230491,
+      "sha256": "4b59b50f7a8a0325c33e86e29f160f59b2385a6f413fccc88287a1c951c39901",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01_diffuse.png"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01_normal.png",
+      "bytes": 7345267,
+      "sha256": "53f51fd31ec6760c26d377b250bfcdde84be46953f4c72821892b76d13055073",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01_normal.png"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01.mhmat",
+      "bytes": 1389,
+      "sha256": "9af03afa0f8cf2d24b4fceb0bd0e3c400ae0975b402e0ea491a33fa32c3b560b",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01.mhmat"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01.mhclo",
+      "bytes": 254911,
+      "sha256": "77561689f0e9eb13537f67e0582ce4e8b93fc7291ea87f57fd86b38b9114d4e1",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01.mhclo"
+    },
+    {
+      "file": "male_worksuit01/male_worksuit01_ao.png",
+      "bytes": 1205288,
+      "sha256": "1ed5f23c5efab316b98a295e1be7905009e61603657577eb922b4d1c99c46810",
+      "archiveMember": "clothes/male_worksuit01/male_worksuit01_ao.png"
+    }
+  ]
+}

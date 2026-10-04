@@ -36,7 +36,7 @@ Both exported models retain the complete 25,802-triangle geometry and skeletal a
 
 The fitted fashion variants, jewelry, optical implant, mechanical brace, brass bird, compass and braided beard are original procedural additions. `src/npc-materials.js` adds clothing finishes, necklines, midriff, pinstripes, makeup and scars in bind coordinates so they follow the animated surface. Individual additive idle poses adjust the chest and head while retaining the source animation. These changes require no additional external assets or services.
 
-`afterlight-characters.blend` is the editable base source with packed textures and animation actions. `textures/` contains derived 1024 px images. `public/models/*.glb` embed their textures and need no runtime asset service or Blender installation. Runtime character art direction lives in `src/npc-profiles.js`: seven named human designs and twelve crowd archetypes have distinct facial blends, stature, builds, skin tones, wardrobe and hairstyles. Portraits render these actual models with studio lighting.
+`afterlight-characters.blend` is the editable base source with packed textures and animation actions. `textures/` contains derived 1024 px images. `public/models/*.glb` embed their textures and need no runtime asset service or Blender installation. Runtime character art direction lives in `src/npc-profiles.js`: seven named human designs and twenty crowd archetypes have distinct facial blends, stature, builds, skin tones, wardrobe and hairstyles. Portraits render these actual models with studio lighting.
 
 The two female target files were retrieved September 27, 2026 from the official MakeHuman repository and retain their explicit CC0 headers. The universal female target is intentionally empty: it is the default body for this target combination. `node scripts/build_npc_shapes.mjs` derives `src/npc-head-shape.js` from the male and female target combinations in the same bind coordinate system as the GLBs. The runtime interpolates this field to fit skin, eyes and accessories together, then applies individual face/build adjustments. The source target filenames are upstream technical identifiers; cast identities, personalities and skin palettes are independently authored.
 
@@ -48,3 +48,15 @@ npm test
 ```
 
 The script also renders front/back studio images in `test-results/` for inspection. Select a rig action in Blender's Action Editor to inspect each animation.
+
+## Original surface and wardrobe additions
+
+The eight additional human resident archetypes, braids/ponytail/fade/receding hairstyles, rounded pilot/coat/utility/vendor accessories and `src/npc-surfaces.js` texture tiles are original Afterlight work. The shared, deterministic 64 px tiles supply albedo, normal and roughness for cloth, leather, metal, hair and skin. Color maps use sRGB and data maps remain linear. They require no external service, image download or additional license. Existing CC0 skin and garment images remain the source of facial and clothing detail. Runtime skin tinting preserves texture detail without applying the complexion twice; derivative filtering prevents pinstripe shimmer. The player uses the same small surface maps for boots, gloves and hardware.
+
+The development studio at `/tools/characters.html` uses the actual runtime assets and profiles. The model tests cover UVs, material maps, finite deformation, independent rigs and resource lifetime; `scripts/check_characters.mjs` additionally verifies real browser image decoding and shader compilation.
+
+## Distinct human base models
+
+`scripts/build_human_bases.py` assembles three additional human bases from the original CC0 body mesh, macro targets and skin weights. The `flight` base uses female anatomy with the authored `female_casualsuit01` shirt and jeans; `utility` uses broad male anatomy with `male_worksuit01` overalls and shirt; `tailored` uses fuller female anatomy with the `female_elegantsuit01` blouse and skirt. These three distinct CC0 garments retain their authored mesh topology and fitting maps, independent of `male_casualsuit05`. Source files and download/license records are preserved in [source/clothes](source/clothes/SOURCES.md). Original fitted footwear and runtime accessories complete the designs. Each export includes UVs, embedded PBR textures, its own 49-bone skin and all 16 retargeted Quaternius clips. Per-base JSON records list dimensions, triangle counts and calibrated motion speeds. Editable sources are saved under `human-bases/`; playable GLBs are in `public/models/humans/`.
+
+The original `citizen` plus `utility` provide two male bases; `flight` and `tailored` provide two female bases. Five crowd designs use each, for ten men and ten women. Named cast identities are preserved, including Jun's nonbinary identity. Runtime selection uses the actual separate GLB for each profile, retaining its garment maps and using its height and gait metadata.

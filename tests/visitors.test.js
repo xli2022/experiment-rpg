@@ -65,8 +65,8 @@ const resources = root => {
 };
 const geometryState = geometry => Object.fromEntries(Object.entries(geometry.attributes).map(([name, attribute]) => [name, digest(attribute.array)]));
 
-test('all four visitor exports contain embedded models and real animated skeletons', () => {
-  assert.deepEqual(VISITOR_PROFILES.map(profile => profile.id).sort(), ['alien-resident', 'alien-scout', 'robot-scout', 'robot-worker']);
+test('all eight visitor exports contain embedded models and real animated skeletons', () => {
+  assert.deepEqual(VISITOR_PROFILES.map(profile => profile.id).sort(), ['alien-envoy', 'alien-navigator', 'alien-resident', 'alien-scout', 'robot-courier', 'robot-scout', 'robot-sentinel', 'robot-worker']);
   for (const profile of VISITOR_PROFILES) {
     const { asset, document } = loaded.get(profile.id);
     assert.ok(document.skins?.length > 0, `${profile.id}: exported skin`);
@@ -169,5 +169,104 @@ test('cloned visitors animate and dispose independently without changing source 
     assert.deepEqual(sourceResources.geometries.map(geometryState), sourceGeometry, `${profile.id}: source geometry preserved`);
     assert.deepEqual(sourceResources.materials.map(material => material.toJSON()), sourceMaterials, `${profile.id}: source materials preserved`);
     assert.equal(disposals.length, 0, `${profile.id}: shared GPU resources remain usable`);
+  }
+});
+
+test('every visitor primitive has usable UVs and embedded color, roughness and normal atlases', () => {
+  for (const profile of VISITOR_PROFILES) {
+    const { asset, document } = loaded.get(profile.id);
+    assert.equal(document.images.length, 3, `${profile.id}: three shared PBR atlases`);
+    for (const image of document.images) {
+      assert.equal(image.mimeType, 'image/png', `${profile.id}: lossless packed atlas`);
+      assert.ok(document.bufferViews[image.bufferView].byteLength > 1000, `${profile.id}: actual surface detail`);
+    }
+    for (const material of document.materials) {
+      assert.ok(material.pbrMetallicRoughness?.baseColorTexture, `${profile.id}/${material.name}: base color map`);
+      assert.ok(material.pbrMetallicRoughness?.metallicRoughnessTexture, `${profile.id}/${material.name}: roughness map`);
+      assert.ok(material.normalTexture, `${profile.id}/${material.name}: tangent normal map`);
+      if (material.name === 'Glass') {
+        assert.equal(material.alphaMode, 'BLEND');
+        assert.ok(material.pbrMetallicRoughness.baseColorFactor[3] < .2, `${profile.id}: see-through helmet`);
+      }
+    }
+    for (const mesh of objects(asset.scene, object => object.isMesh)) {
+      const uv = mesh.geometry.getAttribute('uv');
+      assert.ok(uv?.count > 0, `${profile.id}: UV-mapped mesh`);
+      assert.ok([...uv.array].every(value => Number.isFinite(value) && value >= 0 && value <= 1), `${profile.id}: valid atlas UVs`);
+      const u = new Set(), v = new Set();
+      for (let index = 0; index < uv.count; index++) { u.add(uv.getX(index)); v.add(uv.getY(index)); }
+      assert.ok(u.size >= 2 && v.size >= 2, `${profile.id}/${mesh.name}/${mesh.material.name}: nondegenerate texture coordinates (${u.size},${v.size}, ${uv.count} vertices)`);
+      const weights = mesh.geometry.getAttribute('skinWeight');
+      for (let index = 0; index < weights.count; index++) {
+        const total = weights.getX(index) + weights.getY(index) + weights.getZ(index) + weights.getW(index);
+        assert.ok(Math.abs(total - 1) < 1e-5, `${profile.id}: normalized skin weights`);
+      }
+    }
+  }
+});
+
+test('visitor archetypes have different geometry and exporter-verified rig metadata', () => {
+  for (const [original, variant] of [['robot-scout','robot-courier'], ['robot-worker','robot-sentinel'], ['alien-resident','alien-envoy'], ['alien-scout','alien-navigator']]) {
+    const geometry = id => skins(loaded.get(id).asset.scene).map(mesh => digest(mesh.geometry.attributes.position.array));
+    assert.notDeepEqual(geometry(original), geometry(variant), `${variant}: an actual geometric variant`);
+  }
+  for (const profile of VISITOR_PROFILES) {
+    const metadata = JSON.parse(readFileSync(new URL(`../public/models/visitors/${profile.id}.json`, import.meta.url)));
+    assert.equal(metadata.recommendedHeight, profile.height);
+    assert.equal(metadata.estimatedWalkSpeed, profile.walkSpeed, `${profile.id}: gait calibration matches exported height`);
+    assert.ok(metadata.triangles > 3000 && metadata.triangles < 35000, `${profile.id}: detailed crowd mesh budget`);
+    assert.ok(metadata.maxBakedPoseBoundsError < .002);
+    assert.ok(metadata.maxExportedPoseBoundsError < metadata.sourceHeight * .005);
+    assert.ok(Object.values(metadata.rootTranslationDrift).every(drift => drift < .001));
+  }
+});
+
+test('visitor gait responds to speed and blends to a stable idle', () => {
+  for (const profile of VISITOR_PROFILES) {
+    const actor = createVisitor(loaded.get(profile.id).asset, profile, 'Idle');
+    for (let frame = 0; frame < 30; frame++) actor.update(1 / 60, profile.walkSpeed * .6);
+    assert.equal(actor.animation, 'Walk');
+    assert.ok(Math.abs(actor.actions.Walk.getEffectiveTimeScale() - .6) < 1e-6, `${profile.id}: distance-matched gait`);
+    assert.ok(actor.actions.Walk.getEffectiveWeight() > .99, `${profile.id}: smooth transition completes`);
+    for (let frame = 0; frame < 30; frame++) actor.update(1 / 60, 0);
+    assert.equal(actor.animation, 'Idle');
+    assert.ok(actor.actions.Idle.getEffectiveWeight() > .99, `${profile.id}: settled idle`);
+    assert.equal(actor.actions.Walk.getEffectiveTimeScale(), 0, `${profile.id}: stopped feet`);
+    actor.setAnimation('Walk');
+    assert.equal(actor.action.getEffectiveWeight(), 1, `${profile.id}: preview exact clip`);
+    actor.dispose();
+  }
+});
+
+test('visitor contact correction prevents sole penetration throughout gait and blends', () => {
+  for (const profile of VISITOR_PROFILES) {
+    const actor = createVisitor(loaded.get(profile.id).asset, profile, 'Walk');
+    actor.root.position.set(3, 1.2, -4); actor.root.rotation.y = .7;
+    const clip = actor.action.getClip(), originalPosition = actor.root.position.clone();
+    for (let index = 0; index <= 80; index++) {
+      actor.mixer.setTime(clip.duration * index / 81); actor.ground();
+      const bounds = new THREE.Box3().setFromObject(actor.root, true);
+      assert.ok(bounds.min.y >= actor.root.position.y + .0028, `${profile.id}: soles clear the ground at phase ${index / 81} (${bounds.min.y - actor.root.position.y})`);
+      assert.ok(bounds.min.y < actor.root.position.y + .15, `${profile.id}: preserve compact native foot lift`);
+    }
+    for (let index = 0; index < 80; index++) {
+      actor.update(1 / 60, index < 40 ? 0 : profile.walkSpeed);
+      const bounds = new THREE.Box3().setFromObject(actor.root, true);
+      assert.ok(bounds.min.y >= actor.root.position.y + .0028, `${profile.id}: blended soles stay above ground`);
+    }
+    assert.ok(actor.root.position.equals(originalPosition), `${profile.id}: grounding preserves navigation placement`);
+    actor.dispose();
+  }
+});
+
+test('clear alien helmets do not cast opaque shadows over their faces', () => {
+  for (const profile of VISITOR_PROFILES.filter(profile => ['alien-resident','alien-envoy'].includes(profile.id))) {
+    const actor = createVisitor(loaded.get(profile.id).asset, profile);
+    const helmet = objects(actor.root, object => object.isMesh && object.material.name === 'Glass');
+    assert.equal(helmet.length, 1);
+    assert.equal(helmet[0].castShadow, false);
+    assert.equal(helmet[0].material.transparent, true);
+    assert.ok(helmet[0].material.opacity < .2);
+    actor.dispose();
   }
 });

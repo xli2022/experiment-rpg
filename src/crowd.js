@@ -96,33 +96,51 @@ function pedestrianSlots(paths, city, player, radius, spacing) {
 }
 
 // Full authored skeletal motion, including the hands, torso and feet.
-export function createCrowd(scene, asset, city = null, visitorAssets = {}) {
-  const count = 26, random = seededRandom(707);
+export function createCrowd(scene, asset, city = null, visitorAssets = {}, humanBases = {}) {
+  // Each archetype gets a reusable slot. Interleave visitors with pairs of
+  // humans so lower population budgets still show a representative mixture;
+  // the district budget below continues to cap the active population.
+  const roster = [];
+  for (let i = 0; i < Math.max(CROWD_PROFILES.length, VISITOR_PROFILES.length * 2); i++) {
+    if (CROWD_PROFILES[i]) roster.push({ human: CROWD_PROFILES[i] });
+    if (i % 2 === 0 && VISITOR_PROFILES[i / 2]) roster.push({ visitor: VISITOR_PROFILES[i / 2] });
+  }
+  const count = roster.length, random = seededRandom(707);
   let drawCalls = 0, active = 0, quality = 'high', target = count, spacing = 7, district = null;
   const frustum = new THREE.Frustum(), matrix = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 2);
-  let paths = [], slots = [], scanTime = 0, spawnTime = 0, firstUpdate = true, scanX = Infinity, scanY = Infinity, scanZ = Infinity;
+  let paths = [], slots = [], scanTime = 0, spawnTime = 0, spawnCursor = 0, firstUpdate = true, scanX = Infinity, scanY = Infinity, scanZ = Infinity;
   const inView = p => { sphere.center.set(p.x, (p.y ?? 0) + 1, p.z); return frustum.intersectsSphere(sphere); };
-  let humanIndex = 0;
-  const people = Array.from({ length: count }, (_, i) => {
-    const visitor = i % 3 === 1 ? VISITOR_PROFILES[Math.floor(i / 3) % VISITOR_PROFILES.length] : null;
+  let fallbackIndex = 0;
+  const people = roster.map(({ visitor, human }, i) => {
     const available = visitor && visitorAssets[visitor.id];
-    const profile = available ? visitor : CROWD_PROFILES[humanIndex++ % CROWD_PROFILES.length];
+    const profile = available ? visitor : human ?? CROWD_PROFILES[fallbackIndex++ % CROWD_PROFILES.length];
     const species = available ? visitor.species : 'human', model = profile.id;
-    const avatar = available ? createVisitor(available, profile, 'Walk') : createNPC(asset, profile, i % 3 ? 'Walk' : 'WalkFormal');
-    const { root, mixer, action, scale } = avatar;
+    const humanAsset = humanBases[profile.baseModel] ?? asset;
+    const avatar = available ? createVisitor(available, profile, 'Walk') : createNPC(humanAsset, profile, i % 3 ? 'Walk' : 'WalkFormal');
+    const { root, mixer, action } = avatar;
     root.userData.species = species; root.userData.model = model;
+    if (!available) root.userData.baseModel = humanAsset === asset ? 'citizen' : profile.baseModel;
     const speed = (i % 2 ? 1 : -1) * (.85 + random() * .35);
-    root.position.set((i < 14 ? 0 : i < 20 ? -64 : 64) + (i % 2 ? 10.5 : -10.5), .25, -120 + random() * 240);
+    root.position.set((i < 14 ? 0 : i < 20 ? -64 : 64) + (i % 2 ? 10.5 : -10.5), .04, -120 + random() * 240);
     root.rotation.y = speed > 0 ? Math.PI : 0;
     root.traverseVisible(object => { if (object.isMesh) drawCalls++; });
     action.time = random() * action.getClip().duration;
-    action.timeScale = Math.abs(speed) / (avatar.walkSpeed ?? 1.084589 * scale);
-    mixer.update(0); if (!city?.masterPlan) scene.add(root); else root.visible = false;
-    return { root, mixer, speed, species, model, elapsed: 0, spawn: root.position.clone(), regional: false, lane: 0, along: 0, path: null };
+    avatar.update(0, Math.abs(speed));
+    if (!city?.masterPlan) scene.add(root); else root.visible = false;
+    return { root, mixer, avatar, speed, species, model, elapsed: 0, travelled: 0, spawn: root.position.clone(), regional: false, lane: 0, along: 0, path: null };
   });
   function retire(person) {
-    person.path = null; person.root.visible = false; person.elapsed = 0;
+    person.path = null; person.root.visible = false; person.elapsed = person.travelled = 0;
     if (person.root.parent) scene.remove(person.root);
+  }
+  function animate(person, distance) {
+    if (distance >= 22 && person.elapsed <= .1) return;
+    // Use the distance actually travelled, including slower turns and path
+    // endpoints. Keep all elapsed time when an offscreen pedestrian reappears
+    // so the skeletal cycle remains in step with its world movement.
+    const speed = person.elapsed > 0 ? person.travelled / person.elapsed : Math.abs(person.speed);
+    person.avatar.update(person.elapsed, speed);
+    person.elapsed = person.travelled = 0;
   }
   function relocate(person, camera) {
     let best = null, score = Infinity;
@@ -143,7 +161,12 @@ export function createCrowd(scene, asset, city = null, visitorAssets = {}) {
     snapshot() {
       const assigned = people.filter(person => person.path), species = { human: 0, robot: 0, alien: 0 };
       for (const person of assigned) species[person.species] = (species[person.species] ?? 0) + 1;
-      return { capacity: count, target, assigned: assigned.length, active, species, spacing, district, quality, paths: paths.length, slots: slots.length };
+      const countBases = list => list.filter(person => person.species === 'human').reduce((counts, person) => {
+        const base = person.root.userData.baseModel; counts[base] = (counts[base] ?? 0) + 1; return counts;
+      }, {});
+      return { capacity: count, target, assigned: assigned.length, active, species,
+        humanBases: countBases(assigned), rosterHumanBases: countBases(people),
+        spacing, district, quality, paths: paths.length, slots: slots.length };
     },
     update(dt, player, camera, radius = 65) {
     if (camera) { camera.updateMatrixWorld(); matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(matrix); } active = 0;
@@ -172,30 +195,41 @@ export function createCrowd(scene, asset, city = null, visitorAssets = {}) {
       if (spawnTime <= 0) {
         spawnTime = .35;
         let attempts = firstUpdate ? count : 2;
-        for (const person of people) if (!person.path && assignedCount < target && attempts-- > 0) {
+        for (let examined = 0; examined < count && assignedCount < target && attempts > 0; examined++) {
+          const person = people[spawnCursor++ % count];
+          if (person.path) continue;
+          attempts--;
           if (relocate(person, camera)) assignedCount++;
         }
       }
       for (const person of people) {
         if (!person.path) continue;
-        let next = person.along + person.speed * dt;
+        const previousAlong = person.along;
+        // Turn on the spot before stepping in the new direction, rather than
+        // sliding backwards for half a second while the body catches up.
+        if (person.speed !== 0) {
+          const yaw = Math.atan2((person.path.a.x - person.path.b.x) * Math.sign(person.speed), (person.path.a.z - person.path.b.z) * Math.sign(person.speed));
+          person.root.rotation.y += angleDelta(person.root.rotation.y, yaw) * (1 - Math.exp(-7 * dt));
+        }
+        const pathYaw = Math.atan2((person.path.a.x - person.path.b.x) * Math.sign(person.speed), (person.path.a.z - person.path.b.z) * Math.sign(person.speed));
+        const forward = Math.max(0, Math.cos(angleDelta(person.root.rotation.y, pathYaw)));
+        let next = person.along + person.speed * forward * dt;
         if (next < 0 || next > person.path.length) { next = clamp(next, 0, person.path.length); person.speed *= -1; }
         const ahead = samplePedestrianPath(person.path, next, city);
         if (people.some(other => other !== person && other.path && !separated(ahead, other.root.position, 1.5) &&
           Math.hypot(ahead.x - other.root.position.x, ahead.z - other.root.position.z) < Math.hypot(person.root.position.x - other.root.position.x, person.root.position.z - other.root.position.z))) {
-          person.speed *= -1; next = clamp(person.along + person.speed * dt, 0, person.path.length);
+          person.speed *= -1; next = person.along;
         }
         person.along = next;
         const p = samplePedestrianPath(person.path, person.along, city);
         person.root.position.set(p.x, p.y, p.z);
-        const yaw = Math.atan2((person.path.a.x - person.path.b.x) * Math.sign(person.speed), (person.path.a.z - person.path.b.z) * Math.sign(person.speed));
-        person.root.rotation.y += angleDelta(person.root.rotation.y, yaw) * (1 - Math.exp(-7 * dt));
         const distance = Math.hypot(p.x - player.x, p.z - player.z);
         person.root.visible = distance < radius && (!camera || inView(p)); person.elapsed += dt;
+        person.travelled += Math.abs(person.along - previousAlong);
         if (!person.root.visible) { if (person.root.parent) scene.remove(person.root); continue; }
         if (!person.root.parent) scene.add(person.root);
         active++;
-        if (distance < 22 || person.elapsed > .1) { person.mixer.update(Math.min(person.elapsed, .25)); person.elapsed = 0; }
+        animate(person, distance);
       }
       firstUpdate = false;
       return;
@@ -219,12 +253,12 @@ export function createCrowd(scene, asset, city = null, visitorAssets = {}) {
       }
       distance = Math.hypot(person.root.position.x - player.x, person.root.position.z - player.z);
       sphere.center.copy(person.root.position); sphere.center.y += 1;
-      person.root.visible = distance < radius && frustum.intersectsSphere(sphere);
-      person.elapsed += dt;
+      person.root.visible = distance < radius && (!camera || frustum.intersectsSphere(sphere));
+      person.elapsed += dt; person.travelled += Math.abs(person.speed) * dt;
       if (!person.root.visible) { if (person.root.parent) scene.remove(person.root); continue; }
       if (!person.root.parent) scene.add(person.root);
       active++;
-      if (distance < 22 || person.elapsed > .1) { person.mixer.update(Math.min(person.elapsed, .25)); person.elapsed = 0; }
+      animate(person, distance);
     }
   } };
 }

@@ -1,0 +1,58 @@
+{
+  "source": "Robot.blend",
+  "license": "CC0-1.0",
+  "author": "Quaternius; Afterlight equipment and surface finish",
+  "geometryDetails": "cargo backpack with rails, long signal antenna and chest dispatch display",
+  "textures": {
+    "baseColor": [
+      1024,
+      1024
+    ],
+    "normal": [
+      512,
+      512
+    ],
+    "metallicRoughness": [
+      512,
+      512
+    ],
+    "materialCount": 6,
+    "embeddedImages": 3
+  },
+  "sourceHeight": 5.116818,
+  "minimumY": -0.020304,
+  "idleBounds": {
+    "min": [
+      -1.520695,
+      -0.020304,
+      -1.35
+    ],
+    "max": [
+      1.578764,
+      5.096514,
+      1.346107
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 5498,
+  "primitives": 6,
+  "bones": 43,
+  "animations": {
+    "Idle": 3.333333,
+    "Walk": 0.958333
+  },
+  "sourceAnimations": {
+    "Idle": "Robot_Idle",
+    "Walk": "Robot_Walking"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 1.43e-06,
+  "recommendedHeight": 1.74,
+  "estimatedWalkSpeed": 1.4194,
+  "bytes": 1139932,
+  "maxExportedPoseBoundsError": 2.86e-06
+}

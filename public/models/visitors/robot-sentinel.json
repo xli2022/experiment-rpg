@@ -1,0 +1,58 @@
+{
+  "source": "George.gltf",
+  "license": "CC0-1.0",
+  "author": "Quaternius; Afterlight equipment and surface finish",
+  "geometryDetails": "heavy shoulder shells, raised optical pod, reinforced chest and rear power cells",
+  "textures": {
+    "baseColor": [
+      1024,
+      1024
+    ],
+    "normal": [
+      512,
+      512
+    ],
+    "metallicRoughness": [
+      512,
+      512
+    ],
+    "materialCount": 9,
+    "embeddedImages": 3
+  },
+  "sourceHeight": 6.456647,
+  "minimumY": -0.019082,
+  "idleBounds": {
+    "min": [
+      -2.057407,
+      -0.019082,
+      -1.15
+    ],
+    "max": [
+      2.096247,
+      6.437565,
+      1.686334
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 12210,
+  "primitives": 9,
+  "bones": 47,
+  "animations": {
+    "Idle": 3.333333,
+    "Walk": 0.833333
+  },
+  "sourceAnimations": {
+    "Idle": "Idle",
+    "Walk": "Walk"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 1.19e-06,
+  "recommendedHeight": 2.02,
+  "estimatedWalkSpeed": 2.8338,
+  "bytes": 1834212,
+  "maxExportedPoseBoundsError": 4.53e-06
+}

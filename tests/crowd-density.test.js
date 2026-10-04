@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createCrowd } from '../src/crowd.js';
 import { VISITOR_PROFILES } from '../src/npc-visitors.js';
+import { CROWD_PROFILES, HUMAN_BASE_MODELS } from '../src/npc-profiles.js';
 import { populationFor } from '../src/population.js';
 import { SpatialGrid } from '../src/spatial-grid.js';
 
-const asset = () => ({ scene: new THREE.Group(), animations: ['Idle', 'Walk', 'WalkFormal'].map(name => new THREE.AnimationClip(name, 1, [])) });
+const asset = () => ({ scene: new THREE.Group(), userData: { baseModel: 'citizen' }, animations: ['Idle', 'Walk', 'WalkFormal'].map(name => new THREE.AnimationClip(name, 1, [])) });
 function visitorAsset() {
   const scene = new THREE.Group(), bone = new THREE.Bone(); bone.name = 'VisitorRoot';
   const geometry = new THREE.BoxGeometry(.5, 1.8, .45).translate(0, .9, 0), vertices = geometry.attributes.position.count;
@@ -35,6 +36,7 @@ function districtCity(id, streets = true) {
   return city;
 }
 const assigned = crowd => crowd.people.filter(person => person.path);
+const poolSize = CROWD_PROFILES.length + VISITOR_PROFILES.length;
 
 test('pedestrian density follows district and quality budgets while preserving the fixed avatar pool', () => {
   const player = { x: 0, y: 0, z: 0 };
@@ -42,7 +44,7 @@ test('pedestrian density follows district and quality budgets while preserving t
     const city = districtCity(district), crowd = createCrowd(new THREE.Scene(), asset(), city);
     crowd.setQuality(quality); crowd.update(0, player, null, quality === 'low' ? 42 : 65);
     const expected = populationFor(city, player, quality), snapshot = crowd.snapshot();
-    assert.equal(crowd.people.length, 26);
+    assert.equal(crowd.people.length, poolSize);
     assert.equal(snapshot.target, expected.pedestrians);
     assert.equal(snapshot.assigned, expected.pedestrians);
     assert.deepEqual(snapshot.species, { human: expected.pedestrians, robot: 0, alien: 0 });
@@ -63,8 +65,10 @@ test('robot and alien walkers share the normal crowd budget and navigation at bo
   for (const quality of ['high', 'low']) {
     const city = districtCity('core'), crowd = createCrowd(new THREE.Scene(), asset(), city, visitors);
     crowd.setQuality(quality); crowd.update(0, player, null, 90);
-    assert.equal(crowd.count, 26);
-    assert.equal(crowd.archetypes, 12 + VISITOR_PROFILES.length, 'Visitor slots retain the full human wardrobe variety');
+    assert.equal(crowd.count, poolSize);
+    const humanSlots = crowd.people.filter(person => person.species === 'human').length;
+    assert.equal(crowd.archetypes, Math.min(CROWD_PROFILES.length, humanSlots) + VISITOR_PROFILES.length, 'Visitor slots retain a different human wardrobe in each available slot');
+    assert.deepEqual(new Set(crowd.people.map(person => person.model)), new Set([...CROWD_PROFILES, ...VISITOR_PROFILES].map(profile => profile.id)), 'every authored human, robot and alien is eligible for the crowd');
     const snapshot = crowd.snapshot();
     assert.equal(snapshot.assigned, populationFor(city, player, quality).pedestrians);
     assert.deepEqual(new Set(assigned(crowd).map(person => person.species)), new Set(['human', 'robot', 'alien']));
@@ -88,11 +92,29 @@ test('unavailable visitor models fall back to human walkers while available mode
   const profile = VISITOR_PROFILES[0], visitors = { [profile.id]: visitorAsset() };
   const crowd = createCrowd(new THREE.Scene(), asset(), districtCity('core'), visitors);
   crowd.update(0, { x: 0, y: 0, z: 0 }, null, 90);
-  assert.equal(crowd.archetypes, 13);
+  assert.equal(crowd.archetypes, CROWD_PROFILES.length + 1);
   assert.ok(crowd.people.some(person => person.model === profile.id));
   assert.ok(crowd.people.every(person => person.species === 'human' || person.model === profile.id));
   assert.equal(crowd.snapshot().assigned, 24, 'Missing optional downloads never reduce pedestrian capacity');
-  assert.equal(new Set(crowd.people.filter(person => person.species === 'human').map(person => person.model)).size, 12);
+  assert.equal(new Set(crowd.people.filter(person => person.species === 'human').map(person => person.model)).size, CROWD_PROFILES.length);
+});
+
+test('human profile assignments select independent base assets and gracefully fall back when absent', () => {
+  const citizen = asset(); citizen.scene.name = 'CitizenSource';
+  const humanBases = Object.fromEntries(HUMAN_BASE_MODELS.map(base => {
+    const source = asset(); source.scene.name = `${base.id}Source`; source.userData.baseModel = base.id;
+    return [base.id, source];
+  }));
+  const crowd = createCrowd(new THREE.Scene(), citizen, districtCity('core'), {}, humanBases);
+  for (const base of HUMAN_BASE_MODELS) {
+    const people = crowd.people.filter(person => person.avatar.profile.baseModel === base.id);
+    assert.ok(people.length > 0, `${base.id} must be used by the crowd roster`);
+    assert.ok(people.every(person => person.avatar.body.name === `${base.id}Source`), `${base.id} profiles must clone their distinct source mesh`);
+    assert.ok(people.every(person => person.root.userData.baseModel === base.id));
+  }
+  const fallback = createCrowd(new THREE.Scene(), citizen, districtCity('core'));
+  assert.ok(fallback.people.every(person => person.avatar.body.name === 'CitizenSource'));
+  assert.ok(fallback.people.every(person => person.root.userData.baseModel === 'citizen'));
 });
 
 test('street and upper-market crowds prioritize the player floor without a fixed deck quota', () => {
@@ -125,6 +147,24 @@ test('newly available walking space fills with a bounded placement budget', () =
   assert.equal(assigned(crowd).length, 4);
 });
 
+test('population refill rotates through every model without raising the active pedestrian budget', () => {
+  const city = districtCity('core'), crowd = createCrowd(new THREE.Scene(), asset(), city), player = { x: 0, y: 0, z: 0 };
+  crowd.update(0, player, null, 90);
+  const seen = new Set(assigned(crowd));
+  const originalBudget = populationFor(city, player, 'high').pedestrians;
+  for (let cycle = 0; cycle < 3; cycle++) {
+    crowd.setQuality('low'); crowd.update(.4, player, null, 90);
+    assert.equal(assigned(crowd).length, populationFor(city, player, 'low').pedestrians);
+    crowd.setQuality('high');
+    for (let refill = 0; refill < 5; refill++) {
+      crowd.update(.4, player, null, 90);
+      for (const person of assigned(crowd)) seen.add(person);
+      assert.ok(assigned(crowd).length <= originalBudget);
+    }
+  }
+  assert.equal(seen.size, crowd.count, 'models beyond the first district-sized slice must eventually arrive');
+});
+
 test('lower density retires unseen actors while visible walkers remain continuous', () => {
   const city = districtCity('core'), crowd = createCrowd(new THREE.Scene(), asset(), city), player = { x: 0, y: 0, z: 0 };
   const camera = new THREE.PerspectiveCamera(90, 1, .1, 500);
@@ -142,4 +182,31 @@ test('lower density retires unseen actors while visible walkers remain continuou
   crowd.update(.1, { x: 2000, y: 0, z: 2000 }, camera, 65);
   assert.equal(assigned(crowd).length, 0);
   assert.equal(crowd.active, 0);
+});
+
+test('stationary crowd members idle and offscreen movement retains its full animation clock', () => {
+  const city = districtCity('core'), crowd = createCrowd(new THREE.Scene(), asset(), city), player = { x: 0, y: 0, z: 0 };
+  crowd.update(0, player, null, 150);
+  const person = assigned(crowd)[0];
+  person.speed = 0;
+  const position = person.root.position.clone(), heading = person.root.rotation.y;
+  for (let frame = 0; frame < 90; frame++) crowd.update(1 / 60, player, null, 150);
+  assert.ok(person.root.position.distanceTo(position) < 1e-8);
+  assert.equal(person.root.rotation.y, heading, 'stopping does not rotate the actor toward an arbitrary zero-speed heading');
+  assert.equal(person.avatar.action.getClip().name, 'Idle');
+  assert.ok(person.avatar.actions.Idle.getEffectiveWeight() > .999);
+  const camera = new THREE.PerspectiveCamera(50, 1, .1, 500);
+  camera.position.set(0, 3, 500); camera.lookAt(0, 3, 1000); camera.updateMatrixWorld();
+  const before = person.mixer.time;
+  for (let frame = 0; frame < 120; frame++) crowd.update(1 / 60, player, camera, 150);
+  assert.equal(person.root.visible, false);
+  crowd.update(1 / 60, player, null, 150);
+  assert.ok(Math.abs(person.mixer.time - before - 121 / 60) < .11, 'returning to view does not discard most of its idle/gait timeline');
+});
+
+test('legacy crowd is visible without a camera and rests close to the pedestrian surface', () => {
+  const crowd = createCrowd(new THREE.Scene(), asset());
+  crowd.update(1 / 60, { x: 0, y: 0, z: 0 }, null, 200);
+  assert.equal(crowd.active, crowd.count);
+  assert.ok(crowd.people.every(person => person.root.position.y <= .05), 'the old quarter-meter floating spawn offset is removed');
 });

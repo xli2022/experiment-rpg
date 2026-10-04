@@ -1,12 +1,37 @@
 import * as THREE from 'three';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { headDisplacement } from './npc-shape.js';
 import { npcClothMaterial, npcSkinMaterial } from './npc-materials.js';
+import { npcSurfaceMaterial } from './npc-surfaces.js';
+import { createNPCAnimation } from './npc-animation.js';
+import { createNPCGrounding } from './npc-grounding.js';
 
 const shapeCache = new WeakMap();
 const gaussian = (v, center, spread) => Math.exp(-(((v - center) / spread) ** 2));
 const smooth = THREE.MathUtils.smoothstep;
+
+function fittedProfile(profile, asset) {
+  const baseModel = asset.userData?.baseModel ?? profile.baseModel ?? 'citizen';
+  if (baseModel === 'citizen') return profile;
+  // Female anatomy, broad shoulders and new clothing are baked into these
+  // distinct meshes. Applying the old suit's corrective shapes or painted
+  // neckline again would distort the body and draw bare skin over real fabric.
+  const face = value => 1 + (value - 1) * .4;
+  const eyeBounds = new THREE.Box3();
+  asset.scene.traverse(mesh => {
+    if (mesh.isMesh && mesh.material.name === 'EyeWhite') {
+      mesh.geometry.computeBoundingBox(); eyeBounds.union(mesh.geometry.boundingBox);
+    }
+  });
+  const eyeCenter = eyeBounds.isEmpty() ? new THREE.Vector3(0, 1.7916, -.1425) : eyeBounds.getCenter(new THREE.Vector3());
+  const faceAnchor = { y: eyeCenter.y - 1.7916, z: eyeCenter.z + .1425,
+    xScale: eyeBounds.isEmpty() ? 1 : THREE.MathUtils.clamp(eyeBounds.max.x / .044, .9, 1.1) };
+  return { ...profile, faceShape: 0, waist: 1, hips: 1, shoulders: 1, chest: 0,
+    jaw: face(profile.jaw), cheeks: face(profile.cheeks), faceLength: face(profile.faceLength), nose: profile.nose * .4,
+    faceAnchor, nativeGarment: true, coatDrop: 0, fashion: null };
+}
 
 // Morph in the exported rig's bind space. Keep joint weights and animation
 // tracks intact, and use the same deformation for eyes, clothing and equipment.
@@ -51,26 +76,34 @@ function shapedGeometry(source, profile, materialName) {
 
 function makeWardrobe(body, bones, profile) {
   const groups = new Map(), ownedGeometry = [], ownedMaterials = [];
-  const mat = (color, metalness = 0, roughness = .82) => {
-    const m = new THREE.MeshStandardMaterial({ color, metalness, roughness }); ownedMaterials.push(m); return m;
+  const mat = (color, metalness = 0, roughness = .82, surface = 'cloth') => {
+    const m = npcSurfaceMaterial(color, surface, { metalness, roughness }); ownedMaterials.push(m); return m;
   };
-  const hair = mat(profile.hair, 0, .53), cloth = mat(profile.jacket), accent = mat(profile.accent), leather = mat('#202a30', .05, .4);
-  const trim = mat(profile.fashion ? profile.accent : '#a9aaa0', .72, .28), beard = hair;
-  const piece = (bone, material, geometry, at, scale = [1, 1, 1], rotation = [0, 0, 0]) => {
+  const hair = mat(profile.hair, 0, .82, 'hair'), cloth = mat(profile.jacket), accent = mat(profile.accent), leather = mat('#202a30', .02, .55, 'leather');
+  const trim = mat(profile.fashion ? profile.accent : '#a9aaa0', .72, .38, 'metal'), beard = hair;
+  const piece = (bone, material, geometry, at, scale = [1, 1, 1], rotation = [0, 0, 0], fitHead = true) => {
     const quaternion = rotation.isQuaternion ? rotation : new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation));
     geometry.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(...at), quaternion, new THREE.Vector3(...scale)));
     const attr = geometry.getAttribute('position'), point = new THREE.Vector3();
-    for (let i = 0; i < attr.count; i++) { shapePoint(point.fromBufferAttribute(attr, i), profile); attr.setXYZ(i, point.x, point.y, point.z); }
+    for (let i = 0; i < attr.count; i++) {
+      point.fromBufferAttribute(attr, i);
+      if (bone === 'Head' && profile.faceAnchor && fitHead) {
+        const fit = smooth(-point.z, .07, .14) * (1 - smooth(point.y, 1.845, 1.94));
+        point.x *= 1 + (profile.faceAnchor.xScale - 1) * fit;
+        point.y += profile.faceAnchor.y * fit; point.z += profile.faceAnchor.z * fit;
+      }
+      shapePoint(point, profile); attr.setXYZ(i, point.x, point.y, point.z);
+    }
     geometry.computeVertexNormals();
     const key = `${bone}:${material.uuid}`;
     if (!groups.has(key)) groups.set(key, { bone, material, geometry: [] });
     groups.get(key).geometry.push(geometry);
   };
   const ball = (bone, material, at, size) => piece(bone, material, new THREE.SphereGeometry(1, 14, 10), at, size);
-  const box = (bone, material, at, size, rotation) => piece(bone, material, new THREE.BoxGeometry(1, 1, 1), at, size, rotation);
-  const tube = (bone, material, points, radius) => piece(bone, material, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p))), 14, radius, 5, false), [0, 0, 0]);
+  const box = (bone, material, at, size, rotation) => piece(bone, material, new RoundedBoxGeometry(1, 1, 1, 2, .075), at, size, rotation);
+  const tube = (bone, material, points, radius, fitHead = true) => piece(bone, material, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points.map(p => new THREE.Vector3(...p))), 14, radius, 5, false), [0, 0, 0], [1, 1, 1], [0, 0, 0], fitHead);
   const cap = (material, top = 1.82, size = [.101, .117, .104]) => piece('Head', material, new THREE.SphereGeometry(1, 20, 12, 0, Math.PI * 2, 0, Math.PI * .55), [0, top, -.035], size);
-  if (!['shaved', 'cap', 'beanie'].includes(profile.hairstyle)) cap(hair, 1.831, [.108, .112, .145]);
+  if (!['shaved', 'cap', 'beanie', 'receding', 'highfade'].includes(profile.hairstyle)) cap(hair, 1.831, [.108, .112, .145]);
   if (['bob', 'bun'].includes(profile.hairstyle)) {
     for (const side of [-1, 1]) ball('Head', hair, [side * .087, 1.779, -.02], [.037, .124, .1]);
     ball('Head', hair, [0, 1.786, .036], [.095, .106, .045]);
@@ -92,6 +125,26 @@ function makeWardrobe(body, bones, profile) {
     for (let i = 0; i < 6; i++) piece('Head', hair, new THREE.SphereGeometry(1, 12, 8), [-.025 + i * .013, 1.927 + Math.sin(i) * .005, -.044], [.026, .047, .085], [0, 0, -.35]);
     if (profile.hairstyle === 'pixie') tube('Head', hair, [[-.046, 1.925, -.08], [.03, 1.9, -.158], [.073, 1.838, -.151], [.086, 1.788, -.065]], .021);
   }
+  if (profile.hairstyle === 'ponytail') {
+    ball('Head', hair, [0, 1.858, .097], [.052, .052, .06]);
+    tube('Head', hair, [[0, 1.875, .105], [.018, 1.813, .13], [.012, 1.726, .116], [.031, 1.658, .09]], .027);
+    piece('Head', leather, new THREE.TorusGeometry(.029, .005, 6, 20), [0, 1.831, .116], [1, 1, 1], [Math.PI / 2, 0, 0]);
+  }
+  if (profile.hairstyle === 'braids') {
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) tube('Head', hair, [[side * (.024 + i * .022), 1.935 - i * .01, -.08], [side * (.06 + i * .017), 1.90, -.126 + i * .025], [side * .111, 1.816, -.019 + i * .021]], .009);
+      for (let i = 0; i < 12; i++) ball('Head', hair, [side * (.103 + Math.sin(i * 2.2) * .005), 1.824 - i * .014, .006 + Math.cos(i * 2.2) * .006], [.017 - i * .0007, .013, .016 - i * .0006]);
+      piece('Head', trim, new THREE.TorusGeometry(.009, .0025, 5, 14), [side * .103, 1.668, .006], [1, 1, 1], [Math.PI / 2, 0, 0]);
+    }
+  }
+  if (profile.hairstyle === 'highfade') {
+    cap(hair, 1.87, [.093, .099, .115]);
+    for (let i = 0; i < 5; i++) tube('Head', hair, [[-.066 + i * .031, 1.927, -.116], [-.059 + i * .03, 1.959, -.02], [-.052 + i * .027, 1.912, .073]], .012);
+  }
+  if (profile.hairstyle === 'receding') {
+    for (const side of [-1, 1]) ball('Head', hair, [side * .091, 1.827, .01], [.023, .065, .075]);
+    ball('Head', hair, [0, 1.841, .061], [.092, .075, .031]);
+  }
   if (profile.hairstyle === 'beanie') {
     cap(cloth, 1.842, [.112, .125, .116]);
     piece('Head', accent, new THREE.TorusGeometry(.106, .012, 6, 30), [0, 1.837, -.029], [1, 1.05, 1], [Math.PI / 2, 0, 0]);
@@ -110,8 +163,31 @@ function makeWardrobe(body, bones, profile) {
       piece('Head', accent, new THREE.TorusGeometry(.009, .0025, 5, 14), [0, 1.63, -.139], [1, 1, 1], [Math.PI / 2, 0, 0]);
     }
   }
-  // Eyebrows remain attached to the head and follow each face's proportions.
-  for (const side of [-1, 1]) box('Head', hair, [side * .035, 1.816, -.153], [.042, .006, .005], [0, 0, side * .07]);
+  // Project brows onto the actual source forehead. Fixed-depth bars vanished
+  // inside broad foreheads, leaving only two detached-looking outer dots.
+  let sourceSkin;
+  body.traverse(mesh => { if (mesh.isMesh && mesh.material.name === 'Skin') sourceSkin = mesh.geometry; });
+  let browGeometry, browMaterial, browSurface;
+  if (sourceSkin) {
+    browGeometry = new THREE.BufferGeometry();
+    browGeometry.setAttribute('position', sourceSkin.getAttribute('npcBindPosition'));
+    browGeometry.setIndex(sourceSkin.index);
+    browMaterial = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide });
+    browSurface = new THREE.Mesh(browGeometry, browMaterial);
+  }
+  const browRay = new THREE.Raycaster();
+  for (const side of [-1, 1]) {
+    const points = [];
+    for (let i = 0; i < 6; i++) {
+      const x = side * (.014 + i * .008) * (profile.faceAnchor?.xScale ?? 1);
+      const y = 1.816 + (profile.faceAnchor?.y ?? 0) + Math.sin(i / 5 * Math.PI) * .002 - i * .0005;
+      browRay.set(new THREE.Vector3(x, y, -.5), new THREE.Vector3(0, 0, 1));
+      const hit = browSurface ? browRay.intersectObject(browSurface, false)[0] : null;
+      points.push([x, y, (hit?.point.z ?? -.165) - .0015]);
+    }
+    tube('Head', hair, points, .0025, false);
+  }
+  browGeometry?.dispose(); browMaterial?.dispose();
   if (profile.glasses) {
     const y = profile.glasses === 'goggles' ? 1.858 : 1.795;
     const z = profile.glasses === 'goggles' ? -.167 : -.169;
@@ -135,25 +211,28 @@ function makeWardrobe(body, bones, profile) {
     box('Chest', accent, [.12, 1.409, -.188], [.046, .033, .003]);
   }
   if (profile.outfit === 'medic' || profile.outfit === 'archivist') {
-    if (!profile.fashion) for (const side of [-1, 1]) box('Chest', cloth, [side * .062, 1.462, -.166], [.082, .24, .025], [0, 0, side * .23]);
+    if (!profile.fashion && !profile.nativeGarment) for (const side of [-1, 1]) box('Chest', cloth, [side * .062, 1.462, -.166], [.082, .24, .025], [0, 0, side * .23]);
     box('Chest', accent, [-.116, 1.409, -.168], [.053, .063, .009]);
     if (profile.outfit === 'medic') {
       box('Chest', cloth, [-.116, 1.409, -.175], [.012, .044, .006]); box('Chest', cloth, [-.116, 1.409, -.176], [.036, .012, .006]);
       tube('Chest', leather, [[-.052, 1.583, -.089], [-.105, 1.417, -.187], [0, 1.34, -.203], [.079, 1.44, -.18], [.048, 1.583, -.089]], .004);
     }
   }
-  if (['mechanic', 'vest'].includes(profile.outfit)) {
+  if (['mechanic', 'vest'].includes(profile.outfit) && !profile.nativeGarment) {
     for (const side of [-1, 1]) box('Chest', leather, [side * .111, 1.401, -.161], [.055, .31, .024]);
     box('Hips', leather, [0, 1.04, -.019], [.355, .051, .281]);
     for (let i = 0; i < 4; i++) box('Hips', trim, [-.12 + i * .081, 1.025, -.174], [.025, .115, .022], [0, 0, (i - 1) * .05]);
   }
-  if (profile.outfit === 'gardener') {
+  if (profile.outfit === 'gardener' && !profile.nativeGarment) {
     box('Chest', accent, [0, 1.364, -.161], [.245, .24, .032]);
     box('Hips', cloth, [0, 1.079, -.162], [.33, .26, .039]);
     for (const side of [-1, 1]) {
       box('Chest', accent, [side * .096, 1.506, -.147], [.026, .17, .018]);
       box('Hips', accent, [side * .079, 1.08, -.193], [.091, .103, .015]);
     }
+  }
+  if (profile.outfit === 'gardener' && profile.nativeGarment) {
+    for (const side of [-1, 1]) box('Chest', accent, [side * .042, 1.366, -.202], [.041, .055, .009], [0, 0, side * .1]);
   }
   if (['sailor', 'scarf'].includes(profile.outfit)) {
     const scarf = profile.signature === 'navigator' ? mat('#8b4d39') : accent;
@@ -164,6 +243,53 @@ function makeWardrobe(body, bones, profile) {
     box('Chest', leather, [0, 1.4, -.178], [.038, .47, .021], [0, 0, -.55]);
     box('Hips', cloth, [.216, 1.068, .02], [.126, .264, .24]);
     box('Hips', accent, [.28, 1.109, .02], [.008, .063, .2]);
+  }
+  if (profile.outfit === 'pilot' || (profile.outfit === 'coat' && !profile.nativeGarment)) {
+    // A fitted folded collar, shoulder tabs and curved lapels make a different
+    // silhouette while each shoulder still follows its own animated arm.
+    for (const side of [-1, 1]) {
+      box('Chest', accent, [side * .075, 1.563, -.096], [.047, .092, .021], [.12, 0, side * .32]);
+      box('Chest', cloth, [side * .075, 1.48, -.174], [.061, .187, .018], [0, 0, side * .24]);
+      box(side < 0 ? 'UpperArmL' : 'UpperArmR', cloth, [side * .215, 1.575, -.013], [.075, .024, .135]);
+      box('Chest', accent, [side * .117, 1.391, -.181], [.066, .012, .012]);
+    }
+    if (profile.outfit === 'pilot') {
+      box('Chest', leather, [-.112, 1.441, -.179], [.054, .055, .012]);
+      for (let i = 0; i < 3; i++) box('Chest', trim, [-.124 + i * .012, 1.441, -.19], [.005, .028, .003]);
+    } else {
+      for (const side of [-1, 1]) for (let i = 0; i < 3; i++) ball('Chest', trim, [side * .049, 1.433 - i * .065, -.191], [.006, .006, .004]);
+    }
+  }
+  if (profile.outfit === 'utility' && !profile.nativeGarment) {
+    for (const side of [-1, 1]) {
+      box('Chest', leather, [side * .121, 1.425, -.16], [.046, .292, .027]);
+      box('Chest', cloth, [side * .096, 1.351, -.191], [.089, .092, .025]);
+      box('Chest', accent, [side * .096, 1.386, -.208], [.084, .014, .006]);
+      box('Hips', cloth, [side * .188, 1.023, -.033], [.057, .14, .16]);
+    }
+    box('Chest', trim, [0, 1.454, -.179], [.052, .027, .008]);
+  }
+  if (['utility', 'coat'].includes(profile.outfit) && profile.nativeGarment) {
+    box('Chest', accent, [-.112, 1.437, -.185], [.048, .022, .006]);
+    box('Chest', trim, [-.112, 1.437, -.19], [.032, .009, .003]);
+  }
+  if (profile.outfit === 'vendor' && profile.nativeGarment) {
+    // A tailor's measuring tape leaves the authored blouse and skirt intact.
+    for (const side of [-1, 1]) {
+      tube('Chest', accent, [[side * .053, 1.582, -.104], [side * .069, 1.502, -.192], [side * .075, 1.374, -.207]], .005);
+      box('Chest', trim, [side * .075, 1.37, -.207], [.014, .009, .005]);
+    }
+  }
+  if (profile.outfit === 'vendor' && !profile.nativeGarment) {
+    for (const side of [-1, 1]) tube('Chest', leather, [[side * .067, 1.587, -.092], [side * .107, 1.47, -.211], [side * .084, 1.334, -.223]], .009);
+    // Leave room for the jacket's sculpted folds through chest/hip bending.
+    // Coincident rigid bibs produce flickering holes when the jacket animates.
+    box('Chest', accent, [0, 1.358, -.225], [.226, .211, .022]);
+    box('Hips', cloth, [0, 1.103, -.21], [.313, .19, .025]);
+    for (const side of [-1, 1]) {
+      box('Hips', accent, [side * .083, 1.092, -.232], [.107, .08, .011]);
+      box('Hips', leather, [side * .084, 1.118, -.238], [.107, .006, .004]);
+    }
   }
   if (profile.fashion) {
     const beltY = profile.fashion.crop ? 1.069 : 1.181;
@@ -229,6 +355,7 @@ function makeWardrobe(body, bones, profile) {
     for (const g of new Set([...geometry, ...parts])) g.dispose();
     geometryMerged.computeBoundingSphere(); ownedGeometry.push(geometryMerged);
     const mesh = new THREE.Mesh(geometryMerged, material); mesh.name = `Wardrobe_${profile.id}_${bone}`;
+    mesh.castShadow = true; mesh.receiveShadow = true;
     body.add(mesh); body.updateMatrixWorld(true); bones.get(bone)?.attach(mesh);
   }
   return { ownedGeometry, ownedMaterials, batches: groups.size };
@@ -236,16 +363,18 @@ function makeWardrobe(body, bones, profile) {
 
 export function createNPC(asset, profile, clipName = 'Idle') {
   const root = new THREE.Group(); root.name = `NPC_${profile.id}`;
-  const body = clone(asset.scene); root.add(body); const bones = new Map(), materials = [];
+  const fitted = fittedProfile(profile, asset);
+  const body = clone(asset.scene); root.add(body); const bones = new Map(), materials = [], skeletons = new Set();
   body.traverse(object => {
     if (object.isBone) bones.set(object.name, object);
     if (!object.isMesh) return;
+    if (object.isSkinnedMesh) skeletons.add(object.skeleton);
     object.frustumCulled = false;
     if (object.material.name === 'Hair' || object.material.name === 'Hardware') { object.visible = false; return; }
-    object.geometry = shapedGeometry(object.geometry, profile, object.material.name);
+    object.geometry = shapedGeometry(object.geometry, fitted, object.material.name);
     const original = object.material;
-    if (original.name === 'Jacket' || original.name === 'Trousers') object.material = npcClothMaterial(original, profile);
-    else if (original.name === 'Skin') object.material = npcSkinMaterial(original, profile);
+    if (original.name === 'Jacket' || original.name === 'Trousers') object.material = npcClothMaterial(original, fitted);
+    else if (original.name === 'Skin') object.material = npcSkinMaterial(original, fitted);
     else {
       object.material = original.clone();
       if (original.name === 'Iris') object.material.color.set(profile.iris);
@@ -254,11 +383,14 @@ export function createNPC(asset, profile, clipName = 'Idle') {
     }
     materials.push(object.material);
   });
-  const wardrobe = makeWardrobe(body, bones, profile);
-  const scale = profile.height / 1.9331; root.scale.set(scale * profile.width, scale, scale * profile.depth);
-  const mixer = new THREE.AnimationMixer(body), clip = asset.animations.find(c => c.name === clipName) ?? asset.animations.find(c => c.name === 'Idle');
-  const action = clip ? mixer.clipAction(clip).play() : null;
-  if (clipName === 'Idle' && profile.stance) {
+  const wardrobe = makeWardrobe(body, bones, fitted);
+  const scale = profile.height / (asset.userData?.height ?? 1.9331); root.scale.set(scale * profile.width, scale, scale * profile.depth);
+  const mixer = new THREE.AnimationMixer(body);
+  const walk = clipName === 'WalkFormal' ? 'WalkFormal' : 'Walk';
+  const animation = createNPCAnimation(mixer, asset.animations, { initial: clipName, walk,
+    walkSpeed: (asset.userData?.motionSpeeds?.[walk] ?? 1.084589) * scale * profile.depth });
+  let presenceAction = null;
+  if (profile.stance) {
     const tracks = ['Chest', 'Head'].map(name => {
       const angles = profile.stance[name.toLowerCase()], values = [];
       for (const sway of [0, 1, 0]) {
@@ -267,12 +399,30 @@ export function createNPC(asset, profile, clipName = 'Idle') {
       }
       return new THREE.QuaternionKeyframeTrack(`${name}.quaternion`, [0, 2.8, 5.6], values);
     });
-    mixer.clipAction(new THREE.AnimationClip(`Presence_${profile.id}`, 5.6, tracks, THREE.AdditiveAnimationBlendMode)).play();
+    presenceAction = mixer.clipAction(new THREE.AnimationClip(`Presence_${profile.id}`, 5.6, tracks, THREE.AdditiveAnimationBlendMode))
+      .setEffectiveWeight(clipName === 'Idle' ? 1 : 0).play();
   }
   mixer.update(0);
+  const ground = createNPCGrounding(root, body); ground();
+  const updatePresence = () => {
+    if (!presenceAction) return;
+    presenceAction.setEffectiveWeight(animation.actions.Idle.getEffectiveWeight());
+    mixer.update(0);
+  };
+  let disposed = false;
   root.userData.appearance = profile.id;
-  return { root, body, bones, mixer, action, scale, profile, wardrobeBatches: wardrobe.batches,
-    dispose() { wardrobe.ownedGeometry.forEach(g => g.dispose()); [...wardrobe.ownedMaterials, ...materials].forEach(m => m.dispose()); mixer.stopAllAction(); mixer.uncacheRoot(body); },
+  return { root, body, bones, mixer, get action() { return animation.action; }, actions: animation.actions,
+    ground,
+    update(dt, speed) { animation.update(dt, speed); updatePresence(); ground(dt); },
+    setAnimation(name) { animation.setAnimation(name); updatePresence(); ground(); }, scale, profile, wardrobeBatches: wardrobe.batches,
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      mixer.stopAllAction(); mixer.uncacheRoot(body);
+      skeletons.forEach(skeleton => skeleton.dispose());
+      wardrobe.ownedGeometry.forEach(g => g.dispose());
+      [...wardrobe.ownedMaterials, ...materials].forEach(m => m.dispose());
+    },
   };
 }
 

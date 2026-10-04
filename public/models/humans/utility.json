@@ -1,0 +1,39 @@
+{
+  "id": "utility",
+  "height": 1.933498,
+  "referenceHeight": 1.9331,
+  "bones": 49,
+  "clips": [
+    "Idle",
+    "Walk",
+    "WalkFormal",
+    "Jog",
+    "Run",
+    "JumpStart",
+    "JumpLoop",
+    "JumpLand",
+    "ArmedIdle",
+    "Aim",
+    "AimUp",
+    "AimDown",
+    "Reload",
+    "Fire",
+    "Hit",
+    "Driving"
+  ],
+  "triangles": 26784,
+  "vertices": 14110,
+  "geometry": "Broad male anatomy with authored workwear and safety boots",
+  "bodySource": "MakeHuman CC0 base.obj + male.target + male-face.target",
+  "garmentSource": "male_worksuit01 (MakeHuman CC0 authored garment, original UV and texture maps)",
+  "animation_source": "Quaternius Universal Animation Library Standard v3",
+  "motion_scale": 1.1123991314770392,
+  "motion_speeds": {
+    "Walk": 1.084589153190113,
+    "WalkFormal": 1.084589153190113,
+    "Jog": 5.959281061484138,
+    "Run": 9.177292834685574
+  },
+  "images": 9,
+  "bytes": 5795688
+}

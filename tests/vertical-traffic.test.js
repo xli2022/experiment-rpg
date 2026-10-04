@@ -7,6 +7,8 @@ import { createMasterPlan, SHOWCASE } from '../src/master-plan.js';
 import { VerticalMetropolis } from '../src/vertical-city.js';
 import { orientedBox, circleHitsBox, overlapsHeight, surfaceHeightAt } from '../src/physics.js';
 import { populationFor } from '../src/population.js';
+import { CROWD_PROFILES } from '../src/npc-profiles.js';
+import { VISITOR_PROFILES } from '../src/npc-visitors.js';
 
 test('new-city traffic uses real roads and is present on both Eastpoint street and viaduct levels', () => {
   const plan = createMasterPlan(), metropolis = new VerticalMetropolis(plan);
@@ -87,7 +89,7 @@ test('the fixed pedestrian pool walks at actual path heights and turns at endpoi
   const asset = { scene: new THREE.Group(), animations: ['Idle', 'Walk', 'WalkFormal'].map(name => new THREE.AnimationClip(name, 1, [])) };
   const crowd = createCrowd(scene, asset, city);
   crowd.update(0, plan.spawn, null, 150);
-  assert.equal(crowd.people.length, 26);
+  assert.equal(crowd.people.length, CROWD_PROFILES.length + VISITOR_PROFILES.length);
   assert.ok(crowd.people.filter(person => person.path).length >= 20);
   assert.ok(crowd.people.filter(person => person.path && Math.abs(person.root.position.y - plan.spawn.y) < 3).length >= 20,
     'Nearby ground paths take priority over forcing a fixed group onto the upper deck');
@@ -100,5 +102,5 @@ test('the fixed pedestrian pool walks at actual path heights and turns at endpoi
       assert.ok(Math.abs(person.root.position.y - expected.y) < 1e-8);
     }
   }
-  assert.equal(crowd.people.length, 26);
+  assert.equal(crowd.people.length, CROWD_PROFILES.length + VISITOR_PROFILES.length);
 });

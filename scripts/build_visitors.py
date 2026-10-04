@@ -11,6 +11,7 @@ import json
 import math
 import statistics
 import struct
+import sys
 from pathlib import Path
 
 import bpy
@@ -18,6 +19,8 @@ from mathutils import Matrix
 
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from visitor_surfaces import equipment, surfaces, polish_geometry, DETAILS
 SOURCE = ROOT / "assets" / "characters" / "quaternius"
 OUTPUT = ROOT / "public" / "models" / "visitors"
 SPECS = (
@@ -25,6 +28,10 @@ SPECS = (
     ("robot-worker", "George.gltf", "Idle", "Walk", 1.90),
     ("alien-scout", "Alien.blend", "Alien_Idle", "Alien_Walk", 1.86),
     ("alien-resident", "Alien_Helmet.blend", "Alien_Idle", "Alien_Walk", 1.78),
+    ("robot-courier", "Robot.blend", "Robot_Idle", "Robot_Walking", 1.74),
+    ("robot-sentinel", "George.gltf", "Idle", "Walk", 2.02),
+    ("alien-envoy", "Alien_Helmet.blend", "Alien_Idle", "Alien_Walk", 1.90),
+    ("alien-navigator", "Alien.blend", "Alien_Idle", "Alien_Walk", 1.95),
 )
 
 
@@ -54,38 +61,6 @@ def bounds(meshes):
         evaluated.to_mesh_clear()
     return [[min(point[i] for point in points) for i in range(3)],
             [max(point[i] for point in points) for i in range(3)]]
-
-
-def materials(robot):
-    for material in bpy.data.materials:
-        # Imported glTF materials are already authored correctly. Retain their
-        # colors, maps and emissive accents while adding restrained metalness.
-        if material.use_nodes and material.name != "Glass":
-            node = next(n for n in material.node_tree.nodes if n.type == "BSDF_PRINCIPLED")
-            if robot:
-                node.inputs["Metallic"].default_value = .25
-                node.inputs["Roughness"].default_value = .58
-            continue
-        color = tuple(material.diffuse_color)
-        material.use_nodes = True
-        nodes = material.node_tree.nodes
-        nodes.clear()
-        output = nodes.new("ShaderNodeOutputMaterial")
-        shader = nodes.new("ShaderNodeBsdfPrincipled")
-        material.node_tree.links.new(shader.outputs["BSDF"], output.inputs["Surface"])
-        shader.inputs["Base Color"].default_value = color
-        shader.inputs["Metallic"].default_value = .35 if robot else 0
-        shader.inputs["Roughness"].default_value = .48 if robot else .72
-        if material.name == "Glass":
-            # Alpha blending is intentionally used instead of transmission:
-            # the helmet remains clear on WebGL without an environment map.
-            shader.inputs["Base Color"].default_value = (.34, .75, .82, .20)
-            shader.inputs["Alpha"].default_value = .20
-            shader.inputs["Roughness"].default_value = .17
-            material.surface_render_method = "BLENDED"
-            material.use_backface_culling = True
-        elif material.name in {"Eyes", "Black"}:
-            shader.inputs["Roughness"].default_value = .24
 
 
 def geometry_error(actual, expected):
@@ -125,6 +100,14 @@ def inspect_glb(path):
     assert {clip["name"] for clip in doc.get("animations", [])} == {"Idle", "Walk"}
     assert all("uri" not in buffer for buffer in doc.get("buffers", []))
     assert all("uri" not in image for image in doc.get("images", []))
+    assert len(doc.get("images", [])) == 3, "Three embedded PBR atlas images required"
+    for material in doc["materials"]:
+        pbr = material["pbrMetallicRoughness"]
+        assert "baseColorTexture" in pbr and "metallicRoughnessTexture" in pbr
+        assert "normalTexture" in material
+    for mesh in doc["meshes"]:
+        for primitive in mesh["primitives"]:
+            assert "TEXCOORD_0" in primitive["attributes"]
     return doc
 
 
@@ -146,7 +129,9 @@ def build(spec):
         if obj.type not in {"ARMATURE", "MESH"} or (obj.type == "MESH" and not obj.parent):
             bpy.data.objects.remove(obj, do_unlink=True)
     meshes = [obj for obj in scene.objects if obj.type == "MESH"]
-    materials(slug.startswith("robot"))
+    polish_geometry(meshes, slug.startswith("robot"))
+    meshes.extend(equipment(rig, slug))
+    texture_metadata = surfaces(meshes, slug)
     original_actions = list(bpy.data.actions)
     baked = []
     expected = {}
@@ -231,7 +216,9 @@ def build(spec):
     metadata = {
         "source": source_name,
         "license": "CC0-1.0",
-        "author": "Quaternius",
+        "author": "Quaternius; Afterlight equipment and surface finish",
+        "geometryDetails": DETAILS[slug],
+        "textures": texture_metadata,
         "sourceHeight": round(source_height, 6),
         "minimumY": round(idle_bounds[0][2], 6),
         "idleBounds": {
@@ -275,5 +262,7 @@ def build(spec):
     print("VISITOR_EXPORTED", slug, json.dumps(metadata), flush=True)
 
 
+requested = set(sys.argv[sys.argv.index("--") + 1:]) if "--" in sys.argv else set()
 for visitor in SPECS:
-    build(visitor)
+    if not requested or visitor[0] in requested:
+        build(visitor)

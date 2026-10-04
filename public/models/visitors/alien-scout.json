@@ -1,25 +1,42 @@
 {
   "source": "Alien.blend",
   "license": "CC0-1.0",
-  "author": "Quaternius",
-  "sourceHeight": 2.900449,
-  "minimumY": -0.004616,
+  "author": "Quaternius; Afterlight equipment and surface finish",
+  "geometryDetails": "tactile skin surface and wearable expedition chest beacon",
+  "textures": {
+    "baseColor": [
+      1024,
+      1024
+    ],
+    "normal": [
+      512,
+      512
+    ],
+    "metallicRoughness": [
+      512,
+      512
+    ],
+    "materialCount": 7,
+    "embeddedImages": 3
+  },
+  "sourceHeight": 2.884281,
+  "minimumY": -0.000468,
   "idleBounds": {
     "min": [
-      -0.706871,
-      -0.004616,
-      -0.498352
+      -0.69443,
+      -0.000468,
+      -0.488853
     ],
     "max": [
-      0.656746,
-      2.895833,
-      0.73231
+      0.645352,
+      2.883813,
+      0.725372
     ]
   },
   "headingAdjustment": 3.141592653589793,
   "forward": "+Z",
-  "triangles": 3780,
-  "primitives": 5,
+  "triangles": 15924,
+  "primitives": 7,
   "bones": 45,
   "animations": {
     "Idle": 4.166667,
@@ -33,9 +50,9 @@
     "Idle": 0.0,
     "Walk": 0.0
   },
-  "maxBakedPoseBoundsError": 6.9e-07,
+  "maxBakedPoseBoundsError": 4.8e-07,
   "recommendedHeight": 1.86,
-  "estimatedWalkSpeed": 1.6344,
-  "bytes": 529324,
+  "estimatedWalkSpeed": 1.6436,
+  "bytes": 1624088,
   "maxExportedPoseBoundsError": 1.19e-06
 }

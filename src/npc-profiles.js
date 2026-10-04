@@ -3,23 +3,23 @@
 export const NPC_PROFILES = {
   mara: { id: 'mara', age: 32, height: 1.72, width: .95, depth: .96, waist: .79, hips: 1.16, jaw: .84, cheeks: 1.05, faceLength: .95, nose: -.003, skin: '#bb8867', hair: '#382536', hairstyle: 'swept', jacket: '#592b3d', trousers: '#191c2b', accent: '#d4b071', iris: '#627d61', outfit: 'radio', glasses: null,
     fashion: { inner: '#161b22', neckline: 1.43, roughness: .38, metalness: .12, boots: true }, makeup: { lips: '#823c49', strength: .66, liner: .58 }, jewelry: 'hoops', stance: { chest: [-.045, .04, -.025], head: [.01, -.055, -.05] },
-    description: 'Side-swept plum hair, berry lips and gold hoops; a fitted burgundy leather jacket over a plunging black top, belted trousers and tall boots.' },
+    description: 'Side-swept plum hair, berry lips and gold hoops; a tailored burgundy blouse, dark skirt and a radio headset.' },
   imani: { id: 'imani', age: 48, height: 1.68, width: 1.06, depth: 1.07, waist: .97, hips: 1.2, jaw: .91, cheeks: 1.15, faceLength: .96, nose: .004, skin: '#76503d', hair: '#92978f', hairstyle: 'coils', jacket: '#e1d6bc', trousers: '#294e51', accent: '#d0aa63', iris: '#4a2d23', outfit: 'medic', glasses: 'round',
     fashion: { inner: '#225f60', neckline: 1.48, roughness: .62, metalness: .02 }, makeup: { lips: '#784647', strength: .5, liner: .34 }, jewelry: 'drops', stance: { chest: [-.025, -.025, .02], head: [0, .035, .025] },
-    description: 'Sculpted silver coils, bronze makeup and gold drop earrings; a cream blazer cinched over a teal satin camisole.' },
+    description: 'Sculpted silver coils, bronze makeup and gold drop earrings; a cream clinical top, teal jeans and a stethoscope.' },
   sable: { id: 'sable', age: 35, height: 1.65, width: .9, depth: .92, waist: .78, hips: 1.13, jaw: .8, cheeks: 1.02, faceLength: .96, nose: .002, skin: '#e2c5a2', hair: '#191d2a', hairstyle: 'bob', jacket: '#302b41', trousers: '#1e2031', accent: '#b99dcf', iris: '#49322c', outfit: 'archivist', glasses: 'square',
     fashion: { inner: '#181c25', neckline: 1.40, roughness: .4, metalness: .07, pinstripe: true, boots: true }, makeup: { lips: '#863c50', strength: .72, liner: .62 }, jewelry: 'pendant', stance: { chest: [-.04, -.05, .015], head: [.015, .045, -.035] },
-    description: 'A sharp black bob, wine lipstick and fine silver frames; a close-cut plum evening suit with a deep neckline and an amethyst pendant.' },
+    description: 'A sharp black bob, wine lipstick and fine silver frames; a plum pinstriped blouse, dark skirt and an amethyst pendant.' },
   rook: { id: 'rook', age: 43, height: 1.88, width: 1.17, depth: 1.11, waist: 1.02, hips: 1.03, jaw: 1.09, cheeks: 1.04, faceLength: 1.06, nose: -.005, skin: '#8e6148', hair: '#352c25', hairstyle: 'shaved', beard: 'short', jacket: '#9d6535', trousers: '#3c4547', accent: '#e7ab54', iris: '#503a23', outfit: 'mechanic', glasses: null,
     signature: 'mechanist', scar: true, stance: { chest: [-.055, .09, -.025], head: [.025, -.065, .05] },
-    description: 'An amber optical implant, an eyebrow scar and an exposed mechanical forearm brace; battered ochre workwear, one armored shoulder and a tiny brass bird.' },
+    description: 'An amber optical implant, an eyebrow scar and an exposed mechanical forearm brace; broad work overalls, an ochre shirt, one armored shoulder and a tiny brass bird.' },
   jun: { id: 'jun', age: 31, height: 1.74, width: .98, depth: 1.02, waist: 1.03, hips: 1.04, jaw: .96, cheeks: 1.09, faceLength: 1.01, nose: .003, skin: '#c4ae86', hair: '#493629', hairstyle: 'beanie', jacket: '#52614a', trousers: '#4c493a', accent: '#94c893', iris: '#5a4930', outfit: 'gardener', description: 'A moss beanie, loose work clothes and a canvas apron full of seed packets.' },
   orrin: { id: 'orrin', age: 58, height: 1.8, width: 1.1, depth: 1.12, waist: 1.1, hips: 1.06, jaw: 1.04, cheeks: .97, faceLength: 1.08, nose: -.008, skin: '#c09b78', hair: '#909b98', hairstyle: 'cap', beard: 'braided', jacket: '#243b4d', trousers: '#303b43', accent: '#b98852', iris: '#6d8790', outfit: 'sailor',
     signature: 'navigator', coatDrop: .15, scar: true, stance: { chest: [-.025, -.06, .03], head: [.015, .06, -.045] },
     description: 'A braided silver beard, a weathered cheek and a brass-ringed ear; a long naval coat, worn epaulettes and a pocket compass on a chain.' },
   cass: { id: 'cass', age: 26, height: 1.61, width: .92, depth: .91, waist: .8, hips: 1.13, jaw: .86, cheeks: 1.07, faceLength: .93, nose: .001, skin: '#bc8b6b', hair: '#347e7f', hairstyle: 'pixie', jacket: '#a44160', trousers: '#252b3e', accent: '#80c8bd', iris: '#5d7275', outfit: 'courier',
     fashion: { inner: '#222a38', neckline: 1.47, crop: 1.185, roughness: .34, metalness: .09, boots: true }, makeup: { lips: '#984653', strength: .62, liner: .65 }, jewelry: 'choker', stance: { chest: [-.04, .055, -.04], head: [0, -.04, .065] },
-    description: 'A swept teal pixie cut, smoky eyes and an iridescent choker; a cropped rose moto jacket, bare midriff and fitted high-waisted riding trousers.' },
+    description: 'A swept teal pixie cut, smoky eyes and an iridescent choker; a rose courier tee, dark jeans and a courier satchel.' },
 };
 
 // Shape blends are individual art direction, independent of voice selection.
@@ -27,6 +27,19 @@ for (const [id, faceShape, shoulders, chest] of [
   ['mara', 1, .9, .032], ['imani', .9, .96, .038], ['sable', 1, .88, .029],
   ['rook', 0, 1.08, .01], ['jun', .48, .97, .008], ['orrin', .08, 1.02, .004], ['cass', .94, .89, .027],
 ]) Object.assign(NPC_PROFILES[id], { faceShape, shoulders, chest });
+
+// These bases contain independently authored anatomy and garment topology.
+// `citizen` is the original tailored suit; new files use the same rig contract.
+export const HUMAN_BASE_MODELS = [
+  { id: 'flight', file: 'humans/flight.glb' },
+  { id: 'utility', file: 'humans/utility.glb' },
+  { id: 'tailored', file: 'humans/tailored.glb' },
+];
+for (const [id, baseModel, gender] of [
+  ['mara', 'tailored', 'woman'], ['sable', 'tailored', 'woman'],
+  ['imani', 'flight', 'woman'], ['cass', 'flight', 'woman'],
+  ['rook', 'utility', 'man'], ['orrin', 'citizen', 'man'], ['jun', 'utility', 'nonbinary'],
+]) Object.assign(NPC_PROFILES[id], { baseModel, gender });
 
 // Reusable crowd archetypes retain the same full animated rig, with distinct
 // silhouettes and faces rather than a random tint on a single identical person.
@@ -37,10 +50,28 @@ export const CROWD_PROFILES = [
   { ...NPC_PROFILES.rook, id: 'resident-9', height: 1.73, width: 1.1, skin: '#d2b8a3', hair: '#756b65', jacket: '#8b5853', hairstyle: 'cap', outfit: 'vest', glasses: null },
   { ...NPC_PROFILES.cass, id: 'resident-10', height: 1.79, width: .91, skin: '#856047', hair: '#ddd0be', jacket: '#637587', hairstyle: 'undercut', outfit: 'casual' },
   { ...NPC_PROFILES.jun, id: 'resident-11', height: 1.63, width: 1.15, skin: '#d7b18d', hair: '#414143', jacket: '#82729a', hairstyle: 'bob', outfit: 'casual', glasses: 'round' },
+  { ...NPC_PROFILES.jun, id: 'resident-12', archetype: 'Airship pilot', age: 38, height: 1.84, width: 1.05, depth: 1.03, shoulders: 1.05, jaw: 1.05, skin: '#9e704f', hair: '#231c1d', hairstyle: 'highfade', jacket: '#4d6377', trousers: '#303b46', accent: '#ddb376', outfit: 'pilot', glasses: 'goggles' },
+  { ...NPC_PROFILES.mara, id: 'resident-13', archetype: 'Market tailor', age: 42, height: 1.69, width: 1.08, waist: .91, cheeks: 1.11, skin: '#79513f', hair: '#20222a', hairstyle: 'braids', jacket: '#7f4050', trousers: '#343244', accent: '#dcbba0', outfit: 'vendor', glasses: null, fashion: null, makeup: null },
+  { ...NPC_PROFILES.sable, id: 'resident-14', archetype: 'Transit officer', age: 36, height: 1.82, width: .95, shoulders: .96, jaw: .91, skin: '#d4aa8b', hair: '#50352c', hairstyle: 'ponytail', jacket: '#365d5e', trousers: '#253f47', accent: '#bbccbb', outfit: 'coat', glasses: null, fashion: null, makeup: null },
+  { ...NPC_PROFILES.rook, id: 'resident-15', archetype: 'Dock loader', age: 29, height: 1.91, width: 1.19, depth: 1.13, shoulders: 1.12, waist: 1.08, jaw: 1.13, skin: '#674737', hair: '#171b21', hairstyle: 'highfade', beard: 'short', jacket: '#ae723c', trousers: '#414c53', accent: '#ced8a6', outfit: 'utility', glasses: null, scar: false },
+  { ...NPC_PROFILES.orrin, id: 'resident-16', archetype: 'Night watch', age: 64, height: 1.76, width: 1.05, faceLength: 1.11, cheeks: .94, skin: '#bc967f', hair: '#c5c2b8', hairstyle: 'receding', beard: 'full', jacket: '#42475d', trousers: '#303542', accent: '#bca78b', outfit: 'coat', glasses: 'round', scar: false },
+  { ...NPC_PROFILES.cass, id: 'resident-17', archetype: 'Skyline runner', age: 27, height: 1.73, width: .93, hips: 1.08, faceShape: .67, skin: '#b88162', hair: '#572f40', hairstyle: 'ponytail', jacket: '#426d7f', trousers: '#26374b', accent: '#d8b866', outfit: 'pilot', fashion: null, makeup: null, glasses: null },
+  { ...NPC_PROFILES.imani, id: 'resident-18', archetype: 'Botanical trader', age: 54, height: 1.64, width: 1.17, depth: 1.11, waist: 1.08, hips: 1.14, jaw: 1.01, skin: '#aa7858', hair: '#b4aba0', hairstyle: 'braids', jacket: '#6e7050', trousers: '#3d4b40', accent: '#d2bc89', outfit: 'vendor', fashion: null, makeup: null, glasses: 'round' },
+  { ...NPC_PROFILES.jun, id: 'resident-19', archetype: 'Signal technician', age: 33, height: 1.70, width: .98, waist: .94, shoulders: .94, faceShape: .58, nose: -.005, skin: '#e0bd9c', hair: '#353346', hairstyle: 'undercut', jacket: '#825d42', trousers: '#354653', accent: '#80b9b5', outfit: 'utility', glasses: 'square' },
 ];
 
 // Hero props belong to their owners; passers-by retain simpler streetwear.
-for (const profile of CROWD_PROFILES) { profile.signature = null; profile.stance = null; profile.jewelry = null; profile.coatDrop = 0; }
+for (const profile of CROWD_PROFILES) { profile.signature = null; profile.stance = null; profile.jewelry = null; profile.coatDrop = profile.outfit === 'coat' ? .11 : 0; }
+// Residents are authored independently of their template contact's identity.
+// Each of the four anatomically distinct bases has five crowd archetypes.
+for (const [baseModel, gender, indices] of [
+  ['citizen', 'man', [3, 5, 9, 12, 16]],
+  ['utility', 'man', [4, 8, 11, 15, 19]],
+  ['flight', 'woman', [1, 6, 10, 14, 17]],
+  ['tailored', 'woman', [0, 2, 7, 13, 18]],
+]) for (const index of indices) Object.assign(CROWD_PROFILES[index], { baseModel, gender });
+Object.assign(CROWD_PROFILES[8], { archetype: 'Station engineer', age: 41, faceShape: .1, jaw: 1.03, cheeks: 1.02, fashion: null, makeup: null });
+Object.assign(CROWD_PROFILES[11], { archetype: 'Workshop owner', age: 47, faceShape: .15, jaw: 1.07, cheeks: 1.1 });
 
 // Pitch/rate characterize delivery. Preferred names select a fitting device
 // voice when one exists; voice inventory is never inferred from appearance.

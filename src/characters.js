@@ -6,19 +6,36 @@ import { JUMP } from './jump.js';
 import { animateClimb } from './climb-animation.js';
 import { animateParachutePose } from './parachute.js';
 import { VISITOR_PROFILES } from './npc-visitors.js';
+import { npcSurfaceTextures } from './npc-surfaces.js';
+import { HUMAN_BASE_MODELS } from './npc-profiles.js';
 
 let assets;
 export function loadCharacterAssets() {
   if (!assets) {
     const loader = new GLTFLoader();
-    const modelBase = `${import.meta.env.BASE_URL}models/`;
+    const modelBase = `${import.meta.env?.BASE_URL ?? '/'}models/`;
     assets = Promise.all([loader.loadAsync(`${modelBase}vex.glb`), loader.loadAsync(`${modelBase}citizen.glb`),
-      ...VISITOR_PROFILES.map(profile => loader.loadAsync(`${modelBase}visitors/${profile.id}.glb`).catch(error => {
+      Promise.all(HUMAN_BASE_MODELS.map(profile => loader.loadAsync(`${modelBase}${profile.file}`).catch(error => {
+        console.warn(`Could not load ${profile.id}; using the citizen base for its human profiles.`, error);
+        return null;
+      }))),
+      Promise.all(VISITOR_PROFILES.map(profile => loader.loadAsync(`${modelBase}visitors/${profile.id}.glb`).catch(error => {
         console.warn(`Could not load ${profile.id}; using human pedestrians for its slots.`, error);
         return null;
-      })),
+      }))),
     ])
-      .then(([player, citizen, ...visitors]) => {
+      .then(([player, citizen, humans, visitors]) => {
+        citizen.userData.baseModel = 'citizen';
+        for (const [index, human] of humans.entries()) if (human) human.userData.baseModel = HUMAN_BASE_MODELS[index].id;
+        // Preserve the glTF loader's color-space assignments: base color and
+        // emissive maps are sRGB, while normal/roughness data stays linear.
+        // Modest anisotropy keeps woven cloth and panel lines clear at angles.
+        for (const asset of [player, citizen, ...humans, ...visitors]) asset?.scene.traverse(object => {
+          if (!object.isMesh) return;
+          for (const material of Array.isArray(object.material) ? object.material : [object.material]) {
+            for (const value of Object.values(material)) if (value?.isTexture) value.anisotropy = Math.max(4, value.anisotropy);
+          }
+        });
         // Both exports use the same atlas. Reuse GPU materials/textures as well.
         const shared = new Map();
         player.scene.traverse(object => { if (object.isMesh) shared.set(object.material.name, object.material); });
@@ -31,7 +48,14 @@ export function loadCharacterAssets() {
           old.dispose();
         });
         for (const texture of unusedTextures) texture.dispose();
-        return { player, citizen, visitors: Object.fromEntries(VISITOR_PROFILES.map((profile, i) => [profile.id, visitors[i]])) };
+        for (const asset of [player, citizen, ...humans]) asset?.scene.traverse(object => {
+          if (!object.isMesh) return;
+          for (const material of Array.isArray(object.material) ? object.material : [object.material]) polishCharacterMaterial(material);
+        });
+        return { player, citizen,
+          humanBases: Object.fromEntries([['citizen', citizen], ...HUMAN_BASE_MODELS.map((profile, i) => [profile.id, humans[i] ?? citizen])]),
+          visitors: Object.fromEntries(VISITOR_PROFILES.map((profile, i) => [profile.id, visitors[i]])),
+        };
       });
   }
   return assets;
@@ -71,6 +95,23 @@ const motionSpeed = { Walk: 1.084589, Jog: 5.959281, Run: 9.177293 };
 const locomotion = ['Idle', 'Walk', 'Jog', 'Run'];
 const required = [...locomotion, 'JumpStart', 'JumpLoop', 'JumpLand', 'ArmedIdle', 'Aim', 'AimUp', 'AimDown', 'Reload', 'Fire'];
 
+function polishCharacterMaterial(material) {
+  const surface = { Skin: 'skin', Jacket: 'cloth', Trousers: 'cloth', BootsAndGloves: 'leather', Hardware: 'metal' }[material.name];
+  if (surface) {
+    const maps = npcSurfaceTextures(surface);
+    // Preserve the authored skin and garment atlases. Only untextured leather
+    // and hardware receive a new color tile; all get subtle material relief.
+    if (!material.map && surface !== 'skin') material.map = maps.map;
+    material.normalMap ??= maps.normalMap;
+    material.roughnessMap ??= maps.roughnessMap;
+    material.normalScale.setScalar(surface === 'skin' ? .18 : .35);
+    material.userData.surface = surface;
+    material.needsUpdate = true;
+  }
+  for (const texture of Object.values(material)) if (texture?.isTexture) texture.anisotropy = Math.max(4, texture.anisotropy);
+  material.envMapIntensity = .48;
+}
+
 function footContactPoints(body) {
   const points = [], seen = new Set();
   body.traverse(mesh => {
@@ -97,7 +138,7 @@ export function createCharacter(asset) {
     if (object.isMesh) {
       object.frustumCulled = false;
       object.castShadow = true; object.receiveShadow = true;
-      object.material.envMapIntensity = .48;
+      for (const material of Array.isArray(object.material) ? object.material : [object.material]) polishCharacterMaterial(material);
     }
   });
   const clips = Object.fromEntries(asset.animations.map(clip => [clip.name, clip]));
@@ -128,13 +169,17 @@ export function createCharacter(asset) {
     clip.tracks = clip.tracks.filter(track => upperBody.test(track.name));
     aim[direction] = mixer.clipAction(clip).setEffectiveWeight(0).setEffectiveTimeScale(0).play();
   }
-  return { root, body, bones, mixer, lower, upper, aim, clips, gun, muzzle, flash,
+  const model = { root, body, bones, mixer, lower, upper, aim, clips, gun, muzzle, flash,
     time: 0, phase: 0, shotAge: 100, combatTimer: 0, combatWeight: 0,
     baseWeights: { Idle: 1, Walk: 0, Jog: 0, Run: 0, JumpStart: 0, JumpLoop: 0, JumpLand: 0, ArmedIdle: 0 },
     reloadAge: 0, wasReloading: false, animation: 'Idle', aimPitch: 0,
     jumpTimes: { JumpStart: 0, JumpLoop: 0, JumpLand: 0 }, previousJump: '',
     contacts, groundLift: 0, baseBodyY: body.position.y, contactPoint: new THREE.Vector3(),
   };
+  // An actor can be rendered before its first simulation tick (portraits,
+  // pause screens, and gallery previews). Start in the real idle, not bind pose.
+  animateCharacter(model, false, 0);
+  return model;
 }
 
 export function characterShot(model) {
@@ -202,7 +247,9 @@ export function animateCharacter(model, aiming, dt, options = {}) {
     const duration = model.clips[name].duration;
     let time = model.time % duration;
     if (motionSpeed[name]) time = model.phase * duration;
-    if (name in model.jumpTimes) time = Math.min(duration - .001, model.jumpTimes[name]);
+    if (name in model.jumpTimes) time = name === 'JumpLoop'
+      ? model.jumpTimes[name] % duration
+      : Math.min(duration - .001, model.jumpTimes[name]);
     model.lower[name].time = model.upper[name].time = time;
     model.lower[name].setEffectiveWeight(weight);
     model.upper[name].setEffectiveWeight(weight * (1 - armed));

@@ -1,0 +1,39 @@
+{
+  "id": "flight",
+  "height": 1.92739,
+  "referenceHeight": 1.9331,
+  "bones": 49,
+  "clips": [
+    "Idle",
+    "Walk",
+    "WalkFormal",
+    "Jog",
+    "Run",
+    "JumpStart",
+    "JumpLoop",
+    "JumpLand",
+    "ArmedIdle",
+    "Aim",
+    "AimUp",
+    "AimDown",
+    "Reload",
+    "Fire",
+    "Hit",
+    "Driving"
+  ],
+  "triangles": 24278,
+  "vertices": 12666,
+  "geometry": "Female anatomy with authored short-sleeve tee and jeans",
+  "bodySource": "MakeHuman CC0 base.obj + female-face.target",
+  "garmentSource": "female_casualsuit01 (MakeHuman CC0 authored garment, original UV and texture maps)",
+  "animation_source": "Quaternius Universal Animation Library Standard v3",
+  "motion_scale": 1.0665623991769917,
+  "motion_speeds": {
+    "Walk": 1.039898339197567,
+    "WalkFormal": 1.039898339197567,
+    "Jog": 5.71372713844817,
+    "Run": 8.799139793210182
+  },
+  "images": 9,
+  "bytes": 5194996
+}

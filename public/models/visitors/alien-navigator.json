@@ -1,0 +1,58 @@
+{
+  "source": "Alien.blend",
+  "license": "CC0-1.0",
+  "author": "Quaternius; Afterlight equipment and surface finish",
+  "geometryDetails": "three-fin head crest, survey pack and shoulder navigation lights",
+  "textures": {
+    "baseColor": [
+      1024,
+      1024
+    ],
+    "normal": [
+      512,
+      512
+    ],
+    "metallicRoughness": [
+      512,
+      512
+    ],
+    "materialCount": 8,
+    "embeddedImages": 3
+  },
+  "sourceHeight": 3.383225,
+  "minimumY": -0.000468,
+  "idleBounds": {
+    "min": [
+      -0.69443,
+      -0.000468,
+      -0.5751
+    ],
+    "max": [
+      0.645352,
+      3.382757,
+      0.725372
+    ]
+  },
+  "headingAdjustment": 3.141592653589793,
+  "forward": "+Z",
+  "triangles": 18580,
+  "primitives": 8,
+  "bones": 45,
+  "animations": {
+    "Idle": 4.166667,
+    "Walk": 1.041667
+  },
+  "sourceAnimations": {
+    "Idle": "Alien_Idle",
+    "Walk": "Alien_Walk"
+  },
+  "rootTranslationDrift": {
+    "Idle": 0.0,
+    "Walk": 0.0
+  },
+  "maxBakedPoseBoundsError": 9.5e-07,
+  "recommendedHeight": 1.95,
+  "estimatedWalkSpeed": 1.4683,
+  "bytes": 1882152,
+  "maxExportedPoseBoundsError": 1.19e-06
+}
