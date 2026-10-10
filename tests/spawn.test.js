@@ -11,7 +11,7 @@ import { WORLD_LIMIT } from '../src/world/world-config.js';
 
 const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
 after(() => stream.dispose());
-const collidersAt = (x, z, radius = 3, extraCars = []) => city.spatial.near(x, z, radius).concat([...city.cars, ...extraCars].map(carCollider));
+const collidersAt = (x, z, radius = 3, extraCars = []) => city.spatial.near(x, z, radius).concat(extraCars.map(carCollider));
 const floorAt = (x, z, ceiling) => supportHeight(x, z, city.spatial.near(x, z, 2), ceiling, terrainHeight(x, z));
 const hits = (p, boxes, radius = .43) => boxes.some(b => !b.supportOnly && overlapsHeight(b, p.y) && circleHitsBox(p.x, p.z, radius, b));
 function refugeArrival(id) {

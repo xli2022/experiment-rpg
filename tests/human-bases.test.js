@@ -8,7 +8,7 @@ import { loadCharacterAssets } from '../src/engine/player/characters.js';
 import { createNPC } from '../src/actors/npc-appearance.js';
 import { CROWD_PROFILES, HUMAN_BASE_MODELS, NPC_PROFILES } from '../src/actors/npc-profiles.js';
 import { VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
-import { createCrowd } from '../src/traffic/crowd.js';
+import { createAvatarPool, rosterBases } from '../src/traffic/pedestrians.js';
 import { createWorldLife } from '../src/modes/story/world-life.js';
 import { Campaign } from '../src/modes/story/campaign.js';
 
@@ -127,9 +127,9 @@ test('each human anatomy follows its own stride calibration and grounds the anim
 });
 
 test('crowd and named contacts instantiate every assigned base in the city', () => {
-  const crowd = createCrowd(new THREE.Scene(), assets.citizen, null, assets.visitors, assets.humanBases);
-  assert.deepEqual(crowd.snapshot().rosterHumanBases, { tailored: 5, flight: 5, utility: 5, citizen: 5 });
-  for (const person of crowd.people.filter(person => person.species === 'human')) {
+  const people = createAvatarPool(assets);
+  assert.deepEqual(rosterBases(people), { tailored: 5, flight: 5, utility: 5, citizen: 5 });
+  for (const person of people.filter(person => person.species === 'human')) {
     assert.equal(person.root.userData.baseModel, person.avatar.profile.baseModel);
   }
   const previousDocument = globalThis.document;

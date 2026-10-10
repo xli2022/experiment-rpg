@@ -10,6 +10,6 @@ function showError(error) {
 }
 
 createGame({ canvas: $('world'), modes: MODES }).then(game => {
-  // Read-only diagnostics are exposed only in Vite's development mode.
-  if (import.meta.env.DEV) window.__AFTERLIGHT__ = { snapshot: () => game.snapshot() };
+  // Diagnostics (and a teleport for checking places) only in Vite's development mode.
+  if (import.meta.env.DEV) window.__AFTERLIGHT__ = { snapshot: () => game.snapshot(), teleport: (spot, view) => game.teleport(spot, view) };
 }).catch(showError);

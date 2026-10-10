@@ -1,87 +1,81 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createTraffic, TRAFFIC_TAKEOVER_HITS } from '../src/traffic/traffic.js';
+import { createTraffic, TAKEOVER_HITS } from '../src/traffic/index.js';
+import { gridPlan, crowdAsset } from './helpers/street-grid.js';
 
-const player = { x: 20, y: 10, z: 0 };
+const player = { x: 25, y: 0, z: 25 };
 function harness() {
-  const scene = new THREE.Scene(), city = { cars: [], colliders: [], masterPlan: { roads: [
-    { id: 'slope', width: 18, class: 'secondary', closed: false, points: [{ x: 0, y: 0, z: -500 }, { x: 0, y: 20, z: 500 }] },
-  ] } };
-  const traffic = createTraffic(scene, city);
-  traffic.update(0, player, null, null);
+  const scene = new THREE.Scene(), traffic = createTraffic({ scene, world: { masterPlan: gridPlan(), spatial: null }, assets: { citizen: crowdAsset() } });
+  traffic.update(0, { player });
   assert.ok(traffic.cars.length > 0);
-  return { scene, city, traffic };
+  return { scene, traffic };
 }
+const fleet = traffic => traffic.root.children.find(group => group.name === 'NPC traffic');
 
-test('traffic requires three separate hits before a moving NPC becomes a drivable car', () => {
-  const { traffic, city } = harness(), npc = traffic.cars[0], count = traffic.cars.length;
-  for (let hit = 1; hit < TRAFFIC_TAKEOVER_HITS; hit++) {
-    assert.deepEqual(traffic.hitCar(npc), { hit: true, hitsRemaining: TRAFFIC_TAKEOVER_HITS - hit, car: null });
-    const before = npc.along;
-    traffic.update(.1, player, null, null);
-    assert.ok(npc.along > before, 'non-disabling hits must leave the NPC following its route');
-    assert.equal(traffic.cars.length, count);
-    assert.equal(city.cars.length, 0);
+test('traffic needs three separate hits before a moving car becomes drivable', () => {
+  const { traffic, scene } = harness(), npc = traffic.cars[0], count = traffic.cars.length;
+  for (let hit = 1; hit < TAKEOVER_HITS; hit++) {
+    assert.deepEqual(traffic.hit(npc), { hit: true, hitsRemaining: TAKEOVER_HITS - hit, car: null });
+    for (let i = 0; i < 120; i++) traffic.update(1 / 30, { player });
+    assert.ok(traffic.cars.includes(npc), 'a damaged car brakes and carries on');
+    assert.equal(traffic.owned.length, 0);
     assert.equal(traffic.snapshot().cars.find(car => car.id === npc.id).damageHits, hit);
   }
-  const result = traffic.hitCar(npc);
+  const result = traffic.hit(npc);
   assert.equal(result.hit, true); assert.equal(result.hitsRemaining, 0);
-  assert.ok(result.car?.root.isGroup);
-  assert.equal(result.car.speed, 0);
-  assert.equal(traffic.cars.length, count - 1);
+  assert.ok(result.car?.root.isGroup && result.car.speed === 0);
   assert.equal(traffic.cars.includes(npc), false);
-  assert.ok(traffic.root.children.every(mesh => mesh.count === count - 1), 'the old instance disappears in the same operation');
-  assert.equal(city.cars.length, 0, 'the caller owns adding the converted car to the game');
+  assert.equal(traffic.cars.length, count - 1);
+  assert.deepEqual(traffic.owned, [result.car], 'the traffic module owns acquired cars');
+  assert.ok(scene.children.includes(result.car.root));
+  const meshes = fleet(traffic).children.filter(mesh => mesh.isInstancedMesh && mesh.geometry.type !== 'PlaneGeometry');
+  assert.ok(meshes.every(mesh => mesh.count === count - 1), 'the instance disappears in the same operation');
   traffic.dispose();
 });
 
-test('conversion preserves fleet paint, banked slope pose and wheel rotation without disposing shared assets', () => {
-  const { traffic } = harness(), npc = traffic.cars[0];
-  npc.roll = .035; npc.wheelAngle = -5.7;
-  const old = { x: npc.x, y: npc.y, z: npc.z, yaw: npc.yaw, pitch: npc.pitch, roll: npc.roll };
-  let geometryDisposals = 0, materialDisposals = 0;
-  for (const mesh of traffic.root.children) {
-    mesh.geometry.addEventListener('dispose', () => geometryDisposals++);
-    mesh.material.addEventListener('dispose', () => materialDisposals++);
-  }
-  const painted = traffic.root.children.find(mesh => mesh.instanceColor), paint = new THREE.Color();
-  painted.getColorAt(0, paint);
-  traffic.hitCar(npc); traffic.hitCar(npc);
-  const { car } = traffic.hitCar(npc);
-  assert.deepEqual(car.spawn, old);
-  assert.deepEqual(car.root.position.toArray(), [old.x, old.y + .04, old.z]);
-  assert.deepEqual(car.root.rotation.toArray(), [old.pitch, old.yaw, old.roll, 'YXZ']);
-  assert.equal(car.paint, paint.getHex());
-  const paintMeshes = car.root.children.filter(mesh => mesh.isMesh && mesh.material.color.getHex() === car.paint);
-  assert.ok(paintMeshes.length > 0, 'the full model must use the same paint as the instance');
-  assert.equal(car.wheels.length, 4);
-  assert.ok(car.wheels.every(wheel => wheel.rotation.x === -5.7));
+test('a stopped car can be taken over in place, keeping its paint, body and pose', () => {
+  const { traffic } = harness(), npc = traffic.cars.find(car => car.body.id !== 'sedan') ?? traffic.cars[0];
+  npc.speed = 0;
+  assert.equal(traffic.hijackable({ x: npc.x + 1.8, y: npc.y, z: npc.z }), npc, 'within reach of the door');
+  assert.equal(traffic.hijackable({ x: npc.x + 6, y: npc.y, z: npc.z }), null);
+  assert.equal(traffic.hijackable({ x: npc.x, y: npc.y + 6, z: npc.z }), null, 'not from a floor above');
+  npc.speed = 8;
+  assert.equal(traffic.hijackable({ x: npc.x + 1.8, y: npc.y, z: npc.z }), null, 'moving traffic cannot be boarded');
+  npc.speed = 0; npc.spin = -5.7;
+  const pose = { x: npc.x, y: npc.y, z: npc.z, yaw: npc.yaw, pitch: npc.pitch, roll: npc.roll };
+  const materials = new Set(); fleet(traffic).traverse(o => { if (o.isMesh && o.geometry.type !== 'PlaneGeometry') materials.add(o.material); });
+  let disposed = 0; for (const material of materials) material.addEventListener('dispose', () => disposed++);
+  const car = traffic.takeOver(npc);
+  assert.deepEqual(car.spawn, pose);
+  assert.deepEqual(car.root.position.toArray(), [pose.x, pose.y + .04, pose.z]);
+  assert.deepEqual(car.root.rotation.toArray(), [pose.pitch, pose.yaw, pose.roll, 'YXZ']);
+  assert.equal(car.body, npc.body.id);
+  assert.ok(car.root.children.some(mesh => mesh.isMesh && mesh.material.color.getHex() === car.paint), 'same paint as the instance');
+  assert.ok(car.wheels.length === 4 && car.wheels.every(wheel => wheel.rotation.x === -5.7));
+  if (npc.body.id !== 'sedan') assert.ok(car.root.children.some(mesh => mesh.isMesh && mesh.scale.z !== 1), 'body proportions carry over');
   car.root.traverse(mesh => { if (mesh.isMesh) assert.equal(mesh.castShadow, false, 'moving cars use contact shadows'); });
-  assert.equal(geometryDisposals, 0); assert.equal(materialDisposals, 0);
+  assert.equal(traffic.takeOver(npc), null, 'a car cannot be taken twice');
+  assert.deepEqual(traffic.hit(npc), { hit: false, hitsRemaining: 0, car: null });
+  assert.deepEqual(traffic.hit(car), { hit: false, hitsRemaining: 0, car: null });
   traffic.dispose();
-  assert.equal(materialDisposals, 0, 'disposing the fleet must not dispose materials used by acquired cars');
+  assert.equal(disposed, 0, 'shared car materials stay alive for acquired cars');
 });
 
-test('converted and stale cars cannot convert twice and subsequent traffic updates leave acquired cars alone', () => {
-  const { traffic, city, scene } = harness(), npc = traffic.cars[0];
-  traffic.hitCar(npc); traffic.hitCar(npc);
-  const { car } = traffic.hitCar(npc);
-  city.cars.push(car); scene.add(car.root);
-  car.root.updateMatrix();
-  const pose = car.root.matrix.clone();
+test('acquired cars stay put, count toward the street budget, and survive a reset', () => {
+  const { traffic } = harness(), budget = traffic.snapshot().target;
+  const car = traffic.takeOver(traffic.cars[0]);
   const original = { x: car.x, y: car.y, z: car.z, yaw: car.yaw, speed: car.speed };
-  assert.deepEqual(traffic.hitCar(npc), { hit: false, hitsRemaining: 0, car: null });
-  assert.deepEqual(traffic.hitCar(car), { hit: false, hitsRemaining: 0, car: null });
-  for (let i = 0; i < 180; i++) traffic.update(1 / 60, player, null, null);
-  car.root.updateMatrix();
+  for (let i = 0; i < 90; i++) traffic.update(1 / 30, { player });
   assert.deepEqual({ x: car.x, y: car.y, z: car.z, yaw: car.yaw, speed: car.speed }, original);
-  assert.ok(car.root.matrix.equals(pose));
-  assert.equal(city.cars.length, 1);
-  assert.ok(traffic.cars.every(other => other.id !== npc.id));
+  assert.equal(traffic.snapshot().target, budget - 1);
   assert.ok(traffic.cars.length <= traffic.snapshot().capacity);
-  const stale = traffic.cars[0]; traffic.reset();
-  assert.deepEqual(traffic.hitCar(stale), { hit: false, hitsRemaining: 0, car: null });
+  const stale = traffic.cars[0];
+  traffic.reset();
+  assert.equal(traffic.cars.length, 0);
+  assert.deepEqual(traffic.hit(stale), { hit: false, hitsRemaining: 0, car: null });
+  assert.deepEqual(traffic.owned, [car]);
+  traffic.update(0, { player });
+  assert.ok(traffic.cars.length > 0, 'a cut repopulates the streets at once');
   traffic.dispose();
-  assert.equal(scene.children.includes(car.root), true);
 });

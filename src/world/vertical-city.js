@@ -474,7 +474,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   ground.receiveShadow = true; ground.userData.resident = true; ground.matrixAutoUpdate = false; scene.add(ground);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LIMIT * 2 + 500, WORLD_LIMIT * 2 + 500), new THREE.MeshStandardMaterial({ color: 0x123444, roughness: .88, metalness: .03 }));
   water.name = 'Blackwater Bay'; water.rotation.x = -Math.PI / 2; water.position.y = WATER_LEVEL; water.userData.resident = true; scene.add(water);
-  const signs = [], cars = [], supportCache = new WeakMap();
+  const signs = [], supportCache = new WeakMap();
   function supportCollider(s) {
     if (supportCache.has(s)) return supportCache.get(s);
     const box = s.a ? { ...s, supportOnly: true, walkable: true, slabThickness: .65, minY: s.minY ?? Math.min(s.a.y, s.b.y) - .65, maxY: s.maxY ?? Math.max(s.a.y, s.b.y) } :
@@ -595,8 +595,6 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
       if (inCell(p, cell)) buildSupport(s, add);
     }
   };
-  // Drivable cars are stopped NPC vehicles added during play, not designated
-  // parked spawns. Their positions, collisions and map markers use this list.
   const labels = wayfindingSigns(metropolis.infrastructureIndex);
   if (typeof document !== 'undefined') {
     for (const p of labels) {
@@ -619,7 +617,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     return null;
   };
   const planNear = (x, z) => metropolis.buildingsNear(x, z, 1).map(cachedInteriorPlan).find(Boolean) ?? null;
-  return { ground, water, cars, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
+  return { ground, water, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
     interiorContextAt, planNear, interiorClip, spatialFor: context => context ? interiorSpatial(spatial, context) : spatial,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

@@ -8,8 +8,7 @@ import { terrainHeight } from '../world/master-plan.js';
 import { levelY, roomAt } from '../world/interior-plan.js';
 import { toLocal } from '../world/interior-physics.js';
 import { ResolutionGovernor } from '../world/world-stream.js';
-import { createCrowd } from '../traffic/crowd.js';
-import { createTraffic } from '../traffic/traffic.js';
+import { createTraffic } from '../traffic/index.js';
 import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, circleHitsBox, overlapsHeight, supportHeight } from '../core/physics.js';
 import { findSpawnPosition } from '../core/spawn.js';
 import { RENDER_PROFILES } from '../core/quality.js';
@@ -45,7 +44,7 @@ export async function createGame({ canvas, modes }) {
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
   const vector = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
-  let renderer, composer, bloom, world, character, hud, input, scene, camera, crowd, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
+  let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
   let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
 
@@ -109,7 +108,7 @@ export async function createGame({ canvas, modes }) {
     const track = fn => { cleanups.push(fn); return fn; };
     contactSourcesRef = contactSources;
     return {
-      THREE, scene, camera, renderer, world, traffic, crowd, assets, storage, audio, effects, weapon, input, state,
+      THREE, scene, camera, renderer, world, traffic, assets, storage, audio, effects, weapon, input, state,
       clock: { get time() { return state.time; }, set time(value) { state.time = value; } },
       actorRange: () => RENDER_PROFILES[quality].actors,
       hud: {
@@ -205,7 +204,7 @@ export async function createGame({ canvas, modes }) {
   function setQuality(value) {
     quality = value;
     resolution.reset();
-    shadows.setQuality(quality); traffic.setQuality(quality); crowd.setQuality(quality);
+    shadows.setQuality(quality); traffic.setQuality(quality);
     if (quality === 'high' && !composer) {
       composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera));
       bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), .31, .55, 1.03); composer.addPass(bloom); composer.addPass(new OutputPass());
@@ -247,8 +246,8 @@ export async function createGame({ canvas, modes }) {
     // Car materials are cached and shared with the remaining traffic.
     owned.splice(owned.indexOf(car), 1);
   }
-  /** Move the player (and camera) to a spot: a cut, so traffic and shadows reset too. */
-  function placeAt(spot, { cameraYaw: yaw, cameraPitch: pitch, playerYaw } = {}) {
+  /** Move the player (and camera) to a spot. By default a cut, so traffic and shadows reset too. */
+  function placeAt(spot, { cameraYaw: yaw, cameraPitch: pitch, playerYaw, cut = true } = {}) {
     if (driving) { driving.speed = 0; driving = null; }
     resetTraversal();
     player.x = spot.x; player.z = spot.z; player.y = Math.max(spot.y ?? terrainHeight(spot.x, spot.z), terrainHeight(spot.x, spot.z));
@@ -260,7 +259,7 @@ export async function createGame({ canvas, modes }) {
     if (pitch !== undefined) cameraPitch = pitch;
     character.root.visible = true; input.clear();
     updateCharacter(.016); updateCamera(.016, true);
-    traffic.reset(); shadows.invalidate();
+    if (cut) { traffic.reset(); shadows.invalidate(); }
     world.update({ camera, focus: player, interior: player.interior, now: performance.now() / 1000, force: true, paused: true });
   }
 
@@ -294,6 +293,9 @@ export async function createGame({ canvas, modes }) {
         if (useLift(Number(value))) ui.close(); else hud.notify('Step fully into the elevator to choose a floor.', 2);
       } });
   }
+  function hijackPrompt() {
+    return !driving && !nearestCar && !player.climb && !player.parachute && traffic.hijackable(player) ? { caption: 'TRAFFIC / WAITING', label: 'Take this car' } : null;
+  }
   function liftPrompt() { return nearLift() ? { caption: `ELEVATOR / FLOOR ${player.interior.level + 1} OF ${player.interior.plan.levels}`, label: 'Choose a floor' } : null; }
 
   // --- Player actions ----------------------------------------------------------
@@ -314,9 +316,12 @@ export async function createGame({ canvas, modes }) {
       const target = mode?.interactable?.(player);
       if (target) { target.use(); return; }
       nearestCar = findNearestCar();
+      // A traffic car waiting beside you (at a red light, in a queue) can be taken.
+      const stopped = nearestCar ? null : traffic.hijackable(player);
+      if (stopped) nearestCar = traffic.takeOver(stopped);
       if (!nearestCar) {
         const nearTraffic = traffic.cars.some(car => Math.abs(player.y - car.y) < 2 && Math.hypot(player.x - car.x, player.z - car.z) < 9);
-        hud.notify(nearTraffic && weapon.enabled ? 'Hit a traffic car three times to stop it, then approach to take the wheel.' : mode?.interactHint?.() ?? 'Approach a door, an elevator or a stopped vehicle. E to interact.', 3);
+        hud.notify(nearTraffic ? `Step up to a car while it waits at a light, then press E${weapon.enabled ? ', or hit it three times to stop it' : ''}.` : mode?.interactHint?.() ?? 'Approach a door, an elevator or a stopped vehicle. E to interact.', 3);
         return;
       }
       resetTraversal();
@@ -436,7 +441,7 @@ export async function createGame({ canvas, modes }) {
       const height = Math.max(0, player.y - player.groundY);
       items.push({ x: player.x, z: player.z, y: player.groundY + .055, width: 1.8, length: 1.8, opacity: 1 / (1 + height * .5) });
     }
-    for (const { root } of crowd.people) if (root.visible && root.parent) {
+    for (const { root } of traffic.pedestrians.people) if (root.visible && root.parent) {
       items.push({ x: root.position.x, z: root.position.z, y: Math.max(.055, root.position.y + .015), width: 1.6, length: 1.6 });
     }
     for (const source of contactSourcesRef) source(items);
@@ -490,10 +495,9 @@ export async function createGame({ canvas, modes }) {
     fps = damp(fps, Math.min(144, 1 / Math.max(rawDt, .001)), 2, dt);
     if (!state.paused) {
       state.time += dt;
-      traffic.update(dt, player, driving, camera, crowd.people);
+      traffic.update(dt, { player, vehicle: driving, camera, range: RENDER_PROFILES[quality].actors });
       if (state.started) updatePlayer(dt); else updateCharacter(dt);
       updateCamera(dt); weapon.update(dt); effects.update(dt, state.time);
-      crowd.update(dt, player, camera, RENDER_PROFILES[quality].actors);
       if (mode) mode.update?.(dt, { now: now / 1000, time: state.time, player, driving, camera });
     }
     world.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused });
@@ -514,7 +518,7 @@ export async function createGame({ canvas, modes }) {
     hud.waypoint(camera, goal, player, vector, state.started && !state.paused);
     $('crosshair').classList.toggle('aim', !!input.aiming);
     if (now - lastUI > 85) {
-      hud.update({ state, player, driving, nearestCar, fps, prompt: liftPrompt() ?? (state.started ? mode?.interactable?.(player) ?? null : null), weapon, label: mode?.label ?? definition?.title?.toUpperCase() ?? 'AFTERLIGHT' });
+      hud.update({ state, player, driving, nearestCar, fps, prompt: liftPrompt() ?? (state.started ? mode?.interactable?.(player) ?? hijackPrompt() : null), weapon, label: mode?.label ?? definition?.title?.toUpperCase() ?? 'AFTERLIGHT' });
       if (state.started) mode?.hud?.({ player, goal, time: state.time });
       drawMaps();
       const minute = 48 + Math.floor(state.time / 45); $('game-time').textContent = `${String((23 + Math.floor(minute / 60)) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
@@ -533,15 +537,15 @@ export async function createGame({ canvas, modes }) {
     return {
       mode: definition?.id ?? null, started: state.started, paused: state.paused, modal: state.modal, time: state.time,
       ammo: weapon.ammo, reloading: weapon.reloading, armed: weapon.enabled,
-      sound: { enabled: audio.enabled, state: audio.context?.state ?? 'idle' }, crowdArchetypes: crowd.archetypes,
+      sound: { enabled: audio.enabled, state: audio.context?.state ?? 'idle' }, crowdArchetypes: traffic.pedestrians.archetypes,
       position: { x: player.x, y: player.y, z: player.z }, driving: driving ? { x: driving.x, y: driving.y, z: driving.z, speed: driving.speed, yaw: driving.yaw } : null,
       traversal: { groundY: player.groundY, verticalSpeed: player.velocityY, parachute: player.parachute && { ...player.parachute }, climb: player.climb && { mode: player.climb.mode, roofY: player.climb.roofY, phase: player.climb.phase, blocked: player.climb.blocked }, candidate: player.climbCandidate, nearby: nearbyColliders(player.x, player.z, 3) },
       yaw: cameraYaw, pitch: cameraPitch, fps, quality, touch: input.touch, drawCalls: renderer.info.render.calls,
       rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
-      performance: { ...frameCosts, scale: resolution.scale, activeCrowd: crowd.active, streaming: { ...world.stream.stats }, blueprints: world.metropolis.blocks.size }, population: crowd.snapshot(),
+      performance: { ...frameCosts, scale: resolution.scale, activeCrowd: traffic.pedestrians.active, streaming: { ...world.stream.stats }, blueprints: world.metropolis.blocks.size }, population: traffic.pedestrians.snapshot(),
       shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(),
       city: { span: world.limit * 2, areaKm2: (world.limit * 2 / 1000) ** 2, districts: world.districts.length, roads: world.plan.roads.length, vertical: true },
-      character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: crowd.count, crowdDrawCalls: crowd.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
+      character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: traffic.pedestrians.count, crowdDrawCalls: traffic.pedestrians.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
       camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
       cars: owned.map(c => ({ x: c.x, y: c.y, z: c.z, trafficId: c.trafficId })),
       interior: player.interior && { building: player.interior.id, level: player.interior.level, levels: player.interior.plan.levels, inside: player.interior.inside, layout: player.interior.plan.layout,
@@ -565,11 +569,10 @@ export async function createGame({ canvas, modes }) {
     $('loading-text').textContent = 'BUILDING AFTERLIGHT / STREETS, SKYWAYS & STORIES...';
     assets = await loadCharacterAssets();
     world = createWorld({ scene, renderer });
-    crowd = createCrowd(scene, assets.citizen, world, assets.visitors, assets.humanBases);
     character = createCharacter(assets.player); scene.add(character.root);
     parachute = createParachute(); character.root.add(parachute.root);
-    traffic = createTraffic(scene, world);
-    shadows = createShadows(renderer, scene, world.atmosphere.moon, { dynamicRoots: [traffic.root, character.root, ...crowd.people.map(p => p.root)] });
+    traffic = createTraffic({ scene, world, assets });
+    shadows = createShadows(renderer, scene, world.atmosphere.moon, { dynamicRoots: [traffic.root, character.root, ...traffic.pedestrians.people.map(p => p.root)] });
     contactShadows = createContactShadows(scene);
     effects = createEffects(scene);
     hud = new HUD(world);
@@ -580,18 +583,17 @@ export async function createGame({ canvas, modes }) {
       blur: () => { mode?.onMenu?.(); if (state.started && !state.paused) ui.setPause(true); }, audio: () => audio.init(),
     });
     ui = createUI({ state, input, audio, onMenu: id => { mode?.onMenu?.(id); if (id && state.started) save(); } });
-    owned = world.cars;
+    owned = traffic.owned;
     weapon = createWeapon({ camera, character, audio, effects, hud, input, traffic }, {
       canAct: () => state.started && !state.paused && !driving && !player.climb && !player.parachute,
       scenery, ownedCars: () => owned, allCars, shot: () => characterShot(character),
-      acquire: car => { owned.push(car); scene.add(car.root); },
     });
     attachMapControls({ view: world.mapView, canvas: $('full-map'), position: () => player, onPick: (x, y) => mode?.mapPick?.(x, y) });
     quality = input.touch ? 'low' : 'high'; $('quality').value = quality;
     setQuality(quality);
     setupUI();
     placeAt(world.spawn, { cameraYaw: world.spawn.yaw, cameraPitch: world.spawn.pitch });
-    traffic.update(0, player, driving, camera, crowd.people);
+    traffic.update(0, { player, vehicle: driving, camera, range: RENDER_PROFILES[quality].actors });
     renderPicker();
     renderer.compile(scene, camera);
     $('loading').style.opacity = '0'; setTimeout(() => $('loading').classList.add('hidden'), 500);
@@ -602,5 +604,5 @@ export async function createGame({ canvas, modes }) {
   }
 
   await boot();
-  return { activate, deactivate, snapshot, get mode() { return definition?.id ?? null; } };
+  return { activate, deactivate, snapshot, teleport: placeAt, get mode() { return definition?.id ?? null; } };
 }

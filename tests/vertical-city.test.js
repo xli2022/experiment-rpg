@@ -206,7 +206,7 @@ test('roads and pedestrian decks remain support surfaces while piers and rails a
   const ramp = city.masterPlan.supports.find(s => s.id === 'eastpoint-west-walk-ramp');
   const rampCollider = city.spatial.near((ramp.a.x + ramp.b.x) / 2, (ramp.a.z + ramp.b.z) / 2, 1).find(p => p.id === ramp.id);
   assert.ok(Math.abs(surfaceHeightAt((ramp.a.x + ramp.b.x) / 2, (ramp.a.z + ramp.b.z) / 2, rampCollider) - (ramp.a.y + ramp.b.y) / 2) < .001);
-  assert.equal(city.cars.length, 0, 'drivable cars come from stopped traffic, not designated parked spawns');
+  assert.equal(city.cars, undefined, 'the static city has no cars: drivable cars come from stopped traffic');
 });
 
 test('sloped road meshes follow their support height and stay batched by material', () => {

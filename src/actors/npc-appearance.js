@@ -387,8 +387,10 @@ export function createNPC(asset, profile, clipName = 'Idle') {
   const scale = profile.height / (asset.userData?.height ?? 1.9331); root.scale.set(scale * profile.width, scale, scale * profile.depth);
   const mixer = new THREE.AnimationMixer(body);
   const walk = clipName === 'WalkFormal' ? 'WalkFormal' : 'Walk';
+  const stride = scale * profile.depth, motion = asset.userData?.motionSpeeds ?? {};
+  const speeds = Object.fromEntries(Object.entries(motion).map(([name, speed]) => [name, speed * stride]));
   const animation = createNPCAnimation(mixer, asset.animations, { initial: clipName, walk,
-    walkSpeed: (asset.userData?.motionSpeeds?.[walk] ?? 1.084589) * scale * profile.depth });
+    walkSpeed: (motion[walk] ?? 1.084589) * stride, speeds });
   let presenceAction = null;
   if (profile.stance) {
     const tracks = ['Chest', 'Head'].map(name => {
@@ -415,6 +417,7 @@ export function createNPC(asset, profile, clipName = 'Idle') {
     ground,
     update(dt, speed) { animation.update(dt, speed); updatePresence(); ground(dt); },
     setAnimation(name) { animation.setAnimation(name); updatePresence(); ground(); }, scale, profile, wardrobeBatches: wardrobe.batches,
+    setGait: name => animation.setGait(name), get gait() { return animation.gait; },
     dispose() {
       if (disposed) return;
       disposed = true;

@@ -54,6 +54,7 @@ export function createVisitor(asset, profile, clipName = 'Idle') {
     ground,
     update(dt, speed = 0) { animation.update(dt, speed); ground(dt); },
     setAnimation(name) { animation.setAnimation(name); ground(); },
+    setGait: name => animation.setGait(name), get gait() { return animation.gait; },
     dispose() {
       mixer.stopAllAction(); mixer.uncacheRoot(model);
       // Skeletons belong to the instance; geometry, materials and textures are shared.

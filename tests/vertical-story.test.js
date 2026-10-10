@@ -6,7 +6,7 @@ import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world/world-sca
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { Campaign, SAVE_KEY, WORLD_REVISION, readSave, writeSave } from '../src/modes/story/campaign.js';
 import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt, moveWithCollisions, stepVehicle, orientedBox, rayBoxDistance } from '../src/core/physics.js';
-import { createLaneRoute, sampleTrafficRoute } from '../src/traffic/traffic.js';
+import { buildNetwork, samplePath } from '../src/traffic/network.js';
 import { beginJump, stepJump } from '../src/engine/player/jump.js';
 import { findClimbFace, startClimb, stepClimb } from '../src/engine/player/climbing.js';
 
@@ -112,17 +112,17 @@ test('new-world saves record the current map revision and older saves preserve c
 });
 
 test('driving the actual Eastpoint ramp keeps connected floor support at 30, 60 and 120 FPS', () => {
-  const road = plan.roads.find(r => r.id === 'eastpoint-ramp');
-  assert.ok(road);
-  for (const reverse of [false, true]) for (const fps of [30, 60, 120]) {
-    const route = createLaneRoute(road.points, { width: road.width, closed: false, reverse });
-    const start = sampleTrafficRoute(route, 0), car = { ...start, speed: 0, velocityY: 0 };
+  const edge = buildNetwork(plan).edges.find(e => e.road.id === 'eastpoint-ramp');
+  assert.ok(edge);
+  for (const lane of [...edge.lanes.forward, ...edge.lanes.backward]) for (const fps of [30, 60, 120]) {
+    const route = lane.path, reverse = lane.direction;
+    const start = samplePath(route, 0), car = { ...start, speed: 0, velocityY: 0 };
     car.y = floor(car.x, car.z, start.y + .75);
     let along = 0, elapsed = 0;
     while (along < route.length - 1e-6 && elapsed < 90) {
       const dt = 1 / fps, delta = stepVehicle(car, 1, 0, false, dt), travel = Math.hypot(delta.x, delta.z);
       along = Math.min(route.length, along + travel);
-      const target = sampleTrafficRoute(route, along), previousY = car.y;
+      const target = samplePath(route, along), previousY = car.y;
       const blocked = moveWithCollisions(car, target.x - car.x, target.z - car.z, 1.6, near(car.x, car.z, 6));
       assert.equal(blocked, false, `Ramp lane collision at ${fps} FPS / ${reverse} / ${along}`);
       const next = floor(car.x, car.z, car.y + .75);
@@ -131,7 +131,7 @@ test('driving the actual Eastpoint ramp keeps connected floor support at 30, 60 
       car.y = next; car.yaw = target.yaw; elapsed += dt;
     }
     assert.ok(along >= route.length - 1e-6);
-    assert.ok(Math.abs(car.y - sampleTrafficRoute(route, route.length).y) < .3);
+    assert.ok(Math.abs(car.y - samplePath(route, route.length).y) < .3);
   }
 });
 

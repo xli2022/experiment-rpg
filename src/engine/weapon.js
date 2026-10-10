@@ -70,11 +70,10 @@ export function createWeapon({ camera, character, audio, effects, hud, input, tr
     },
   };
   function hitTrafficCar(car, end) {
-    const result = traffic.hitCar(car);
+    const result = traffic.hit(car);
     if (!result.hit) return;
     effects.hitMarker(); audio.hit(); effects.sparks(end, 0xbfe3d7, 6);
     if (result.car) {
-      world.acquire(result.car);
       hud.notify(input.touch ? 'VEHICLE STOPPED // Approach and tap USE to take the wheel.' : 'VEHICLE STOPPED // Approach and press E to take the wheel.', 4);
     } else hud.notify(`VEHICLE HIT // ${result.hitsRemaining} more ${result.hitsRemaining === 1 ? 'hit' : 'hits'} to stop it.`, 1.4);
   }
