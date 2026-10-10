@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { WorldStream } from '../src/world-stream.js';
+import { WorldStream } from '../src/world/world-stream.js';
 
 test('a previously unloaded tower streams in when only its upper floors are visible from another rooftop', () => {
   const scene = new THREE.Scene(), material = new THREE.MeshStandardMaterial();

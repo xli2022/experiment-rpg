@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import * as authored from '../src/authored-plan.js';
-import * as runtime from '../src/master-plan.js';
-import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world-scale.js';
-import { WORLD_LIMIT } from '../src/world-config.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { rayBoxDistance } from '../src/physics.js';
+import * as authored from '../src/world/authored-plan.js';
+import * as runtime from '../src/world/master-plan.js';
+import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world/world-scale.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { rayBoxDistance } from '../src/core/physics.js';
 
 const source = authored.createMasterPlan(), plan = runtime.createMasterPlan();
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-8, `${a} differs from ${b}`);

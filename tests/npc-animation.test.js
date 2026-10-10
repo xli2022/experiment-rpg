@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createNPCAnimation } from '../src/npc-animation.js';
+import { createNPCAnimation } from '../src/actors/npc-animation.js';
 
 function controller(initial = 'Walk') {
   const model = new THREE.Group(), bone = new THREE.Bone(); bone.name = 'Hips'; model.add(bone);

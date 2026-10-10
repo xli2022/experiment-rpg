@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetails } from '../src/building-design.js';
-import { createFacadeMaterial, FACADE_STYLES, facadeUV } from '../src/building-materials.js';
-import { createVerticalCity } from '../src/vertical-city.js';
-import { WorldStream, WORLD_GEOMETRY } from '../src/world-stream.js';
-import { SHOWCASE } from '../src/master-plan.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { boxContainsPoint, supportHeight } from '../src/physics.js';
+import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetails } from '../src/world/building-design.js';
+import { createFacadeMaterial, FACADE_STYLES, facadeUV } from '../src/world/building-materials.js';
+import { createVerticalCity } from '../src/world/vertical-city.js';
+import { WorldStream, WORLD_GEOMETRY } from '../src/world/world-stream.js';
+import { SHOWCASE } from '../src/world/master-plan.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { boxContainsPoint, supportHeight } from '../src/core/physics.js';
 
 const types = ['office', 'apartment', 'terrace', 'civic', 'market', 'warehouse', 'factory'];
 const example = (type, i) => ({ id: `${type}:design:${i}`, type, x: 37, z: -23, y: 4, ground: 3.5,

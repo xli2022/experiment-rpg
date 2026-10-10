@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createMasterPlan, terrainHeight } from '../src/master-plan.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { WAYFINDING_SIGNS, placeWayfindingSign, wayfindingSigns } from '../src/wayfinding.js';
-import { geometryVolume, infrastructureIntersections } from '../src/infrastructure-clearance.js';
-import { SpatialGrid } from '../src/spatial-grid.js';
+import { createMasterPlan, terrainHeight } from '../src/world/master-plan.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { WAYFINDING_SIGNS, placeWayfindingSign, wayfindingSigns } from '../src/world/wayfinding.js';
+import { geometryVolume, infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
 
 test('Eastpoint wayfinding signs stay clear of both decks, ramp shoulders and railings', () => {
   const metro = new VerticalMetropolis(createMasterPlan(), WORLD_OBJECTS), index = metro.infrastructureIndex;

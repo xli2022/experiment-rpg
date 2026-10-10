@@ -11,8 +11,8 @@ await mkdir(output, { recursive: true });
 await writeFile(new URL('harness.html', output), `<!doctype html>
 <html><head><link rel="icon" href="/favicon.svg"></head><body><script type="module">
 import * as THREE from 'three';
-import { createFacadeMaterial, facadeUV, FACADE_STYLES } from '/src/building-materials.js';
-import { WorldStream } from '/src/world-stream.js';
+import { createFacadeMaterial, facadeUV, FACADE_STYLES } from '/src/world/building-materials.js';
+import { WorldStream } from '/src/world/world-stream.js';
 
 window.runWindowChecks = () => {
   const check = (ok, message) => { if (!ok) throw new Error(message); };

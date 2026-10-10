@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createContactShadows } from '../src/contact-shadows.js';
+import { createContactShadows } from '../src/engine/contact-shadows.js';
 
 const actor = (changes = {}) => ({ x: 5, y: .04, z: -8, width: 2.4, length: 4.6, ...changes });
 const close = (a, b) => assert.ok(Math.abs(a - b) < 1e-5, `${a} != ${b}`);

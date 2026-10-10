@@ -1,16 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { DISTRICT_ARCHITECTURE, BUILDING_FOOTPRINTS, SKYSCRAPER_HEIGHT } from '../src/district-architecture.js';
-import { MASTER_DISTRICTS, createMasterPlan, districtAt } from '../src/master-plan.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { WORLD_LIMIT } from '../src/world-config.js';
-import { buildingVolumes, buildingVolumeColliders } from '../src/building-design.js';
-import { WORLD_GEOMETRY } from '../src/world-stream.js';
-import { footprintVertices } from '../src/building-footprints.js';
-import { orientedPrism, boxContainsPoint, circleHitsBox, supportHeight, rayBoxDistance, moveWithCollisions } from '../src/physics.js';
-import { findClimbFace, startClimb, stepClimb } from '../src/climbing.js';
+import { DISTRICT_ARCHITECTURE, BUILDING_FOOTPRINTS, SKYSCRAPER_HEIGHT } from '../src/world/district-architecture.js';
+import { MASTER_DISTRICTS, createMasterPlan, districtAt } from '../src/world/master-plan.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
+import { buildingVolumes, buildingVolumeColliders } from '../src/world/building-design.js';
+import { WORLD_GEOMETRY } from '../src/world/world-stream.js';
+import { footprintVertices } from '../src/world/building-footprints.js';
+import { orientedPrism, boxContainsPoint, circleHitsBox, supportHeight, rayBoxDistance, moveWithCollisions } from '../src/core/physics.js';
+import { findClimbFace, startClimb, stepClimb } from '../src/engine/player/climbing.js';
 
 const worldPoint = (p, x, z, y = 0) => new THREE.Vector3(p.x + x * Math.cos(p.yaw) + z * Math.sin(p.yaw), y, p.z - x * Math.sin(p.yaw) + z * Math.cos(p.yaw));
 

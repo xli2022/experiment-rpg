@@ -1,12 +1,13 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { findSpawnPosition } from '../src/spawn.js';
-import { createVerticalCity } from '../src/vertical-city.js';
-import { WorldStream } from '../src/world-stream.js';
-import { WORLD_OBJECTS, placeById } from '../src/content.js';
-import { createMasterPlan, terrainHeight } from '../src/master-plan.js';
-import { carCollider, circleHitsBox, overlapsHeight, supportHeight, moveWithCollisions, orientedBox, WORLD_LIMIT } from '../src/physics.js';
+import { findSpawnPosition } from '../src/core/spawn.js';
+import { createVerticalCity } from '../src/world/vertical-city.js';
+import { WorldStream } from '../src/world/world-stream.js';
+import { WORLD_OBJECTS, placeById } from '../src/modes/story/content.js';
+import { createMasterPlan, terrainHeight } from '../src/world/master-plan.js';
+import { carCollider, circleHitsBox, overlapsHeight, supportHeight, moveWithCollisions, orientedBox } from '../src/core/physics.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
 
 const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
 after(() => stream.dispose());
@@ -100,7 +101,7 @@ test('a fully blocked arrival returns null instead of placing the player inside 
 
 test('arrival validation rejects invalid floors and keeps its clearance inside the world', () => {
   assert.equal(findSpawnPosition({ x: 0, y: 0, z: 0 }, () => [], () => NaN), null);
-  const safe = findSpawnPosition({ x: WORLD_LIMIT - .2, y: 0, z: 0 }, () => [], () => 0);
+  const safe = findSpawnPosition({ x: WORLD_LIMIT - .2, y: 0, z: 0 }, () => [], () => 0, .43, WORLD_LIMIT);
   assert.ok(safe);
   assert.ok(Math.abs(safe.x) <= WORLD_LIMIT - .93 && Math.abs(safe.z) <= WORLD_LIMIT - .93);
 });

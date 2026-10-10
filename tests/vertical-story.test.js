@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WORLD_OBJECTS, CONTACTS, MEMORIES, DISTRICTS, QUESTS, placeById } from '../src/content.js';
-import { createMasterPlan, terrainHeight, SHOWCASE } from '../src/master-plan.js';
-import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world-scale.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { Campaign, SAVE_KEY, WORLD_REVISION, readSave, writeSave } from '../src/campaign.js';
-import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt, moveWithCollisions, stepVehicle, orientedBox, rayBoxDistance } from '../src/physics.js';
-import { createLaneRoute, sampleTrafficRoute } from '../src/traffic.js';
-import { beginJump, stepJump } from '../src/jump.js';
-import { findClimbFace, startClimb, stepClimb } from '../src/climbing.js';
+import { WORLD_OBJECTS, CONTACTS, MEMORIES, DISTRICTS, QUESTS, placeById } from '../src/modes/story/content.js';
+import { createMasterPlan, terrainHeight, SHOWCASE } from '../src/world/master-plan.js';
+import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world/world-scale.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { Campaign, SAVE_KEY, WORLD_REVISION, readSave, writeSave } from '../src/modes/story/campaign.js';
+import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt, moveWithCollisions, stepVehicle, orientedBox, rayBoxDistance } from '../src/core/physics.js';
+import { createLaneRoute, sampleTrafficRoute } from '../src/traffic/traffic.js';
+import { beginJump, stepJump } from '../src/engine/player/jump.js';
+import { findClimbFace, startClimb, stepClimb } from '../src/engine/player/climbing.js';
 
 const plan = createMasterPlan(), metropolis = new VerticalMetropolis(plan, WORLD_OBJECTS);
 const near = (x, z, radius = 3) => metropolis.collidersIn(x - radius, z - radius, x + radius, z + radius)

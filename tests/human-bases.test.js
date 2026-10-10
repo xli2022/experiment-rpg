@@ -4,13 +4,13 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { loadCharacterAssets } from '../src/characters.js';
-import { createNPC } from '../src/npc-appearance.js';
-import { CROWD_PROFILES, HUMAN_BASE_MODELS, NPC_PROFILES } from '../src/npc-profiles.js';
-import { VISITOR_PROFILES } from '../src/npc-visitors.js';
-import { createCrowd } from '../src/crowd.js';
-import { createWorldLife } from '../src/world.js';
-import { Campaign } from '../src/campaign.js';
+import { loadCharacterAssets } from '../src/engine/player/characters.js';
+import { createNPC } from '../src/actors/npc-appearance.js';
+import { CROWD_PROFILES, HUMAN_BASE_MODELS, NPC_PROFILES } from '../src/actors/npc-profiles.js';
+import { VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
+import { createCrowd } from '../src/traffic/crowd.js';
+import { createWorldLife } from '../src/modes/story/world-life.js';
+import { Campaign } from '../src/modes/story/campaign.js';
 
 // Parse production geometry, rig and animation bytes through GLTFLoader. Image
 // pixels need a browser decoder; marker textures let the loader test verify

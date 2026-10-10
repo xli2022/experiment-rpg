@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WORLD_LIMIT } from '../src/world-config.js';
-import { CITY_SCALE } from '../src/world-scale.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { RPGUI } from '../src/rpg-ui.js';
-import { bindMapDrag, constrainMapView, panMapView, zoomMapView, MAP_WORLD_SPAN, MIN_MAP_SPAN } from '../src/map-viewport.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
+import { CITY_SCALE } from '../src/world/world-scale.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { RPGUI } from '../src/modes/story/rpg-ui.js';
+import { bindMapDrag, constrainMapView, panMapView, zoomMapView, MAP_WORLD_SPAN, MIN_MAP_SPAN } from '../src/engine/map-viewport.js';
 
 function canvas(width = 900, height = 700, cssWidth = width, cssHeight = height) {
   const listeners = new Map();

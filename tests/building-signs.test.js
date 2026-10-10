@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { BUILDING_SIGN_CATALOG } from '../src/building-signs.js';
-import { createVerticalCity, VerticalMetropolis } from '../src/vertical-city.js';
-import { createMasterPlan, MASTER_DISTRICTS, SHOWCASE } from '../src/master-plan.js';
-import { WorldStream, WORLD_GEOMETRY } from '../src/world-stream.js';
-import { WORLD_LIMIT } from '../src/world-config.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { SpatialGrid } from '../src/spatial-grid.js';
-import { footprintVertices, polygonFaces } from '../src/building-footprints.js';
-import { createInfrastructureIndex, geometryVolume, infrastructureIntersections } from '../src/infrastructure-clearance.js';
+import { BUILDING_SIGN_CATALOG } from '../src/world/building-signs.js';
+import { createVerticalCity, VerticalMetropolis } from '../src/world/vertical-city.js';
+import { createMasterPlan, MASTER_DISTRICTS, SHOWCASE } from '../src/world/master-plan.js';
+import { WorldStream, WORLD_GEOMETRY } from '../src/world/world-stream.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
+import { footprintVertices, polygonFaces } from '../src/world/building-footprints.js';
+import { createInfrastructureIndex, geometryVolume, infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
 
 let worldAudit;
 function entireWorld() {

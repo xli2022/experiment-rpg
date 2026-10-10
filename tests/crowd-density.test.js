@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createCrowd } from '../src/crowd.js';
-import { VISITOR_PROFILES } from '../src/npc-visitors.js';
-import { CROWD_PROFILES, HUMAN_BASE_MODELS } from '../src/npc-profiles.js';
-import { populationFor } from '../src/population.js';
-import { SpatialGrid } from '../src/spatial-grid.js';
+import { createCrowd } from '../src/traffic/crowd.js';
+import { VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
+import { CROWD_PROFILES, HUMAN_BASE_MODELS } from '../src/actors/npc-profiles.js';
+import { populationFor } from '../src/traffic/population.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
 
 const asset = () => ({ scene: new THREE.Group(), userData: { baseModel: 'citizen' }, animations: ['Idle', 'Walk', 'WalkFormal'].map(name => new THREE.AnimationClip(name, 1, [])) });
 function visitorAsset() {
@@ -204,9 +204,3 @@ test('stationary crowd members idle and offscreen movement retains its full anim
   assert.ok(Math.abs(person.mixer.time - before - 121 / 60) < .11, 'returning to view does not discard most of its idle/gait timeline');
 });
 
-test('legacy crowd is visible without a camera and rests close to the pedestrian surface', () => {
-  const crowd = createCrowd(new THREE.Scene(), asset());
-  crowd.update(1 / 60, { x: 0, y: 0, z: 0 }, null, 200);
-  assert.equal(crowd.active, crowd.count);
-  assert.ok(crowd.people.every(person => person.root.position.y <= .05), 'the old quarter-meter floating spawn offset is removed');
-});

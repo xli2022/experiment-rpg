@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { createNPC, shapePoint } from '../src/npc-appearance.js';
-import { NPC_PROFILES, CROWD_PROFILES, VOICE_PROFILES, HUMAN_BASE_MODELS } from '../src/npc-profiles.js';
-import { npcSurfaceTextures } from '../src/npc-surfaces.js';
-import { npcClothMaterial, npcSkinMaterial } from '../src/npc-materials.js';
-import { CONTACTS, ENDINGS, QUESTS } from '../src/content.js';
-import { Campaign } from '../src/campaign.js';
-import { dialogueFor, acceptanceReply, offerScene, replyScene } from '../src/dialogue.js';
+import { createNPC, shapePoint } from '../src/actors/npc-appearance.js';
+import { NPC_PROFILES, CROWD_PROFILES, VOICE_PROFILES, HUMAN_BASE_MODELS } from '../src/actors/npc-profiles.js';
+import { npcSurfaceTextures } from '../src/actors/npc-surfaces.js';
+import { npcClothMaterial, npcSkinMaterial } from '../src/actors/npc-materials.js';
+import { CONTACTS, ENDINGS, QUESTS } from '../src/modes/story/content.js';
+import { Campaign } from '../src/modes/story/campaign.js';
+import { dialogueFor, acceptanceReply, offerScene, replyScene } from '../src/modes/story/dialogue.js';
 
 // Load the actual exported mesh, skin and animations with the actual GLTF
 // loader. Omit only embedded images, which require a browser image decoder.

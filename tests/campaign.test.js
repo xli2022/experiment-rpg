@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Campaign, freshProgress, restoreProgress, readSave, writeSave, SAVE_KEY } from '../src/campaign.js';
-import { QUESTS, WORLD_OBJECTS, MEMORIES, CACHES, CONTACTS, DISTRICTS, ENCOUNTERS, UPGRADES, ENDINGS, placeById, districtAt } from '../src/content.js';
-import { WORLD_LIMIT } from '../src/world-config.js';
-import { dialogueFor, endingScene } from '../src/dialogue.js';
-import { terrainHeight } from '../src/master-plan.js';
+import { Campaign, freshProgress, restoreProgress, readSave, writeSave, SAVE_KEY } from '../src/modes/story/campaign.js';
+import { QUESTS, WORLD_OBJECTS, MEMORIES, CACHES, CONTACTS, DISTRICTS, ENCOUNTERS, UPGRADES, ENDINGS, placeById, districtAt } from '../src/modes/story/content.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
+import { dialogueFor, endingScene } from '../src/modes/story/dialogue.js';
+import { terrainHeight } from '../src/world/master-plan.js';
 
 function completeStep(game, questId, ending = 'free', records = 'public') {
   const step = game.current(questId);

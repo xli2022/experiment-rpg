@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { createMasterPlan, terrainHeight } from '../src/master-plan.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { infrastructureIntersections } from '../src/infrastructure-clearance.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { createMasterPlan, terrainHeight } from '../src/world/master-plan.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
 
 test('streetlights across the entire city rest on terrain or a real bridge shoulder and clear surrounding structures', () => {
   const metro = new VerticalMetropolis(createMasterPlan(), WORLD_OBJECTS);

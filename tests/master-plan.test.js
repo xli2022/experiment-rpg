@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import {
   createMasterPlan, MASTER_DISTRICTS, SHOWCASE, TERRAIN_GRID, WATER_LEVEL,
   fromMap, fromReference, districtAt, terrainHeight, coastX, nearestOnSegment,
-} from '../src/master-plan.js';
-import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt } from '../src/physics.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { CITY_SCALE } from '../src/world-scale.js';
+} from '../src/world/master-plan.js';
+import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt } from '../src/core/physics.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { CITY_SCALE } from '../src/world/world-scale.js';
 
 const plan = createMasterPlan();
 

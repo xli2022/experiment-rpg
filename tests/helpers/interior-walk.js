@@ -1,8 +1,8 @@
-import { circleHitsBox, moveWithCollisions, overlapsHeight, supportHeight } from '../../src/physics.js';
-import { stepJump } from '../../src/jump.js';
-import { footVelocity, MOVEMENT } from '../../src/locomotion.js';
-import { interiorContext, interiorSpatial, toLocal, toWorld } from '../../src/interior-physics.js';
-import { cachedInteriorPlan, levelY } from '../../src/interior-plan.js';
+import { circleHitsBox, moveWithCollisions, overlapsHeight, supportHeight } from '../../src/core/physics.js';
+import { stepJump } from '../../src/engine/player/jump.js';
+import { footVelocity, MOVEMENT } from '../../src/engine/player/locomotion.js';
+import { interiorContext, interiorSpatial, toLocal, toWorld } from '../../src/world/interior-physics.js';
+import { cachedInteriorPlan, levelY } from '../../src/world/interior-plan.js';
 
 // Player-scale grid search over one level, using the same collision tests as
 // movement. Returns world-space waypoints from start to goal, or null.

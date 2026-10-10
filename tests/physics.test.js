@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { circleHitsBox, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, angleDelta, WORLD_LIMIT } from '../src/physics.js';
+import { circleHitsBox, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, angleDelta } from '../src/core/physics.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
 
 const wall = { minX: 2, maxX: 6, minZ: -10, maxZ: 10, maxY: 12 };
 
@@ -18,7 +19,7 @@ test('diagonal movement slides along walls instead of sticking', () => {
 
 test('movement respects the city boundary', () => {
   const p = { x: WORLD_LIMIT - 1, z: 0 };
-  moveWithCollisions(p, 20, -20, 1, []);
+  moveWithCollisions(p, 20, -20, 1, [], WORLD_LIMIT);
   assert.equal(p.x, WORLD_LIMIT - 1); assert.ok(Math.abs(p.z + 20) < 1e-7);
 });
 
@@ -58,7 +59,7 @@ test('vehicle exits keep the whole player within the city boundary', () => {
   for (const x of [-WORLD_LIMIT + 1.6, WORLD_LIMIT - 1.6]) {
     for (const z of [-WORLD_LIMIT + 1.6, WORLD_LIMIT - 1.6]) {
       for (let degrees = 0; degrees < 360; degrees += 15) {
-        const car = { x, z, yaw: degrees * Math.PI / 180 }, exit = findExitPosition(car, []);
+        const car = { x, z, yaw: degrees * Math.PI / 180 }, exit = findExitPosition(car, [], .48, WORLD_LIMIT);
         if (!exit) continue;
         assert.ok(Math.abs(exit.x) < WORLD_LIMIT - .48 && Math.abs(exit.z) < WORLD_LIMIT - .48);
         assert.equal(circleHitsBox(exit.x, exit.z, .48, carCollider(car)), false);

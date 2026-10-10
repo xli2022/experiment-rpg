@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createVerticalCity } from '../src/vertical-city.js';
-import { WorldStream, WORLD_GEOMETRY } from '../src/world-stream.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { buildingVolumes } from '../src/building-design.js';
-import { SpatialGrid } from '../src/spatial-grid.js';
-import { geometryVolume } from '../src/infrastructure-clearance.js';
-import { treeParts, shrubParts } from '../src/vegetation.js';
-import { MASTER_DISTRICTS, terrainHeight } from '../src/master-plan.js';
-import { circleHitsBox } from '../src/physics.js';
+import { createVerticalCity } from '../src/world/vertical-city.js';
+import { WorldStream, WORLD_GEOMETRY } from '../src/world/world-stream.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { buildingVolumes } from '../src/world/building-design.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
+import { geometryVolume } from '../src/world/infrastructure-clearance.js';
+import { treeParts, shrubParts } from '../src/world/vegetation.js';
+import { MASTER_DISTRICTS, terrainHeight } from '../src/world/master-plan.js';
+import { circleHitsBox } from '../src/core/physics.js';
 
 function crownHits(vertices, index) {
   const bounds = new THREE.Box3().setFromPoints(vertices);

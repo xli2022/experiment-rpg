@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { DISTRICTS } from '../src/content.js';
-import { terrainHeight } from '../src/master-plan.js';
-import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } from '../src/building-design.js';
-import { interiorPlan, floorPlan, buildingUnits, levelY, INTERIOR, sharedSegments } from '../src/interior-plan.js';
-import { polygonArea, pointInConvex, polygonFaces, clipConvex, insetConvex } from '../src/building-footprints.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { DISTRICTS } from '../src/modes/story/content.js';
+import { terrainHeight } from '../src/world/master-plan.js';
+import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } from '../src/world/building-design.js';
+import { interiorPlan, floorPlan, buildingUnits, levelY, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
+import { polygonArea, pointInConvex, polygonFaces, clipConvex, insetConvex } from '../src/world/building-footprints.js';
 
 const metropolis = new VerticalMetropolis();
 const blueprints = [...new Map(DISTRICTS.flatMap(d => metropolis.area(d.x - 70, d.z - 70, d.x + 70, d.z + 70))

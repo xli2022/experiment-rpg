@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DialogueVoice, speechChunks, selectVoice, VOICE_STORAGE_KEY } from '../src/voice.js';
-import { VOICE_PROFILES } from '../src/npc-profiles.js';
+import { DialogueVoice, speechChunks, selectVoice, VOICE_STORAGE_KEY } from '../src/modes/story/voice.js';
+import { VOICE_PROFILES } from '../src/actors/npc-profiles.js';
 
 function harness(storage) {
   const pending = new Map(), events = new Map(); let timer = 0;

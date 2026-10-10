@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createTraffic, createLaneRoute, sampleTrafficRoute } from '../src/traffic.js';
-import { circleHitsBox, carCollider } from '../src/physics.js';
+import { createTraffic, createLaneRoute, sampleTrafficRoute } from '../src/traffic/traffic.js';
+import { circleHitsBox, carCollider } from '../src/core/physics.js';
 
 function harness(elevated = false) {
   const corners = [[-90, -90], [90, -90], [90, 90], [-90, 90]];

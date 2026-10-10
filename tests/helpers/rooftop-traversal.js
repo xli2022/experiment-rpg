@@ -1,8 +1,8 @@
-import { boxContainsPoint, boxCoordinates, circleHitsBox, moveWithCollisions, overlapsHeight, supportHeight } from '../../src/physics.js';
-import { beginJump, JUMP, stepJump } from '../../src/jump.js';
-import { footVelocity, MOVEMENT } from '../../src/locomotion.js';
-import { SpatialGrid } from '../../src/spatial-grid.js';
-import { terrainHeight } from '../../src/master-plan.js';
+import { boxContainsPoint, boxCoordinates, circleHitsBox, moveWithCollisions, overlapsHeight, supportHeight } from '../../src/core/physics.js';
+import { beginJump, JUMP, stepJump } from '../../src/engine/player/jump.js';
+import { footVelocity, MOVEMENT } from '../../src/engine/player/locomotion.js';
+import { SpatialGrid } from '../../src/core/spatial-grid.js';
+import { terrainHeight } from '../../src/world/master-plan.js';
 
 function corners(box) {
   const c = Math.cos(box.yaw), s = Math.sin(box.yaw);

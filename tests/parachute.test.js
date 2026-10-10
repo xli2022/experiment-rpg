@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { beginJump, JUMP, PARACHUTE, resetFall, stepJump } from '../src/jump.js';
-import { findClimbFace, startClimb, dropClimb } from '../src/climbing.js';
-import { orientedBox } from '../src/physics.js';
+import { beginJump, JUMP, PARACHUTE, resetFall, stepJump } from '../src/engine/player/jump.js';
+import { findClimbFace, startClimb, dropClimb } from '../src/engine/player/climbing.js';
+import { orientedBox } from '../src/core/physics.js';
 
 const rates = [30, 60, 120];
 const close = (actual, expected, tolerance = 1e-7) => assert.ok(Math.abs(actual - expected) < tolerance, `${actual} should be near ${expected}`);

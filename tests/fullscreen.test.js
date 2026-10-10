@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { setupFullscreen } from '../src/fullscreen.js';
+import { setupFullscreen } from '../src/engine/fullscreen.js';
 
 function harness({ supported = true, enabled = true, prefixed = false, mode = 'browser', standalone = false } = {}) {
   const doc = new EventTarget(), target = {}, button = new EventTarget(), attributes = new Map(), messages = [], helps = [], requestArguments = [];

@@ -4,38 +4,38 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { addSky } from './city.js';
-import { createVerticalCity } from './vertical-city.js';
-import { terrainHeight, SHOWCASE } from './master-plan.js';
-import { WORLD_LIMIT } from './world-config.js';
-import { createDrone } from './models.js';
-import { Input } from './input.js';
-import { GameAudio } from './audio.js';
-import { HUD } from './ui.js';
-import { createCrowd } from './crowd.js';
-import { loadCharacterAssets, createCharacter, animateCharacter, characterShot } from './characters.js';
-import { beginJump, stepJump, resetFall } from './jump.js';
-import { createParachute, updateParachute } from './parachute.js';
-import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from './physics.js';
-import { MOVEMENT, footVelocity } from './locomotion.js';
-import { findClimbFace, startClimb, dropClimb, stepClimb } from './climbing.js';
-import { Campaign, freshProgress, readSave, writeSave, WORLD_REVISION } from './campaign.js';
-import { WORLD_OBJECTS, DISTRICTS, ENCOUNTERS, districtAt, placeById } from './content.js';
-import { createWorldLife } from './world.js';
-import { RPGUI } from './rpg-ui.js';
-import { createNPCPortraits } from './npc-appearance.js';
-import { DialogueVoice } from './voice.js';
-import { WorldStream, RENDER_PROFILES, ResolutionGovernor } from './world-stream.js';
-import { createShadows } from './shadows.js';
-import { createContactShadows } from './contact-shadows.js';
-import { createTraffic } from './traffic.js';
-import { findSpawnPosition } from './spawn.js';
-import { setupFullscreen } from './fullscreen.js';
-import { createInteriors } from './interiors.js';
-import { levelY, roomAt } from './interior-plan.js';
-import { toLocal } from './interior-physics.js';
-import { pointInConvex } from './building-footprints.js';
-import './npc.css';
+import { addSky } from './world/atmosphere.js';
+import { createVerticalCity } from './world/vertical-city.js';
+import { terrainHeight, SHOWCASE } from './world/master-plan.js';
+import { WORLD_LIMIT } from './world/world-config.js';
+import { createDrone } from './modes/story/drones.js';
+import { Input } from './engine/input.js';
+import { GameAudio } from './engine/audio.js';
+import { HUD } from './engine/hud.js';
+import { createCrowd } from './traffic/crowd.js';
+import { loadCharacterAssets, createCharacter, animateCharacter, characterShot } from './engine/player/characters.js';
+import { beginJump, stepJump, resetFall } from './engine/player/jump.js';
+import { createParachute, updateParachute } from './engine/player/parachute.js';
+import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from './core/physics.js';
+import { MOVEMENT, footVelocity } from './engine/player/locomotion.js';
+import { findClimbFace, startClimb, dropClimb, stepClimb } from './engine/player/climbing.js';
+import { Campaign, freshProgress, readSave, writeSave, WORLD_REVISION } from './modes/story/campaign.js';
+import { WORLD_OBJECTS, DISTRICTS, ENCOUNTERS, districtAt, placeById } from './modes/story/content.js';
+import { createWorldLife } from './modes/story/world-life.js';
+import { RPGUI } from './modes/story/rpg-ui.js';
+import { createNPCPortraits } from './actors/npc-appearance.js';
+import { DialogueVoice } from './modes/story/voice.js';
+import { WorldStream, RENDER_PROFILES, ResolutionGovernor } from './world/world-stream.js';
+import { createShadows } from './engine/shadows.js';
+import { createContactShadows } from './engine/contact-shadows.js';
+import { createTraffic } from './traffic/traffic.js';
+import { findSpawnPosition } from './core/spawn.js';
+import { setupFullscreen } from './engine/fullscreen.js';
+import { createInteriors } from './world/interiors.js';
+import { levelY, roomAt } from './world/interior-plan.js';
+import { toLocal } from './world/interior-physics.js';
+import { pointInConvex } from './world/building-footprints.js';
+import './modes/story/npc.css';
 
 const $ = id => document.getElementById(id);
 const canvas = $('world');
@@ -302,7 +302,7 @@ function removeDrivableCar(car) {
 function groundAt(x, z, ceiling = Infinity) { return supportHeight(x, z, scenery().near(x, z, 2), ceiling, terrainHeight(x, z)); }
 function refugeArrival(refuge) {
   const offset = refuge.arrivalOffset ?? { x: 0, z: -2 };
-  return findSpawnPosition({ x: refuge.x + offset.x, y: refuge.y ?? terrainHeight(refuge.x, refuge.z), z: refuge.z + offset.z }, nearbyColliders, groundAt);
+  return findSpawnPosition({ x: refuge.x + offset.x, y: refuge.y ?? terrainHeight(refuge.x, refuge.z), z: refuge.z + offset.z }, nearbyColliders, groundAt, .43, WORLD_LIMIT);
 }
 
 function objective() {
@@ -320,7 +320,7 @@ function objective() {
 function saveProgress() {
   if (!state.started) return;
   campaign.data.elapsed = state.time;
-  const position = driving ? findExitPosition(driving, nearbyColliders(driving.x, driving.z, 8, driving)) ?? placeById(campaign.data.rest) : player;
+  const position = driving ? findExitPosition(driving, nearbyColliders(driving.x, driving.z, 8, driving), .48, WORLD_LIMIT) ?? placeById(campaign.data.rest) : player;
   const success = writeSave(storage, campaign.data, position);
   if ($('save-status')) $('save-status').textContent = success ? 'PROGRESS SAVED / THIS BROWSER' : 'SAVE UNAVAILABLE / THIS SESSION ONLY';
   if (!success && !saveWarningShown) { hud.notify('Browser storage is unavailable. Progress will last for this session only.', 7); saveWarningShown = true; }
@@ -353,7 +353,7 @@ function fastTravel(id) {
   if (driving) return 'Exit your vehicle before taking the tram.';
   if (state.time - state.damageAt < 10 || drones.some(d => !d.dead && d.engaged && Math.hypot(d.root.position.x - player.x, d.root.position.z - player.z) < 30)) return 'Lose the patrols and stay clear of combat for 10 seconds.';
   const stop = placeById(id);
-  const arrival = findSpawnPosition({ x: stop.x, y: stop.y ?? terrainHeight(stop.x, stop.z), z: stop.z + 2 }, nearbyColliders, groundAt);
+  const arrival = findSpawnPosition({ x: stop.x, y: stop.y ?? terrainHeight(stop.x, stop.z), z: stop.z + 2 }, nearbyColliders, groundAt, .43, WORLD_LIMIT);
   if (!arrival) return 'The destination platform is blocked. Try another station or clear its arrival area.';
   resetTraversal();
   Object.assign(player, arrival); player.groundY = player.y;
@@ -401,7 +401,7 @@ function interact() {
   if (driving) {
     if (Math.abs(driving.speed) > 7) { hud.notify('Slow down before exiting the vehicle.', 2); return; }
     const others = nearbyColliders(driving.x, driving.z, 8, driving);
-    const exit = findExitPosition(driving, others);
+    const exit = findExitPosition(driving, others, .48, WORLD_LIMIT);
     if (!exit) { hud.notify('Both doors are blocked. Move the car into the street.', 3); return; }
     resetTraversal();
     player.x = exit.x; player.z = exit.z; player.y = groundAt(exit.x, exit.z, (exit.y ?? driving.y) + .6); player.groundY = player.y; player.velocityY = 0; player.yaw = driving.yaw;
@@ -550,7 +550,7 @@ function updatePlayer(dt) {
     const delta = stepVehicle(driving, axes.y, axes.x, input.keys.has('Space'), dt);
     const previousSpeed = driving.speed;
     const colliders = nearbyColliders(driving.x, driving.z, 6, driving);
-    const collision = moveWithCollisions(driving, delta.x, delta.z, 1.6, colliders);
+    const collision = moveWithCollisions(driving, delta.x, delta.z, 1.6, colliders, WORLD_LIMIT);
     const floor = groundAt(driving.x, driving.z, driving.y + .75);
     if (floor >= driving.y - .8) { driving.y = floor; driving.velocityY = 0; }
     else { driving.velocityY = (driving.velocityY ?? 0) - dt * 22; driving.y = Math.max(floor, driving.y + driving.velocityY * dt); }
@@ -585,7 +585,7 @@ function updatePlayer(dt) {
       const delta = footVelocity(player, axes, cameraYaw, dt, { sprint, walk, aiming, sprintSpeed: campaign.sprintSpeed });
       if (player.pushTime > 0) { player.pushTime -= dt; delta.x = player.pushVX * dt; delta.z = player.pushVZ * dt; }
       const beforeX = player.x, beforeZ = player.z;
-      moveWithCollisions(player, delta.x, delta.z, .43, colliders);
+      moveWithCollisions(player, delta.x, delta.z, .43, colliders, WORLD_LIMIT);
       player.speed = Math.hypot(player.x - beforeX, player.z - beforeZ) / dt;
       if (amount > .08 && !aiming && !firing) player.yaw += angleDelta(player.yaw, Math.atan2(-delta.x, -delta.z)) * (1 - Math.exp(-MOVEMENT.turn * dt));
       if (aiming || firing) player.yaw += angleDelta(player.yaw, cameraYaw) * (1 - Math.exp(-MOVEMENT.turn * dt));
@@ -695,7 +695,7 @@ function updateDrones(dt) {
     const targetX = awake && drone.engaged ? player.x + Math.sin(drone.phase * .7) * 9 : drone.homeX + Math.sin(drone.phase * .35) * 2.6;
     const targetZ = awake && drone.engaged ? player.z - 10 + Math.cos(drone.phase * .6) * 3 : drone.homeZ + Math.cos(drone.phase * .32) * 2.7;
     const moveX = damp(pos.x, targetX, .55, dt) - pos.x, moveZ = damp(pos.z, targetZ, .55, dt) - pos.z;
-    moveWithCollisions(pos, moveX, moveZ, .9, city.spatial);
+    moveWithCollisions(pos, moveX, moveZ, .9, city.spatial, WORLD_LIMIT);
     pos.y = drone.homeY + 2.9 + Math.sin(drone.phase * 1.8) * .35;
     drone.root.rotation.y = awake ? Math.atan2(-(player.x - pos.x), -(player.z - pos.z)) : drone.phase * .3;
     drone.root.rotation.z = Math.sin(drone.phase * 1.2) * .045;

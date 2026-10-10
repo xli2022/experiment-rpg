@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
-import { createCharacter, animateCharacter, characterShot } from '../src/characters.js';
-import { beginJump, stepJump, JUMP } from '../src/jump.js';
-import { createParachute, updateParachute } from '../src/parachute.js';
+import { createCharacter, animateCharacter, characterShot } from '../src/engine/player/characters.js';
+import { beginJump, stepJump, JUMP } from '../src/engine/player/jump.js';
+import { createParachute, updateParachute } from '../src/engine/player/parachute.js';
 
 function loadGLB(name) {
   const file = readFileSync(new URL(`../public/models/${name}.glb`, import.meta.url));

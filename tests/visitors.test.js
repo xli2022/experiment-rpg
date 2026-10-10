@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { createVisitor, VISITOR_PROFILES } from '../src/npc-visitors.js';
+import { createVisitor, VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
 
 // Retain the actual geometry, skin and animation data. Browser image decoding is
 // unavailable in Node, so remove only image references from the loader fixture.

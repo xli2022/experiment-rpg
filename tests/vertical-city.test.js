@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createVerticalCity, createVerticalGroundGeometry, VerticalMetropolis, frontageBlocked } from '../src/vertical-city.js';
-import { createMasterPlan, terrainHeight, TERRAIN_GRID, SHOWCASE, MASTER_DISTRICTS } from '../src/master-plan.js';
-import { WorldStream } from '../src/world-stream.js';
-import { surfaceHeightAt, boxContainsPoint } from '../src/physics.js';
-import { SpatialGrid } from '../src/spatial-grid.js';
-import { CITY_SCALE } from '../src/world-scale.js';
-import { buildingVolumes } from '../src/building-design.js';
-import { footprintVertices, polygonFaces } from '../src/building-footprints.js';
+import { createVerticalCity, createVerticalGroundGeometry, VerticalMetropolis, frontageBlocked } from '../src/world/vertical-city.js';
+import { createMasterPlan, terrainHeight, TERRAIN_GRID, SHOWCASE, MASTER_DISTRICTS } from '../src/world/master-plan.js';
+import { WorldStream } from '../src/world/world-stream.js';
+import { surfaceHeightAt, boxContainsPoint } from '../src/core/physics.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
+import { CITY_SCALE } from '../src/world/world-scale.js';
+import { buildingVolumes } from '../src/world/building-design.js';
+import { footprintVertices, polygonFaces } from '../src/world/building-footprints.js';
 
 const worldPoint = (p, x, z) => ({ x: p.x + x * Math.cos(p.yaw) + z * Math.sin(p.yaw), z: p.z - x * Math.sin(p.yaw) + z * Math.cos(p.yaw) });
 

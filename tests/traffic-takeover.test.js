@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createTraffic, TRAFFIC_TAKEOVER_HITS } from '../src/traffic.js';
+import { createTraffic, TRAFFIC_TAKEOVER_HITS } from '../src/traffic/traffic.js';
 
 const player = { x: 20, y: 10, z: 0 };
 function harness() {

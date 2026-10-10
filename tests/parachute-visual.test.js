@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createParachute, updateParachute } from '../src/parachute.js';
+import { createParachute, updateParachute } from '../src/engine/player/parachute.js';
 
 test('parachute leaves no visible accessory when stowed and suspension follows the deployed canopy', () => {
   const model = createParachute();

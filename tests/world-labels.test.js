@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { WORLD_LABEL_LAYOUT } from '../src/world.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { createMasterPlan } from '../src/master-plan.js';
-import { geometryVolume, infrastructureIntersections } from '../src/infrastructure-clearance.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { WORLD_LABEL_LAYOUT } from '../src/modes/story/world-life.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { createMasterPlan } from '../src/world/master-plan.js';
+import { geometryVolume, infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
 
 function labelVolume(place, yaw = 0, pitch = 0) {
   return { x: place.x, y: (place.y ?? 0) + WORLD_LABEL_LAYOUT.rootOffsetY + (place.labelHeight ?? WORLD_LABEL_LAYOUT.offsetY), z: place.z,

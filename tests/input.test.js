@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Input } from '../src/input.js';
+import { Input } from '../src/engine/input.js';
 
 function harness(t, { touch = false, requestLock, callbacks = {} } = {}) {
   function element(tagName = 'DIV') {

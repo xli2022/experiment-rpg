@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createShadows, shadowAnchor, SHADOW_PROFILES } from '../src/shadows.js';
-import { WorldStream } from '../src/world-stream.js';
-import { createCar } from '../src/models.js';
+import { createShadows, shadowAnchor, SHADOW_PROFILES } from '../src/engine/shadows.js';
+import { WorldStream } from '../src/world/world-stream.js';
+import { createCar } from '../src/traffic/car-model.js';
 
 function shadowFixture() {
   const renderer = { shadowMap: {} }, scene = new THREE.Scene();

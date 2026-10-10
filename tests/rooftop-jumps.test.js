@@ -1,10 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { createMasterPlan, MASTER_DISTRICTS } from '../src/master-plan.js';
-import { WORLD_LIMIT } from '../src/world-config.js';
-import { WORLD_OBJECTS } from '../src/content.js';
-import { orientedBox } from '../src/physics.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { createMasterPlan, MASTER_DISTRICTS } from '../src/world/master-plan.js';
+import { WORLD_LIMIT } from '../src/world/world-config.js';
+import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { orientedBox } from '../src/core/physics.js';
 import { findRepeatableJump, nearestRoofPairs, roofGap, traversalSpatial } from './helpers/rooftop-traversal.js';
 
 test('roof-gap measurement follows rotated footprint edges', () => {

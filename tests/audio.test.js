@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { GameAudio } from '../src/audio.js';
+import { GameAudio } from '../src/engine/audio.js';
 
 function harness(t) {
   const contexts = [], previous = globalThis.window;

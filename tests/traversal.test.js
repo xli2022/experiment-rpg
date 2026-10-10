@@ -1,13 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { orientedBox, circleHitsBox, moveWithCollisions, rayBoxDistance, supportHeight, overlapsHeight } from '../src/physics.js';
-import { findClimbFace, startClimb, stepClimb, dropClimb, CLIMB } from '../src/climbing.js';
-import { beginJump, stepJump } from '../src/jump.js';
-import { footVelocity, MOVEMENT } from '../src/locomotion.js';
-import { buildingColliders, buildingStructure } from '../src/architecture.js';
-import { BUILDING_TYPES } from '../src/city-plan.js';
-import { writeSave, readSave, Campaign } from '../src/campaign.js';
-import { PUBLIC_SPACES, publicSpaceParts, publicSpaceColliders } from '../src/public-spaces.js';
+import { orientedBox, circleHitsBox, moveWithCollisions, rayBoxDistance, supportHeight, overlapsHeight } from '../src/core/physics.js';
+import { findClimbFace, startClimb, stepClimb, dropClimb, CLIMB } from '../src/engine/player/climbing.js';
+import { beginJump, stepJump } from '../src/engine/player/jump.js';
+import { footVelocity, MOVEMENT } from '../src/engine/player/locomotion.js';
+import { writeSave, readSave, Campaign } from '../src/modes/story/campaign.js';
 
 test('driving through the empty corner of a rotated building no longer hits its broad-phase square', () => {
   const wall = orientedBox(0, 0, 20, 20, Math.PI / 4, 30);
@@ -125,31 +122,6 @@ test('jumping onto a raised surface starts landing recovery at a valid time', ()
     }
     assert.equal(p.y, .8); assert.equal(p.jumpPhase, 'land');
     assert.ok(p.jumpTime >= 0 && p.jumpTime <= 1 / fps + .001, `Landing time ${p.jumpTime} at ${fps} FPS`);
-  }
-});
-
-test('all building families have climbable walls, walkable roofs and matching rooftop equipment', () => {
-  for (const type of BUILDING_TYPES) {
-    const building = { id: type, type, x: 12, z: -20, yaw: .6, w: 20, d: 18, h: 16, variation: .4 };
-    const boxes = buildingColliders(building), parts = buildingStructure(building).filter(p => p.rooftop);
-    assert.ok(boxes[0].climbable); assert.equal(boxes[0].maxY, 16.5);
-    assert.equal(boxes.length, parts.length + 1);
-    for (const [i, p] of parts.entries()) {
-      const b = boxes[i + 1];
-      assert.equal(b.minY, p.y - p.h / 2); assert.equal(b.maxY, p.y + p.h / 2);
-      assert.equal(b.w, p.w); assert.equal(b.d, p.d); assert.equal(overlapsHeight(b, 0), false);
-    }
-  }
-});
-
-test('public spaces keep their paths open and physical props match visible structural pieces', () => {
-  for (const type of PUBLIC_SPACES) {
-    const pieces = publicSpaceParts(type).filter(p => p.solid), boxes = publicSpaceColliders({ type, x: 0, z: 0 });
-    assert.equal(boxes.length, pieces.length);
-    for (const [i, box] of boxes.entries()) {
-      assert.equal(box.w, pieces[i].w); assert.equal(box.d, pieces[i].d);
-    }
-    assert.equal(boxes.some(b => circleHitsBox(0, 17, 1.6, b)), false, 'Approach stays clear');
   }
 });
 

@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { populationFor } from '../src/population.js';
-import { createTraffic, sampleTrafficRoute, TRAFFIC_PROFILES, TRAFFIC_TAKEOVER_HITS } from '../src/traffic.js';
-import { MASTER_DISTRICTS } from '../src/master-plan.js';
+import { populationFor } from '../src/traffic/population.js';
+import { createTraffic, sampleTrafficRoute, TRAFFIC_PROFILES, TRAFFIC_TAKEOVER_HITS } from '../src/traffic/traffic.js';
+import { MASTER_DISTRICTS } from '../src/world/master-plan.js';
 
 const player = { x: 0, y: 0, z: 0 };
 const road = (id, x, length = 1000) => ({ id, class: 'local', width: 12, closed: false,

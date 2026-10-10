@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createTraffic, createLaneRoute, sampleTrafficRoute, TRAFFIC_PROFILES } from '../src/traffic.js';
-import { createCrowd, pedestrianPaths, samplePedestrianPath } from '../src/crowd.js';
-import { createMasterPlan, SHOWCASE } from '../src/master-plan.js';
-import { VerticalMetropolis } from '../src/vertical-city.js';
-import { orientedBox, circleHitsBox, overlapsHeight, surfaceHeightAt } from '../src/physics.js';
-import { populationFor } from '../src/population.js';
-import { CROWD_PROFILES } from '../src/npc-profiles.js';
-import { VISITOR_PROFILES } from '../src/npc-visitors.js';
+import { createTraffic, createLaneRoute, sampleTrafficRoute, TRAFFIC_PROFILES } from '../src/traffic/traffic.js';
+import { createCrowd, pedestrianPaths, samplePedestrianPath } from '../src/traffic/crowd.js';
+import { createMasterPlan, SHOWCASE } from '../src/world/master-plan.js';
+import { VerticalMetropolis } from '../src/world/vertical-city.js';
+import { orientedBox, circleHitsBox, overlapsHeight, surfaceHeightAt } from '../src/core/physics.js';
+import { populationFor } from '../src/traffic/population.js';
+import { CROWD_PROFILES } from '../src/actors/npc-profiles.js';
+import { VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
 
 test('new-city traffic uses real roads and is present on both Eastpoint street and viaduct levels', () => {
   const plan = createMasterPlan(), metropolis = new VerticalMetropolis(plan);

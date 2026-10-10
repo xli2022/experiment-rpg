@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { orientedBox, surfaceHeightAt, supportHeight, moveWithCollisions, carCollider, findExitPosition, rayBoxDistance, rayObstructionDistance, overlapsHeight } from '../src/physics.js';
+import { orientedBox, surfaceHeightAt, supportHeight, moveWithCollisions, carCollider, findExitPosition, rayBoxDistance, rayObstructionDistance, overlapsHeight } from '../src/core/physics.js';
 
 function ramp(a = { x: 0, y: 0, z: 0 }, b = { x: 0, y: 10, z: 100 }, width = 12, nested = true) {
   const yaw = Math.atan2(b.x - a.x, b.z - a.z), length = Math.hypot(b.x - a.x, b.z - a.z);

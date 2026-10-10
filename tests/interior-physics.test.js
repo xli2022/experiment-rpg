@@ -1,15 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { createVerticalCity } from '../src/vertical-city.js';
-import { WorldStream } from '../src/world-stream.js';
-import { WORLD_OBJECTS, DISTRICTS } from '../src/content.js';
-import { cachedInteriorPlan, levelY, INTERIOR } from '../src/interior-plan.js';
-import { interiorHull, interiorContext, toWorld, toLocal } from '../src/interior-physics.js';
-import { circleHitsBox, overlapsHeight, rayBoxDistance, rayObstructionDistance, supportHeight } from '../src/physics.js';
-import { findSpawnPosition } from '../src/spawn.js';
-import { polygonFaces } from '../src/building-footprints.js';
-import { interiorClipUniforms, patchInteriorClip, createFacadeMaterial } from '../src/building-materials.js';
+import { createVerticalCity } from '../src/world/vertical-city.js';
+import { WorldStream } from '../src/world/world-stream.js';
+import { WORLD_OBJECTS, DISTRICTS } from '../src/modes/story/content.js';
+import { cachedInteriorPlan, levelY, INTERIOR } from '../src/world/interior-plan.js';
+import { interiorHull, interiorContext, toWorld, toLocal } from '../src/world/interior-physics.js';
+import { circleHitsBox, overlapsHeight, rayBoxDistance, rayObstructionDistance, supportHeight } from '../src/core/physics.js';
+import { findSpawnPosition } from '../src/core/spawn.js';
+import { polygonFaces } from '../src/world/building-footprints.js';
+import { interiorClipUniforms, patchInteriorClip, createFacadeMaterial } from '../src/world/building-materials.js';
 import { findPath, walk } from './helpers/interior-walk.js';
 
 const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
