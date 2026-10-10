@@ -1,12 +1,12 @@
 import { QUESTS, WORLD_OBJECTS, DISTRICTS, UPGRADES, ENCOUNTERS, ENDINGS, questById, placeById } from './content.js';
-import { WORLD_LIMIT } from '../../world/world-config.js';
+import { WORLD_LIMIT, WORLD_REVISION } from '../../world/world-config.js';
 import { MOVEMENT } from '../../engine/player/locomotion.js';
 import { formatCurrency } from './currency.js';
 import { terrainHeight } from '../../world/master-plan.js';
 
 export const SAVE_KEY = 'afterlight.last-signal.v1';
 export const SAVE_VERSION = 1;
-export const WORLD_REVISION = 6;
+export { WORLD_REVISION };
 const integer = (value, fallback = 0, max = 1000000) => Number.isFinite(value) ? Math.max(0, Math.min(max, Math.floor(value))) : fallback;
 const uniqueKnown = (value, allowed) => Array.isArray(value) ? [...new Set(value.filter(v => allowed.includes(v)))] : [];
 const droneIds = ENCOUNTERS.flatMap(e => e.positions.map((_, i) => `${e.id}-${i}`));

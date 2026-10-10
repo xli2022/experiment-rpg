@@ -11,6 +11,7 @@ const ALLOWED = {
   world: ['core', 'world'],
   actors: ['core', 'actors'],
   traffic: ['core', 'world', 'actors', 'traffic'],
+  engine: ['core', 'world', 'actors', 'traffic', 'engine'],
 };
 const src = path.resolve('src');
 function files(dir) {
@@ -28,6 +29,20 @@ test('layers only import from the layers beneath them', () => {
     for (const [, spec] of text.matchAll(/\bfrom\s*['"](\.[^'"]+)['"]/g)) {
       const target = layerOf(path.resolve(path.dirname(file), spec));
       if (!allowed.includes(target)) violations.push(`${path.relative(src, file)} → ${spec}`);
+    }
+  }
+  assert.deepEqual(violations, []);
+});
+
+test('game modes are plug-ins: they never import another mode, and the engine imports none', () => {
+  const violations = [];
+  for (const file of files(path.join(src, 'modes'))) {
+    const own = path.relative(path.join(src, 'modes'), file).split(path.sep);
+    if (own.length < 2) continue; // modes/index.js is the registry
+    for (const [, spec] of readFileSync(file, 'utf8').matchAll(/\bfrom\s*['"](\.[^'"]+)['"]/g)) {
+      const target = path.relative(src, path.resolve(path.dirname(file), spec)).split(path.sep);
+      if (target[0] === 'modes' && target[1] !== own[0]) violations.push(`${path.relative(src, file)} → ${spec}`);
+      if (target[0] === 'tools') violations.push(`${path.relative(src, file)} → ${spec}`);
     }
   }
   assert.deepEqual(violations, []);

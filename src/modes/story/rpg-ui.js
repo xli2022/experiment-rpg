@@ -3,8 +3,8 @@ import { dialogueFor, replyScene, offerScene, endingScene, acceptanceReply } fro
 import { NPC_PROFILES, VOICE_PROFILES } from '../../actors/npc-profiles.js';
 import { COLORS, SYMBOLS } from './world-life.js';
 import { formatCurrency } from './currency.js';
-import { CITY_SCALE } from '../../world/world-scale.js';
-import { bindMapDrag, constrainMapView, zoomMapView, MAP_WORLD_SPAN } from '../../engine/map-viewport.js';
+import { constrainMapView, zoomMapView } from '../../engine/map-viewport.js';
+import { mapAction } from '../../engine/map-controls.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -29,10 +29,9 @@ export class RPGUI {
         <div id="dialogue-choices" class="dialogue-choices"></div>
         <footer>AFTERLIGHT / LOCAL CHANNEL <span>Choose a response · Escape to leave</span></footer>
       </section></div>
-      <div id="service" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="service-title"><section class="service-card"><header class="rpg-heading"><div><div id="service-kicker" class="eyebrow"></div><h2 id="service-title"></h2></div><button class="icon-button" data-action="close" aria-label="Close panel">×</button></header><div id="service-content"></div></section></div>
       <div id="district-arrival" class="district-arrival hidden" aria-live="polite"><small>NEW DISTRICT DISCOVERED</small><strong></strong><span></span></div>`;
-    $('game').append(layer);
-    this.cb.voice.subscribe(voice => {
+    $('game').append(layer); this.layer = layer;
+    this.unsubscribe = this.cb.voice.subscribe(voice => {
       $('voice-status').textContent = voice.message;
       $('voice-replay').disabled = !voice.supported || !voice.enabled || !voice.volume;
       $('voice-toggle').disabled = !voice.supported;
@@ -41,36 +40,21 @@ export class RPGUI {
       $('speaker-monogram').classList.toggle('speaking', voice.status === 'speaking');
     });
     layer.addEventListener('click', e => { const target = e.target.closest('[data-action]'); if (target && !target.disabled) this.action(target.dataset.action); });
-    const mapCanvas = $('full-map');
-    const navigation = document.createElement('div'); navigation.className = 'map-navigation';
-    navigation.innerHTML = `${button('−', 'zoom-out')}${button('+', 'zoom-in')}${button('Your area', 'map-home')}${button('Entire city', 'map-city')}<span>Drag to pan · scroll to zoom</span>`;
-    document.querySelector('.city-map-card .map-heading').after(navigation);
-    navigation.addEventListener('click', e => { const target = e.target.closest('[data-action]'); if (target) this.action(target.dataset.action); });
-    mapCanvas.addEventListener('wheel', e => { e.preventDefault(); if (e.deltaY) this.zoomMap(e.deltaY > 0 ? 1.4 : 1 / 1.4); }, { passive: false });
-    document.querySelector('.map-legend').insertAdjacentHTML('beforeend', '<span>● CONTACT</span><span>T TRANSIT</span><span>◈ MEMORY</span>');
-    const layout = document.createElement('div'); layout.className = 'map-layout'; mapCanvas.before(layout); layout.append(mapCanvas);
-    const sidebar = document.createElement('aside'); sidebar.className = 'map-sidebar'; sidebar.innerHTML = `<div class="map-filters">${['all', 'contacts', 'transit'].map(f => button(f, `filter:${f}`)).join('')}</div><div id="map-locations" class="map-locations"></div><div id="map-selection" class="map-selection"></div>`; layout.append(sidebar);
+    // The engine owns the map canvas and its navigation; the story adds its places list.
+    const sidebar = document.createElement('aside'); sidebar.className = 'map-sidebar'; sidebar.innerHTML = `<div class="map-filters">${['all', 'contacts', 'transit'].map(f => button(f, `filter:${f}`)).join('')}</div><div id="map-locations" class="map-locations"></div><div id="map-selection" class="map-selection"></div>`;
+    document.querySelector('.map-layout')?.append(sidebar); this.sidebar = sidebar;
     sidebar.addEventListener('click', e => { const target = e.target.closest('[data-action]'); if (target && !target.disabled) this.action(target.dataset.action); });
-    bindMapDrag(mapCanvas, this.cb.mapView, e => {
-      this.boundMap();
-      const rect = mapCanvas.getBoundingClientRect();
-      if (!(rect.width > 0 && rect.height > 0)) return;
-      const x = (e.clientX - rect.left) * mapCanvas.width / rect.width;
-      const y = (e.clientY - rect.top) * mapCanvas.height / rect.height;
-      const view = this.cb.mapView, scale = Math.min(mapCanvas.width, mapCanvas.height) / view.span;
-      const places = this.mapPlaces().map(p => ({ p, distance: Math.hypot(mapCanvas.width / 2 + (p.x - view.x) * scale - x, mapCanvas.height / 2 + (p.z - view.z) * scale - y) })).sort((a, b) => a.distance - b.distance);
-      if (places[0]?.distance < 25) { this.selectedPlace = places[0].p.id; this.renderMap(); }
-    });
-    if (typeof ResizeObserver !== 'undefined') {
-      this.mapResize = new ResizeObserver(() => this.boundMap()); this.mapResize.observe(mapCanvas);
-    }
-    this.boundMap();
+  }
+  dispose() { this.unsubscribe?.(); this.layer.remove(); this.sidebar.remove(); }
+  // Select the story place nearest a click on the full map (canvas pixels).
+  pickMapPlace(x, y) {
+    const canvas = $('full-map'), view = this.cb.mapView, scale = Math.min(canvas.width, canvas.height) / view.span;
+    const places = this.mapPlaces().map(p => ({ p, distance: Math.hypot(canvas.width / 2 + (p.x - view.x) * scale - x, canvas.height / 2 + (p.z - view.z) * scale - y) })).sort((a, b) => a.distance - b.distance);
+    if (places[0]?.distance < 25) { this.selectedPlace = places[0].p.id; this.renderMap(); }
   }
   action(action) {
     const focused = document.activeElement, focusAction = focused?.dataset.action;
-    if (action === 'zoom-in' || action === 'zoom-out') { this.zoomMap(action === 'zoom-in' ? .5 : 2); return; }
-    if (action === 'map-home') { Object.assign(this.cb.mapView, { x: this.cb.position().x, z: this.cb.position().z, span: 1200 * CITY_SCALE }); this.boundMap(); return; }
-    if (action === 'map-city') { Object.assign(this.cb.mapView, { x: 0, z: 0, span: MAP_WORLD_SPAN }); this.boundMap(); return; }
+    if (mapAction(this.cb.mapView, $('full-map'), action, this.cb.position())) return;
     const [kind, id] = action.split(':');
     if (kind === 'close') this.cb.close();
     if (kind === 'voice-replay') this.cb.voice.replay();
@@ -88,7 +72,6 @@ export class RPGUI {
     if (kind === 'memory') this.openMemory(id);
     if (kind === 'filter') { this.mapFilter = id; this.renderMap(); }
     if (kind === 'place') { this.selectedPlace = id; const place = placeById(id); if (place) Object.assign(this.cb.mapView, { x: place.x, z: place.z }); this.renderMap(); }
-    if (kind === 'floor') this.cb.elevator(Number(id));
     if (kind === 'travel') { const result = this.cb.travel(id); if (result !== true) this.cb.notify(result); else this.cb.close(); }
     if (kind === 'clear-pin') { this.game.pin = null; this.renderMap(); }
     // Replacing a quest or map list removes its focused button from the DOM.
@@ -175,11 +158,6 @@ export class RPGUI {
   openMemory(id) {
     const m = placeById(id); this.cb.open('service'); $('service-kicker').textContent = `MEMORY FRAGMENT / ${m.author}`; $('service-title').textContent = m.name;
     $('service-content').innerHTML = `<p class="memory-reading">${esc(m.description)}</p><p class="service-note">Saved to your journal’s memory archive.</p>${button('Keep moving ↗', 'close', 'accent')}`;
-  }
-  openElevator(levels, current) {
-    this.cb.open('service'); $('service-kicker').textContent = 'BUILDING / ELEVATOR'; $('service-title').textContent = 'Choose a floor.';
-    const floors = Array.from({ length: levels }, (_, i) => levels - 1 - i);
-    $('service-content').innerHTML = `<div class="elevator-floors">${floors.map(level => button(String(level + 1), `floor:${level}`, level === current ? '' : 'accent', level === current)).join('')}</div>`;
   }
   showTerminal(place, text) {
     this.cb.open('service'); $('service-kicker').textContent = 'AFTERLIGHT / LOCAL TERMINAL'; $('service-title').textContent = place.name;

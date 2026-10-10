@@ -23,11 +23,17 @@ export function createShadows(renderer, scene, light, { dynamicRoots = [] } = {}
   const dynamicMeshes = new WeakSet();
   // A throttled map retains old silhouettes between updates. Moving actors
   // instead use frame-synchronous contact shadows, while receiving city shade.
-  for (const root of dynamicRoots) root.traverse(object => {
+  const addDynamic = root => root.traverse(object => {
     if (!object.isMesh) return;
     object.castShadow = false; object.receiveShadow = true;
     dynamicMeshes.add(object);
   });
+  const eligible = object => {
+    if (!object.isMesh || dynamicMeshes.has(object) || object.isInstancedMesh || object.userData.resident) return false;
+    const materials = Array.isArray(object.material) ? object.material : [object.material];
+    return materials.some(m => m.isMeshStandardMaterial && !m.transparent);
+  };
+  for (const root of dynamicRoots) addDynamic(root);
   let profile, lastUpdate = -Infinity, dirty = true, updates = 0, lastBuilds = -1;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -39,9 +45,7 @@ export function createShadows(renderer, scene, light, { dynamicRoots = [] } = {}
   // Streamed instances are handled by WorldStream. Cache the remaining meshes
   // once; only stationary furniture and story objects belong in this cache.
   scene.traverse(object => {
-    if (!object.isMesh || dynamicMeshes.has(object) || object.isInstancedMesh || object.userData.resident) return;
-    const materials = Array.isArray(object.material) ? object.material : [object.material];
-    if (!materials.some(m => m.isMeshStandardMaterial && !m.transparent)) return;
+    if (!eligible(object)) return;
     object.receiveShadow = true; casters.push(object);
   });
   return {
@@ -57,6 +61,15 @@ export function createShadows(renderer, scene, light, { dynamicRoots = [] } = {}
       dirty = true;
     },
     invalidate() { dirty = true; },
+    /** Moving actors added later: they receive city shade but never cast into the throttled map. */
+    addDynamic,
+    /** Stationary meshes added after creation (for example a mode's props). */
+    addCasters(root) { root.traverse(object => { if (eligible(object)) { object.receiveShadow = true; casters.push(object); } }); dirty = true; },
+    removeCasters(root) {
+      const removed = new Set(); root.traverse(object => removed.add(object));
+      for (let i = casters.length - 1; i >= 0; i--) if (removed.has(casters[i])) casters.splice(i, 1);
+      dirty = true;
+    },
     update(now, player, paused = false, builds = 0) {
       if (!profile) return;
       if (!dirty && (now - lastUpdate < 1 / profile.hz || (paused && builds === lastBuilds))) return;

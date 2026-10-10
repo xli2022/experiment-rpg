@@ -4,6 +4,8 @@ import { AUTHORED_WORLD_LIMIT, CITY_SCALE } from './world-scale.js';
 export const WORLD_LIMIT = AUTHORED_WORLD_LIMIT * CITY_SCALE;
 export const MAP_SPAN = WORLD_LIMIT * 2 + 60;
 export const CHUNK_SIZE = 96;
+// Bumped whenever the city layout changes enough that saved coordinates no longer apply.
+export const WORLD_REVISION = 6;
 export const METRO_BLOCK_SIZE = 192;
 
 export const OUTER_DISTRICTS = [
