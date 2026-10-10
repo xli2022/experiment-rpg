@@ -117,7 +117,7 @@ Indoors the player jogs rather than sprints, and the camera moves closer. In ver
 `interiors.js` builds merged geometry for each floor in building-local space:
 
 - **Lighting:** it is baked into vertex colors on unlit materials, so no scene lights are added and city shaders never recompile. Some units are dark, reflecting the building's lit or dark facade.
-- **Doors:** pocket doors and street doors slide open as the player approaches. Interior doorways are 1.1 m wide, so the player passes through at an angle in any building rotation.
+- **Doors:** doors open as the player approaches. Room and lift doors fold into one side of their frame, and paired street doors part to both sides, so an open door never reaches past its doorway, for example over the stair beside a lift. Interior doorways are 1.1 m wide, so the player passes through at an angle in any building rotation.
 - **What is shown:** inside, the current floor ±1. Outside on foot, the lobby of any building whose door is within 25 m; nothing new is built while driving. At most one floor is built per frame, and unused floors are released after 1.5 s.
 - **Shell cut-outs:** the facade, industrial, stone and glass materials share a small clip uniform set. Up to four street doorways are cut out of the shell once their lobby exists. For the occupied building, its cavity discards exterior trim such as balcony rings that would otherwise cross the rooms.
 

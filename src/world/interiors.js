@@ -116,7 +116,7 @@ function furniturePiece(builder, f, y, shade) {
 }
 
 // One floor's static geometry plus its door leaves and glazing.
-function buildFloor(plan, level) {
+export function buildFloor(plan, level) {
   const floor = floorPlan(plan, level), t = floor.template, y = floor.y, top = level >= plan.levels - 1 ? plan.top : levelY(plan, level + 1);
   const shadeFor = lighting(plan, floor), zones = new Map(t.zones.map(z => [z.id, z]));
   const surfaces = new Builder(), fixtures = new Builder(), glass = new Builder(), doors = [];
@@ -178,7 +178,7 @@ function buildFloor(plan, level) {
       if (o.from > cursor) solid(cursor, o.from, y, top);
       solid(o.from, o.to, y + o.top, top);
       const door = t.doors.find(dd => dd.id === o.door);
-      if (door) doors.push({ kind: door.kind, x: door.x, z: door.z, ux, uz, w: o.to - o.from, h: o.top, travel: (o.to - o.from) * .92, y });
+      if (door) doors.push({ kind: door.kind, wall: wall.id, x: door.x, z: door.z, ux, uz, w: o.to - o.from, h: o.top, travel: (o.to - o.from) * .92, y });
       cursor = o.to;
     }
     if (length > cursor) solid(cursor, length, y, top);
@@ -220,6 +220,13 @@ function pointInZone(zone, p) {
     const b = zone.polygon[(i + 1) % zone.polygon.length];
     return (b.x - a.x) * (p.z - a.z) - (b.z - a.z) * (p.x - a.x) >= -1e-6;
   });
+}
+
+// An opening leaf folds into the jamb on its opening side, so it never
+// reaches past its doorway: a lift door beside the stair would cover it.
+export function leafPose(leaf, open) {
+  const width = leaf.w - open * leaf.travel, shift = (leaf.w - width) / 2;
+  return { x: leaf.x + leaf.ux * shift, z: leaf.z + leaf.uz * shift, width };
 }
 
 const leafGeometry = new THREE.BoxGeometry(1, 1, 1);
@@ -279,10 +286,10 @@ export function createInteriors(scene, city) {
       const target = near ? 1 : 0, before = leaf.open;
       leaf.open += Math.sign(target - leaf.open) * Math.min(Math.abs(target - leaf.open), dt * 3.2);
       if (!force && Math.abs(before - leaf.open) < 1e-5) continue;
-      // Leaves slide along their wall: pocket doors, and paired glass doors at the street.
-      const slide = leaf.open * leaf.travel;
-      position.set(leaf.x + leaf.ux * slide, leaf.y + leaf.h / 2, leaf.z + leaf.uz * slide);
-      quaternion.setFromAxisAngle(up, Math.atan2(-leaf.uz, leaf.ux)); scale.set(leaf.w, leaf.h, leaf.kind === 'entrance' ? .03 : .05);
+      // Room and lift doors fold to one side, paired glass doors at the street to both.
+      const pose = leafPose(leaf, leaf.open);
+      position.set(pose.x, leaf.y + leaf.h / 2, pose.z);
+      quaternion.setFromAxisAngle(up, Math.atan2(-leaf.uz, leaf.ux)); scale.set(pose.width, leaf.h, leaf.kind === 'entrance' ? .03 : .05);
       leaf.mesh.setMatrixAt(leaf.index, matrix.compose(position, quaternion, scale)); touched.add(leaf.mesh);
     }
     for (const mesh of touched) mesh.instanceMatrix.needsUpdate = true;

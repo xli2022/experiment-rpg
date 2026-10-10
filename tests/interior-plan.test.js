@@ -6,6 +6,7 @@ import { terrainHeight } from '../src/world/master-plan.js';
 import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } from '../src/world/building-design.js';
 import { interiorPlan, floorPlan, buildingUnits, levelY, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
 import { polygonArea, pointInConvex, polygonFaces, clipConvex, insetConvex } from '../src/world/building-footprints.js';
+import { buildFloor, leafPose } from '../src/world/interiors.js';
 
 const metropolis = new VerticalMetropolis();
 const blueprints = [...new Map(DISTRICTS.flatMap(d => metropolis.area(d.x - 70, d.z - 70, d.x + 70, d.z + 70))
@@ -84,6 +85,24 @@ test('stairs serve every multi-storey building and tall ones have a lift', () =>
     }
     if (plan.levels > INTERIOR.liftAbove) assert.ok(plan.core.lift, `${plan.id} has a lift`);
   }
+});
+
+test('open doors fold into their frames: none reaches past its wall, so no lift door covers the stair', () => {
+  let lifts = 0;
+  for (const { plan } of plans.filter(e => e.plan.levels > 1).filter((_, i) => i % 5 === 0)) {
+    const { floor, doors } = buildFloor(plan, 1), walls = new Map(floor.template.walls.map(w => [w.id, w]));
+    for (const leaf of doors.filter(d => d.wall)) {
+      const wall = walls.get(leaf.wall), length = Math.hypot(wall.b.x - wall.a.x, wall.b.z - wall.a.z), open = leafPose(leaf, 1);
+      assert.ok(open.width < leaf.w * .1, 'an open door clears its doorway');
+      for (const k of [-1, 1]) {
+        const x = open.x + leaf.ux * k * open.width / 2, z = open.z + leaf.uz * k * open.width / 2;
+        const along = ((x - wall.a.x) * (wall.b.x - wall.a.x) + (z - wall.a.z) * (wall.b.z - wall.a.z)) / length;
+        assert.ok(along > -1e-6 && along < length + 1e-6, `${plan.id}: an open ${leaf.kind} door reaches past its wall`);
+      }
+      if (leaf.kind === 'lift') lifts++;
+    }
+  }
+  assert.ok(lifts > 20, 'buildings with lifts are covered');
 });
 
 test('street doors sit where the facade draws its entrances', () => {
