@@ -15,7 +15,6 @@ export const BODIES = [{ id: 'compact', scale: [.95, .96, .86] }, { id: 'sedan',
 const PAINTS = [0x9aaea5, 0xbb7c73, 0x648a99, 0xc1ac7f, 0x7e819c, 0x657d71, 0x2c3a44, 0xd6d9d2, 0x8c3b3f, 0x3f6f5c];
 const TURN_WEIGHT = { straight: 6, right: 2.5, left: 1.5, uturn: .02 };
 const LATERAL = 2.6, COMFORT = 1.8, HALF_LENGTH = 2.34, HALF_WIDTH = 1.1, WHEELBASE = 2.91, STEP = 1.5, MAX_CARS = 16;
-const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
 /**
  * Braking for a fixed mark `d` metres ahead of the bumper (a stop line): the
@@ -135,21 +134,29 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
     const body = BODIES[Math.floor(random() * BODIES.length)];
     const car = { id: nextId++, piece: lane, s, prev: null, route: [], speed, accel: 0, cruise: .86 + random() * .2, body, half: HALF_LENGTH * body.scale[2],
       paint: Math.floor(random() * PAINTS.length), x: 0, y: 0, z: 0, yaw: 0, pitch: 0, roll: 0, steer: 0, spin: 0, brake: false, signal: null,
-      box: null, boxNode: null, hits: 0, panic: 0, stuck: 0, waiting: 0, ended: false, cause: 'free', denied: null };
+      box: null, boxes: [], odometer: 0, hits: 0, panic: 0, stuck: 0, waiting: 0, ended: false, cause: 'free', denied: null };
     extend(car, 80); pose(car, 0, true);
     cars.push(car); return car;
   }
 
   // --- Junction rules ---------------------------------------------------------
+  // Two movements conflict when cars following them could touch anywhere in
+  // the junction: car-sized boxes (the largest body, plus a margin) swept along
+  // both paths overlap, whatever their headings.
+  const poses = path => { const out = []; for (let s = 0; s < path.length + .5; s += .75) out.push(samplePath(path, Math.min(s, path.length))); return out; };
+  function bodiesMeet(a, b, length = 2.65, width = 1.25) {
+    if (Math.abs(a.x - b.x) > 2 * length || Math.abs(a.z - b.z) > 2 * length || Math.abs(a.y - b.y) > 2.5) return false;
+    const extent = (p, x, z) => Math.abs(p.dx * x + p.dz * z) * length + Math.abs(-p.dz * x + p.dx * z) * width;
+    return [[a.dx, a.dz], [-a.dz, a.dx], [b.dx, b.dz], [-b.dz, b.dx]].every(([x, z]) => Math.abs((b.x - a.x) * x + (b.z - a.z) * z) < extent(a, x, z) + extent(b, x, z));
+  }
   function conflicts(a, b) {
     if (!a || !b || a === b || a.from === b.from) return false;
     if (a.to === b.to) return true;
     const key = a.id < b.id ? `${a.id}|${b.id}` : `${b.id}|${a.id}`;
     if (!conflictCache.has(key)) {
-      let hit = false;
-      for (const p of a.path.points) { for (const q of b.path.points) if (Math.hypot(p.x - q.x, p.z - q.z) < 2.6) { hit = true; break; } if (hit) break; }
+      const first = poses(a.path), second = poses(b.path);
       if (conflictCache.size > 20000) conflictCache.clear();
-      conflictCache.set(key, hit);
+      conflictCache.set(key, first.some(p => second.some(q => bodiesMeet(p, q))));
     }
     return conflictCache.get(key);
   }
@@ -170,17 +177,20 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
     const light = signalState(connector.node, connector.inApproach, time);
     return light.color === 'green' || light.color === 'amber' && stopping(car, dStop) > 3.2;
   };
-  // Don't enter a junction whose exit is backed up: a queue reaching the far stop line.
+  // Don't enter a junction whose exit is backed up: the queue must leave room
+  // for the whole car beyond the exit crosswalk, or it would stop on it.
   function roomAfter(connector, car) {
-    const lane = connector.to;
-    for (const other of cars) if (other !== car && other.piece === lane && other.speed < 2 && other.s - other.half < car.half * 2 + 2) return false;
+    const lane = connector.to, crosswalk = connector.node.ground && connector.node.kind === 'junction' ? 3 : 0;
+    for (const other of cars) if (other !== car && other.piece === lane && other.speed < 2 && other.s - other.half < car.half * 2 + 2 + crosswalk) return false;
     return true;
   }
-  function permitted(car, connector, dStop, time, approaching) {
+  function permitted(car, connector, dStop, time, approaching, lights = true) {
     const node = connector.node;
     if (node.kind === 'continuation') return true;
-    if (!goes(car, connector, dStop, time)) return (car.denied = 'signal', false);
-    for (const other of occupants.get(node) ?? []) if (other !== car && conflicts(connector, other.box)) return (car.denied = 'occupied', false);
+    if (lights && !goes(car, connector, dStop, time)) return (car.denied = 'signal', false);
+    for (const other of occupants.get(node) ?? []) {
+      if (other !== car && other.boxes.some(b => b.connector.node === node && conflicts(connector, b.connector))) return (car.denied = 'occupied', false);
+    }
     for (const entry of approaching.get(node) ?? []) {
       const other = entry.car;
       if (other === car || !conflicts(connector, entry.connector) || !yieldsTo(connector, entry.connector)) continue;
@@ -192,36 +202,64 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
     car.denied = null;
     return true;
   }
-  function enterBox(car, connector) {
-    leaveBox(car);
-    car.box = connector; car.boxNode = connector.node;
-    if (!occupants.has(connector.node)) occupants.set(connector.node, new Set());
-    occupants.get(connector.node).add(car);
+  // Reserved turns, each held until the car's tail is a little way past it.
+  const holds = (car, connector) => car.boxes.some(b => b.connector === connector);
+  function reserve(car, connectors) {
+    for (const connector of connectors) if (!holds(car, connector)) {
+      car.boxes.push({ connector, clear: Infinity });
+      if (!occupants.has(connector.node)) occupants.set(connector.node, new Set());
+      occupants.get(connector.node).add(car);
+    }
+    car.box = car.boxes[0]?.connector ?? null;
   }
-  function leaveBox(car) {
-    if (car.boxNode) occupants.get(car.boxNode)?.delete(car);
-    car.box = car.boxNode = null;
+  function release(car, entry) {
+    car.boxes.splice(car.boxes.indexOf(entry), 1);
+    if (!car.boxes.some(b => b.connector.node === entry.connector.node)) occupants.get(entry.connector.node)?.delete(car);
+    car.box = car.boxes[0]?.connector ?? null;
+  }
+  const releaseAll = car => { for (const entry of [...car.boxes]) release(car, entry); };
+  // The next junction on the car's route and the distance from its bumper to
+  // where it must wait for it. A lane too short to hold a car (a bend just
+  // before the junction) is no place to wait, so the wait moves back to the end
+  // of the last lane that can hold one. For the same reason junctions with no
+  // such lane between them are one chain, entered on the first one's light
+  // when every turn in it is free, and reserved together: like a car clearing
+  // a junction, it has the right of way through the rest.
+  const HOLDING_LANE = 7;
+  function nextJunction(car) {
+    if (car.piece.kind !== 'lane') return null;
+    let start = car.piece.path.length - car.s, waitAt = start;
+    const chain = [];
+    for (const piece of car.route) {
+      if (start > 70 && !chain.length) break;
+      if (piece.kind === 'connector' && piece.node.kind === 'junction') chain.push({ connector: piece, dStop: (chain.length ? start : waitAt) - car.half });
+      else if (piece.kind === 'lane' && piece.path.length >= HOLDING_LANE) {
+        if (chain.length) break;
+        waitAt = start + piece.path.length;
+      }
+      start += piece.path.length;
+    }
+    const open = chain.filter(entry => !holds(car, entry.connector));
+    return open.length ? { ...open[0], chain: open } : null;
   }
   // Distance from the front bumper to the stop line the car must hold, or null.
   function junctionHold(car, time, approaching) {
-    if (car.piece.kind !== 'lane') return null;
-    const connector = car.route[0];
-    if (!connector || connector.kind !== 'connector' || car.box === connector) return null;
-    const dStop = car.piece.path.length - car.s - car.half;
-    if (dStop > 70) return null;
-    if (permitted(car, connector, dStop, time, approaching)) {
+    const next = nextJunction(car);
+    if (!next) return null;
+    if (next.chain.every(({ connector, dStop }, i) => permitted(car, connector, dStop, time, approaching, i === 0))) {
       // Once stopping would take a firm brake, the car is committed.
-      if (stopping(car, dStop) > 2.2 || dStop < 1.5) enterBox(car, connector);
+      if (stopping(car, next.dStop) > 2.2 || next.dStop < 1.5) reserve(car, next.chain.map(entry => entry.connector));
       return null;
     }
-    return dStop;
+    return next.dStop;
   }
   // Lights further ahead (beyond a short block) are anticipated, not discovered at the line.
   function signalAhead(car, time, look) {
     let start = car.piece.path.length - car.s;
+    const chained = nextJunction(car)?.chain.slice(1).map(entry => entry.connector) ?? [];
     for (let i = 0; i < car.route.length && start < look; start += car.route[i].path.length, i++) {
       const piece = car.route[i];
-      if (i === 0 || piece.kind !== 'connector' || car.box === piece) continue;
+      if (i === 0 || piece.kind !== 'connector' || holds(car, piece) || chained.includes(piece)) continue;
       if (piece.node.signalized && !goes(car, piece, start - car.half, time)) return start - car.half;
     }
     return null;
@@ -229,13 +267,16 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
   // Turning across a crosswalk that someone is using means waiting before it.
   function crosswalkHold(car, crossings, look) {
     if (!crossings.size) return null;
+    const next = nextJunction(car);
     let start = -car.s;
     for (let i = -1; i < car.route.length && start < look; i++) {
       const piece = i < 0 ? car.piece : car.route[i];
       if (i >= 0) start += (i === 0 ? car.piece : car.route[i - 1]).path.length;
       if (piece.kind !== 'connector' || !piece.node.ground || piece.node.kind !== 'junction') continue;
       const key = approach => `${piece.node.id}:${approach.index}`;
-      if (start > 0 && car.box !== piece && crossings.has(key(piece.inApproach))) return start - car.half - .5;
+      // Before entering, a crossing in use on either side means waiting at the
+      // stop line: stopping inside would leave the car across the near crosswalk.
+      if (start > 0 && !holds(car, piece) && (crossings.has(key(piece.inApproach)) || crossings.has(key(piece.outApproach)))) return next?.connector === piece ? next.dStop : start - car.half - .5;
       // The exit crosswalk begins where the connector ends, at the junction's edge.
       const before = start + piece.path.length - .4 - car.half;
       if (before > -.5 && crossings.has(key(piece.outApproach))) return Math.max(.05, before);
@@ -244,11 +285,11 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
   }
   // Give-way approaches slow down to look before the line.
   function yieldSpeed(car) {
-    const connector = car.route[0];
-    if (car.piece.kind !== 'lane' || connector?.kind !== 'connector' || car.box === connector) return Infinity;
-    const node = connector.node;
-    if (node.kind !== 'junction' || node.signalized || connector.inApproach.major && connector.turn !== 'left') return Infinity;
-    return Math.sqrt(3.5 ** 2 + 2 * COMFORT * Math.max(0, car.piece.path.length - car.s - car.half));
+    const next = nextJunction(car);
+    if (!next) return Infinity;
+    const { connector, dStop } = next;
+    if (connector.node.signalized || connector.inApproach.major && connector.turn !== 'left') return Infinity;
+    return Math.sqrt(3.5 ** 2 + 2 * COMFORT * Math.max(0, dStop));
   }
 
   // --- Perception ---------------------------------------------------------------
@@ -264,8 +305,17 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
   function touches(w, p) { return Math.hypot(p.x - w.x, p.z - w.z) < w.r + HALF_WIDTH + .45 && Math.abs(p.y - w.y) < 2.2; }
   // The nearest thing on the planned path ahead: { gap, speed }.
   function scan(car, look, bodies, walkers) {
-    const others = bodiesNear(car, look, bodies), people = walkers.filter(w => Math.abs(w.x - car.x) < look + 4 && Math.abs(w.z - car.z) < look + 4);
-    if (!others.length && !people.length) return null;
+    const others = bodiesNear(car, look, bodies), near = walkers.filter(w => Math.abs(w.x - car.x) < look + 4 && Math.abs(w.z - car.z) < look + 4);
+    if (!others.length && !near.length) return null;
+    // Someone against the car's body or front bumper: it doesn't move at all.
+    // People waiting at the kerb count only if they are actually in the way:
+    // they wait for the car, so the car must not wait for them.
+    const fx = -Math.sin(car.yaw), fz = -Math.cos(car.yaw), width = HALF_WIDTH * car.body.scale[0];
+    for (const w of near) {
+      const dx = w.x - car.x, dz = w.z - car.z, along = dx * fx + dz * fz, across = Math.abs(dx * -fz + dz * fx), size = w.waiting ? 0 : w.size ?? w.r;
+      if (Math.abs(w.y - car.y) < 2.2 && along > -car.half && along < car.half + size + (w.waiting ? 0 : .4) && across < width + size + (w.waiting ? 0 : .1)) return { gap: 0, speed: 0, what: w.kind };
+    }
+    const people = near.filter(w => !w.waiting);
     const hitAt = p => others.find(b => inside(b, p)) ?? people.find(w => touches(w, p)) ?? null;
     for (let d = 0, before = 0; d <= look; before = d, d += STEP) {
       const found = hitAt(at(car, car.half + d));
@@ -294,14 +344,17 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
 
   // --- Motion -----------------------------------------------------------------
   function advance(car, ds) {
-    car.s += ds;
+    car.s += ds; car.odometer += ds;
     while (car.s > car.piece.path.length && car.route.length) {
       car.s -= car.piece.path.length; car.prev = car.piece; car.piece = car.route.shift();
-      if (car.piece.kind === 'connector' && car.box !== car.piece) enterBox(car, car.piece);
+      // A turn is clear once the tail is a little way past it.
+      const left = car.boxes.find(b => b.connector === car.prev);
+      if (left) left.clear = car.odometer - car.s + car.half + 1;
+      // Junction turns are always reserved, even one entered without a reservation.
+      if (car.piece.kind === 'connector' && car.piece.node.kind === 'junction') reserve(car, [car.piece]);
     }
     if (car.s >= car.piece.path.length) { car.s = car.piece.path.length; car.ended = !car.route.length; }
-    // The junction is clear once the tail is a little way down the exit lane.
-    if (car.piece.kind === 'lane' && car.box && car.box === car.prev && car.s > car.half + 1) leaveBox(car);
+    for (const entry of [...car.boxes]) if (car.odometer >= entry.clear) release(car, entry);
   }
   function pose(car, dt, snap = false) {
     const front = at(car, WHEELBASE / 2), rear = at(car, -WHEELBASE / 2), here = locate(car, 0), center = samplePath(here.piece.path, here.s);
@@ -362,23 +415,20 @@ export function createVehicles({ scene, network, plan, random = seededRandom(491
     spawn,
     update(dt, { time, bodies, walkers, crossings = new Set() }) {
       const approaching = new Map();
-      for (const car of cars) {
-        const connector = car.route[0];
-        if (car.piece.kind !== 'lane' || connector?.kind !== 'connector' || car.box === connector) continue;
-        const dStop = car.piece.path.length - car.s - car.half;
-        if (dStop > 60) continue;
-        if (!approaching.has(connector.node)) approaching.set(connector.node, []);
-        approaching.get(connector.node).push({ car, connector, dStop });
+      for (const car of cars) for (const entry of nextJunction(car)?.chain ?? []) {
+        if (entry.dStop > 60) continue;
+        if (!approaching.has(entry.connector.node)) approaching.set(entry.connector.node, []);
+        approaching.get(entry.connector.node).push({ car, ...entry });
       }
       for (const car of cars) think(car, dt, time, bodies, walkers, approaching, crossings);
     },
     remove(car) {
       const index = cars.indexOf(car);
       if (index < 0) return;
-      leaveBox(car); cars.splice(index, 1);
+      releaseAll(car); cars.splice(index, 1);
     },
     sync(time) { fleet.sync(cars, time); },
-    clear() { for (const car of [...cars]) leaveBox(car); cars.length = 0; occupants.clear(); },
+    clear() { for (const car of [...cars]) releaseAll(car); cars.length = 0; occupants.clear(); },
     /** A complete drivable model of a traffic car, posed where it stands. */
     drivable(car) {
       const model = createCar(PAINTS[car.paint]), [sx, sy, sz] = car.body.scale, spot = { x: car.x, y: car.y, z: car.z, yaw: car.yaw, pitch: car.pitch, roll: car.roll };

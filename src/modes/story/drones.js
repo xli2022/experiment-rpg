@@ -10,12 +10,13 @@ export function createDrone() {
   part(root, [.52, .2, .12], [0, -.02, -.41], black, true);
   part(root, [.32, .075, .04], [0, 0, -.483], glow);
   part(root, [.18, .33, .22], [0, -.3, -.17], black);
-  const rotors = [];
+  const rotors = [], rings = [];
   for (const x of [-.77, .77]) {
     part(root, [.55, .11, .14], [x * .8, .02, 0], shell);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(.38, .065, 6, 16), shell); ring.rotation.x = Math.PI / 2; ring.position.set(x, .04, 0); root.add(ring);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(.38, .065, 6, 16), shell); ring.rotation.x = Math.PI / 2; ring.position.set(x, .04, 0); root.add(ring); rings.push(ring);
     const blade = part(root, [.59, .015, .1], [x, .04, 0], black); rotors.push(blade);
     part(root, [.08, .04, .08], [x, .12, 0], glow);
   }
-  return { root, rotors };
+  // Boxes and materials are shared through mesh-kit; only the rotor rings are the drone's own.
+  return { root, rotors, dispose() { for (const ring of rings) ring.geometry.dispose(); } };
 }

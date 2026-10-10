@@ -145,7 +145,7 @@ function createStory(host, fresh) {
   function newStory() {
     campaign.data = freshProgress(); campaign.pin = null; campaign.messages = []; campaign.changed();
     you.releaseVehicles(); resetDrones(true);
-    host.clock.time = 0; vitals.damageAt = -100;
+    host.clock.time = 0; vitals.damageAt = -100; effects.clear();
     respawn(); ui.close();
     rpgUI.selectedQuest = 'dead-air'; rpgUI.tab = 'quests'; host.save();
     host.hud.notify('A NEW SIGNAL // Mara is waiting on the Upper Market. Your story starts here.', 6);
@@ -207,7 +207,7 @@ function createStory(host, fresh) {
       drone.root.rotation.y = awake ? Math.atan2(-(p.x - pos.x), -(p.z - pos.z)) : drone.phase * .3;
       drone.root.rotation.z = Math.sin(drone.phase * 1.2) * .045;
       for (const rotor of drone.rotors) rotor.rotation.y += dt * 42;
-      if (driving && distance < 3.5 && Math.abs(driving.speed) > 9) { damageDrone(drone, 100); continue; }
+      if (driving && pos.distanceTo(driving.root.position) < 3.5 && Math.abs(driving.speed) > 9) { damageDrone(drone, 100); continue; }
       if (awake) {
         drone.fireTimer -= dt;
         if (drone.fireTimer <= 0) {
@@ -289,13 +289,9 @@ function createStory(host, fresh) {
       };
     },
     dispose() {
-      voice.stop(); unsubscribeVoice(); rpgUI.dispose(); storyHud.dispose();
-      for (const object of worldLife.objects) {
-        scene.remove(object.root);
-        object.root.traverse(o => { if (o.isSprite) { o.material.map?.dispose(); o.material.dispose(); } });
-      }
-      for (const avatar of Object.values(worldLife.avatars)) avatar.dispose?.();
-      for (const drone of drones) scene.remove(drone.root);
+      unsubscribeVoice(); voice.dispose(); rpgUI.dispose(); storyHud.dispose();
+      worldLife.dispose();
+      for (const drone of drones) { scene.remove(drone.root); drone.dispose(); }
     },
   };
 }

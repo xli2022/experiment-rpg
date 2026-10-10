@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { orientedBox, circleHitsBox, moveWithCollisions, rayBoxDistance, supportHeight, overlapsHeight } from '../src/core/physics.js';
+import { orientedBox, circleHitsBox, moveWithCollisions, rayBoxDistance, supportHeight } from '../src/core/physics.js';
 import { findClimbFace, startClimb, stepClimb, dropClimb, CLIMB } from '../src/engine/player/climbing.js';
 import { beginJump, stepJump } from '../src/engine/player/jump.js';
 import { footVelocity, MOVEMENT } from '../src/engine/player/locomotion.js';

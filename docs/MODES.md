@@ -46,7 +46,7 @@ Every hook is optional. The engine calls them as follows.
 
 | Hook | Called | Purpose |
 | --- | --- | --- |
-| `spawn()` | After `create` | Starting spot `{ x, y, z, yaw?, cameraYaw? }`. Defaults to `world.spawn`. |
+| `spawn()` | After `create` | Starting spot `{ x, y, z, cameraYaw?, cameraPitch? }`; `yaw` is accepted as the camera heading. Defaults to `world.spawn`. |
 | `welcome()` | After spawning | Notification text. |
 | `label` | Every HUD update | Mode name in the status line. |
 | `update(dt, { now, time, player, driving, camera })` | Every unpaused frame | The game's simulation. |
@@ -58,7 +58,7 @@ Every hook is optional. The engine calls them as follows.
 | `districtKnown(id)` | Map draws | Fog for undiscovered districts. |
 | `mapOpened()`, `mapPick(x, y)` | Map opened, map clicked | Select places on the full map. |
 | `onAction(name)` | J (`'journal'`) and Q (`'medkit'`) | Mode actions on fixed keys. |
-| `onMenu(id)` | A menu opens or the page hides | Pause speech, close dialogue, and so on. |
+| `onMenu(id)` | A menu opens (its ID), closes (`null`), or the window loses focus or hides (no argument) | Pause speech, close dialogue, and so on. |
 | `onVehicleImpact(speed)` | The player's car hits something | Damage, for example. |
 | `sprintSpeed()` | Each movement step | Sprint upgrades. |
 | `safeSpot()` | Saving while driving with no clear exit | Fallback save position. |
@@ -80,7 +80,7 @@ Every hook is optional. The engine calls them as follows.
 | UI | `ui.open(id, handler)`, `ui.close()`, `ui.panel({ kicker, title, html, onAction })`, `ui.register(id, closeKey)`, `ui.menu(items, settingsElement)` (pause menu buttons), `ui.legend(html)` (map legend), `ui.mapSidebar(element)`, `ui.controls(html)` (extra control rows), `ui.openMap()` |
 | Combat | `weapon.enable({ damage(), targets() })`, where targets are spheres `{ position, radius, hit(amount, point) }`; also `weapon.disable()` and `weapon.refill()`. A shot also stops traffic cars: three hits hand one to the player. |
 | Effects | `effects` (tracers, sparks, hit markers), `audio`, `shadows.addCasters(root)`, `shadows.addDynamic(root)`, `contactShadows.add(source)` |
-| State | `storage` (a `localStorage` that tolerates blocked storage), `state`, `clock.time` (the in-game time of day), `save()` |
+| State | `storage`: a `localStorage` wrapper whose reads never throw. When storage is blocked or full, a write keeps its value for the session, then throws, so wrap writes in `try`/`catch` and warn as the story does. Also `state`, `clock.time` (the in-game time of day) and `save()`. |
 
 Use your own storage key, and include `WORLD_REVISION` from [`world-config.js`](../src/world/world-config.js) so saves from an older city layout drop their coordinates. The story keeps its original `afterlight.last-signal.v1` save; Free roam uses `afterlight.free-roam.v1`.
 

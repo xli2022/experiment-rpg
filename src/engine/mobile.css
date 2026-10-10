@@ -22,7 +22,9 @@ body.touch .brand h1 span{display:none}
 body.touch .brand-mark{width:20px;height:28px;transform:skew(-24deg) scale(.7);transform-origin:left center;margin-right:-4px}
 body.touch .brand-sub{font-size:6px;letter-spacing:1.1px;margin-top:4px}
 body.touch .world-status{display:none}
-body.touch .mission-panel{top:calc(env(safe-area-inset-top, 0px) + 86px);left:var(--touch-left);width:176px;padding-left:10px}
+body.touch .mission-panel,body.touch .roam-panel{top:calc(env(safe-area-inset-top, 0px) + 86px);left:var(--touch-left);width:176px;padding-left:10px}
+body.touch .roam-panel{font-size:9px}
+body.touch .roam-panel b{font-size:13px}
 body.touch .mission-panel .eyebrow{font-size:7px;letter-spacing:1px}
 body.touch .mission-panel h2{font-size:21px;margin:7px 0}
 body.touch .mission-panel p{display:none}
@@ -118,7 +120,7 @@ body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3
   body.touch .brand-mark,body.touch .brand-sub{display:none}
   body.touch .brand h1{font-size:clamp(14px,calc(5vw - 2px),17px);letter-spacing:.6px}
   body.touch .top-actions{gap:3px}
-  body.touch .mission-panel{width:156px}
+  body.touch .mission-panel,body.touch .roam-panel{width:156px}
   body.touch .map-panel{width:100px}
   body.touch .minimap-button{height:85px}
   body.touch .player-panel{width:108px}
@@ -133,7 +135,7 @@ body.touch .start-hint .touch-only{display:block;font-size:9px;letter-spacing:.3
 @media(max-height:560px) and (orientation:landscape){
   body.touch{--move-size:112px;--touch-bottom:calc(env(safe-area-inset-bottom, 0px) + 16px)}
   body.touch .brand{top:calc(env(safe-area-inset-top, 0px) + 19px)}
-  body.touch .mission-panel{top:calc(env(safe-area-inset-top, 0px) + 71px);width:190px}
+  body.touch .mission-panel,body.touch .roam-panel{top:calc(env(safe-area-inset-top, 0px) + 71px);width:190px}
   body.touch .mission-panel h2{font-size:19px;margin:5px 0}
   body.touch .mission-objective{font-size:9px}
   body.touch .map-panel{top:calc(env(safe-area-inset-top, 0px) + 67px);width:94px}
@@ -207,7 +209,7 @@ body.touch:not(.playing) #journal-button{display:none}
   body:not(.touch) .world-status #district,body:not(.touch) .world-status .divider{display:inline}
 }
 @media(max-width:700px){
-  body:not(.touch) .mission-panel{left:16px;top:104px;width:calc(100% - 148px)}
+  body:not(.touch) .mission-panel,body:not(.touch) .roam-panel{left:16px;top:104px;width:calc(100% - 148px)}
   body:not(.touch) .mission-panel p{display:none}
   body:not(.touch) .map-panel{right:16px;top:104px;width:100px}
   body:not(.touch) .minimap-button{height:85px}

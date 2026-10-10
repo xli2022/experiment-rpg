@@ -31,10 +31,12 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
     /** Swap the moving clip (for example Walk to Jog); its own speed calibrates playback. */
     setGait(name) {
       if (name === gait) return true;
-      if (!available.has(name) || !(speeds[name] > 0)) return false;
+      // The avatar's own walk is always available; other gaits need a calibrated speed.
+      const speed = name === walk ? walkSpeed : speeds[name];
+      if (!available.has(name) || !(speed > 0)) return false;
       const previous = walking;
       walking = actionFor(name); walking.time = previous.time / previous.getClip().duration * walking.getClip().duration;
-      gait = name; gaitSpeed = speeds[name];
+      gait = name; gaitSpeed = speed;
       return true;
     },
     update(dt, speed = 0) {

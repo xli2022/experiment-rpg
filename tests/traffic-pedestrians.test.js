@@ -1,19 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { buildNetwork } from '../src/traffic/network.js';
+import { buildNetwork, samplePath } from '../src/traffic/network.js';
 import { createPedestrians, createAvatarPool, rosterBases } from '../src/traffic/pedestrians.js';
 import { walkState } from '../src/traffic/signals.js';
 import { populationFor } from '../src/traffic/population.js';
-import { surfaceHeightAt } from '../src/core/physics.js';
+import { surfaceHeightAt, orientedBox, circleHitsBox } from '../src/core/physics.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
 import { VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
 import { CROWD_PROFILES, HUMAN_BASE_MODELS } from '../src/actors/npc-profiles.js';
 import { gridPlan, streetPlan, crowdAsset, visitorAsset } from './helpers/street-grid.js';
 
 const poolSize = CROWD_PROFILES.length + VISITOR_PROFILES.length;
 const player = { x: 30, y: 0, z: 30, yaw: 0, speed: 0 };
-function crowd({ plan = gridPlan(), assets = { citizen: crowdAsset() }, quality = 'high' } = {}) {
-  const network = buildNetwork(plan), pedestrians = createPedestrians({ scene: new THREE.Scene(), network, plan, assets });
+function crowd({ plan = gridPlan(), assets = { citizen: crowdAsset() }, quality = 'high', spatial = null } = {}) {
+  const network = buildNetwork(plan), pedestrians = createPedestrians({ scene: new THREE.Scene(), network, plan, spatial, assets });
   pedestrians.setQuality(quality);
   const step = (dt, at = player, extra = {}) => pedestrians.update(dt, { player: at, radius: 65, population: populationFor({ masterPlan: plan }, at, quality), ...extra });
   return { plan, network, pedestrians, step };
@@ -67,7 +68,7 @@ test('human profiles use their own base models and fall back to the citizen', ()
 test('three minutes on foot: sidewalks, kerbs, walk signals and everyday behaviour', () => {
   const { plan, network, pedestrians, step } = crowd();
   const junctions = new Map(network.nodes.map(n => [n.id, n])), degree = id => network.walk.adjacency.get(id).length;
-  const travelled = new Map(), behaviours = new Set(), last = new Map();
+  const travelled = new Map(), behaviours = new Set(), last = new Map(), onCrossing = new Map();
   let time = 0, crossings = 0;
   for (let frame = 0; frame < 180 * 30; frame++) {
     time += 1 / 30; step(1 / 30, player, { time });
@@ -87,6 +88,13 @@ test('three minutes on foot: sidewalks, kerbs, walk signals and everyday behavio
         travelled.set(p, (travelled.get(p) ?? 0) + Math.hypot(p.x - before.x, p.z - before.z));
         assert.ok(Math.hypot(p.x - before.x, p.z - before.z) < (p.jog ? .15 : .08), `no teleporting: ${p.model} ${p.mode} ${Math.hypot(p.x - before.x, p.z - before.z).toFixed(3)} pace ${p.pace}`);
       }
+      // A crossing, once started, is finished promptly: nobody circles at the far kerb.
+      if (p.edge.kind === 'crossing' && p.mode !== 'follow') {
+        const since = onCrossing.get(p)?.edge === p.edge ? onCrossing.get(p).since : time;
+        onCrossing.set(p, { edge: p.edge, since });
+        // Queues behind slower people are fine; circling at the kerb is not.
+        assert.ok(time - since < p.edge.path.length / .5 + 10, `${p.model} is stuck on a crossing`);
+      } else onCrossing.delete(p);
       if (p.edge.kind !== 'crossing' && p.mode !== 'chat' && p.mode !== 'follow') {
         const onRoad = plan.roadIndex.near(p.x, p.z, 0).some(s => surfaceHeightAt(p.x, p.z, { ...s, width: s.width - .4 }) !== null);
         assert.ok(!onRoad, `${p.model} walks in the road on a ${p.edge.kind} at ${p.x.toFixed(2)},${p.z.toFixed(2)} offset ${p.offset.toFixed(2)} s ${p.s.toFixed(2)}/${p.edge.path.length.toFixed(2)} ${JSON.stringify(p.edge.path.points.map(q => [+q.x.toFixed(1), +q.z.toFixed(1)]))}`);
@@ -126,4 +134,85 @@ test('a reset clears the street and the next update repopulates around the new s
   assert.ok(pedestrians.people.every(p => !p.root.parent));
   step(0);
   assert.equal(walkers(pedestrians).length, pedestrians.snapshot().target);
+});
+
+test('walkers keep clear of buildings and props, passing round what they can and avoiding what blocks the way', () => {
+  // A kiosk in the middle of one sidewalk, and a wall right across another.
+  const kiosk = orientedBox(48, 0, 1.2, 1.2, 0, 3, 0), wall = orientedBox(62, 11, 5, 1, 0, 3, 0);
+  const spatial = new SpatialGrid([kiosk, wall], 48);
+  const { pedestrians, step } = crowd({ spatial });
+  let time = 0, passedKiosk = 0;
+  for (let frame = 0; frame < 120 * 30; frame++) {
+    time += 1 / 30; step(1 / 30, player, { time });
+    for (const p of walkers(pedestrians)) {
+      if (p.mode === 'chat') continue;
+      assert.ok(!circleHitsBox(p.x, p.z, .25, kiosk) && !circleHitsBox(p.x, p.z, .25, wall), `${p.model} walks into a box at ${p.x.toFixed(1)}, ${p.z.toFixed(1)}`);
+      if (Math.abs(p.x - 48) < 1.6 && Math.abs(p.z) < .7) passedKiosk++;
+    }
+  }
+  assert.ok(passedKiosk > 0, 'people still use the sidewalk beside the kiosk');
+});
+
+test('nobody waits for good on someone in the way: people meeting at a corner, or the player on a kerb link', () => {
+  // Streets meeting at 50°: the kerb links round the sharp corner leave no room to step aside.
+  const skew = 50 * Math.PI / 180, plan = streetPlan([
+    { id: 'main', width: 10, points: [{ x: -200, z: 0 }, { x: 200, z: 0 }] },
+    { id: 'skew', width: 8, points: [{ x: -200 * Math.cos(skew), z: -200 * Math.sin(skew) }, { x: 200 * Math.cos(skew), z: 200 * Math.sin(skew) }] },
+  ]);
+  // The corner beside one crosswalk, its link from the kerb, and the two kerb links that meet there.
+  function corner({ network: { walk, nodes } }) {
+    const node = nodes.find(n => n.signalized), across = (edge, id) => walk.byId.get(edge.a === id ? edge.b : edge.a);
+    const crossing = walk.edges.find(e => e.kind === 'crossing' && e.junction === node.id && e.approach === node.approaches[1].index);
+    const link = walk.adjacency.get(crossing.b).find(e => e.kind === 'link' && across(e, crossing.b).kind === 'corner'), point = across(link, crossing.b);
+    return { link, point, kerbLinks: walk.adjacency.get(point.id).filter(e => e.kind === 'link' && across(e, point.id).kind === 'curb') };
+  }
+  const put = (person, edge, toward, s) => {
+    const forward = edge.b === toward, L = edge.path.length, p = samplePath(edge.path, forward ? s : L - s), dx = forward ? p.dx : -p.dx, dz = forward ? p.dz : -p.dz;
+    Object.assign(person, { edge, forward, s, offset: 0, wantOffset: 0, next: null, speed: 0, pace: person.basePace, x: p.x, y: p.y, z: p.z, yaw: Math.atan2(-dx, -dz),
+      mode: 'walk', held: 0, leader: null, follower: null, group: null, pauseIn: Infinity });
+  };
+  const only = n => ({ population: { pedestrians: n, pedestrianSpacing: 3, district: 'core' } });
+  // Two people reach the corner together, each heading where the other comes from.
+  const meeting = crowd({ plan }), { point, kerbLinks: [l1, l2] } = corner(meeting), near = { x: point.x + 20, y: 0, z: point.z + 20, yaw: 0, speed: 0 };
+  meeting.step(0, near, only(2));
+  const [a, b] = walkers(meeting.pedestrians);
+  put(a, l1, point.id, l1.path.length - .9); put(b, l2, point.id, l2.path.length - .9);
+  a.next = { edge: l2, forward: l2.a === point.id }; b.next = { edge: l1, forward: l1.a === point.id };
+  for (let t = 0; t < 5; t += 1 / 30) meeting.step(1 / 30, near, { ...only(2), time: t });
+  const round = (p, from) => p.edge !== from && Math.hypot(p.x - point.x, p.z - point.z) > 1;
+  assert.ok(round(a, l1) && round(b, l2), 'both get round the corner instead of waiting on each other');
+  // The player stands across a kerb link that someone walks along.
+  const passing = crowd({ plan }), { link, point: end } = corner(passing), mid = samplePath(link.path, link.path.length / 2);
+  const still = { x: mid.x, y: mid.y, z: mid.z, yaw: Math.atan2(-mid.dx, -mid.dz) + Math.PI / 2, speed: 0 };
+  passing.step(0, still, only(1));
+  const [walker] = walkers(passing.pedestrians);
+  put(walker, link, end.id, 0);
+  let passed = false;
+  for (let t = 0; t < 8 && !passed; t += 1 / 30) {
+    passing.step(1 / 30, still, { ...only(1), time: t });
+    passed = walker.edge !== link || walker.s > link.path.length / 2 + .6;
+  }
+  assert.ok(passed, 'the walker squeezes past the player');
+});
+
+test('walkers get past a player standing on the sidewalk, and joggers return to their own walk', () => {
+  const { network, pedestrians, step } = crowd();
+  // Stand in the middle of a sidewalk that people walk along.
+  const sidewalk = network.walk.edges.find(e => e.kind === 'sidewalk' && Math.abs(e.path.points[0].x - 48) < .5);
+  const stand = samplePath(sidewalk.path, sidewalk.path.length / 2), still = { x: stand.x, y: stand.y, z: stand.z, yaw: Math.PI / 2, speed: 0 };
+  const blocked = new Map();
+  let time = 0;
+  for (let frame = 0; frame < 120 * 30; frame++) {
+    time += 1 / 30; step(1 / 30, still, { time });
+    for (const p of walkers(pedestrians)) {
+      const d = Math.hypot(p.x - still.x, p.z - still.z), waiting = d < 1.6 && p.speed < .1 && p.mode === 'walk';
+      blocked.set(p, waiting ? (blocked.get(p) ?? 0) + 1 / 30 : 0);
+      assert.ok(blocked.get(p) < 6, `${p.model} is stuck behind the player`);
+    }
+  }
+  const person = walkers(pedestrians).find(p => p.species === 'human');
+  const own = person.gait;
+  assert.ok(person.avatar.setGait('Jog')); person.jog = true;
+  pedestrians.reset();
+  assert.equal(person.avatar.gait, own, 'a jogger returns to their own walk');
 });

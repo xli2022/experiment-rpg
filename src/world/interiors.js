@@ -304,8 +304,10 @@ export function createInteriors(scene, city) {
     }
   }
 
-  function update(player, context, now, dt) {
-    if (now - scanAt > .3 || (context && !active.has(context.id))) { scanAt = now; scan(player, context); }
+  // While driving nothing new is built (a car can't go in); built floors age out.
+  function update(player, context, now, dt, { build = true } = {}) {
+    if (!build) wanted = [];
+    else if (now - scanAt > .3 || (context && !active.has(context.id))) { scanAt = now; scan(player, context); }
     let madePlan = false;
     for (const p of wanted) {
       if (active.has(p.id)) continue;
@@ -375,6 +377,10 @@ export function createInteriors(scene, city) {
       cavity: uniforms.interiorCavity.value.w > .5,
     };
   }
-  function dispose() { for (const b of active.values()) disposeBuilding(b); active.clear(); root.removeFromParent(); }
+  function dispose() {
+    for (const b of active.values()) disposeBuilding(b);
+    active.clear(); root.removeFromParent();
+    warm.dispose(); for (const material of Object.values(materials)) material.dispose();
+  }
   return { root, update, snapshot, dispose, materials };
 }

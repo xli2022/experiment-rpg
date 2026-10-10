@@ -92,15 +92,19 @@ export function moveWithCollisions(position, dx, dz, radius, colliders, limit = 
   // Ramp slabs therefore never act as the tall walls of their bounding boxes.
   colliders = colliders.filter(box => !box.supportOnly && overlapsHeight(box, position.y ?? 0, position.bodyHeight ?? 1.8));
   const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / Math.max(radius * 0.65, 0.2)));
-  const sx = dx / steps, sz = dz / steps;
+  const sx = dx / steps, sz = dz / steps, hits = (x, z) => colliders.some(b => circleHitsBox(x, z, radius, b));
   let collided = false;
   for (let i = 0; i < steps; i++) {
-    const nx = clamp(position.x + sx, -limit + radius, limit - radius);
-    if (!colliders.some(b => circleHitsBox(nx, position.z, radius, b))) position.x = nx;
-    else collided = true;
-    const nz = clamp(position.z + sz, -limit + radius, limit - radius);
-    if (!colliders.some(b => circleHitsBox(position.x, nz, radius, b))) position.z = nz;
-    else collided = true;
+    const nx = clamp(position.x + sx, -limit + radius, limit - radius), nz = clamp(position.z + sz, -limit + radius, limit - radius);
+    // The whole sub-step first, so a diagonal walk through a narrow gap (a door
+    // in a rotated building) doesn't drift into a jamb; otherwise slide along
+    // whichever axis is free.
+    if (!hits(nx, nz)) { position.x = nx; position.z = nz; }
+    else {
+      collided = true;
+      if (!hits(nx, position.z)) position.x = nx;
+      if (!hits(position.x, nz)) position.z = nz;
+    }
     if (Math.abs(position.x) >= limit - radius || Math.abs(position.z) >= limit - radius) collided = true;
   }
   return collided;

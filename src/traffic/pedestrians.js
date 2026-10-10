@@ -11,8 +11,13 @@ import { angleDelta, circleHitsBox, clamp, overlapsHeight, seededRandom } from '
 // slower people, and now and then stop to look around, check a phone, chat
 // in small groups, walk in pairs or jog.
 
-const SLOTS = [-1.1, -.55, 0, .55, 1.1], CHECK_STEP = 1.5, CARROT = 1.6, TURN_RATE = 2.6, SHOW_MARGIN = 6;
+const SLOTS = [-1.1, -.55, 0, .55, 1.1], CHECK_STEP = .75, CARROT = 1.6, TURN_RATE = 2.6, SHOW_MARGIN = 6, PATIENCE = 1.5;
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+// Whether b stands just ahead of a, within its walking line.
+function inPath(a, b) {
+  const fx = -Math.sin(a.yaw), fz = -Math.cos(a.yaw), rx = b.x - a.x, rz = b.z - a.z;
+  return rx * fx + rz * fz > 0 && Math.abs(rx * -fz + rz * fx) < .75;
+}
 
 /** The fixed avatar pool: every human wardrobe interleaved with the visitors. */
 export function createAvatarPool({ citizen, visitors = {}, humanBases = {} }, random = seededRandom(707)) {
@@ -34,7 +39,7 @@ export function createAvatarPool({ citizen, visitors = {}, humanBases = {} }, ra
     avatar.update(0, 0);
     // Visitors walk at the pace their gait was authored for; people vary.
     const pace = available ? clamp(visitor.walkSpeed * .78, 1.05, 1.9) : (i % 3 ? 1.18 : 1.08) + random() * .32;
-    return { id: i, root, avatar, species, model: profile.id, pace, basePace: pace, mode: null, elapsed: 0, travelled: 0, x: 0, y: 0, z: 0, yaw: 0, speed: 0 };
+    return { id: i, root, avatar, species, model: profile.id, pace, basePace: pace, gait: avatar.gait, mode: null, elapsed: 0, travelled: 0, x: 0, y: 0, z: 0, yaw: 0, speed: 0 };
   });
 }
 
@@ -83,17 +88,23 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
   }
   const usable = edge => clearance(edge).usable;
   // The free lateral offset (in the walker's own frame) closest to the one it wants.
+  // The lateral offset closest to the wanted one that stays clear from a metre
+  // behind (the walker's own body) to a few metres ahead. Where anything is in
+  // the way, only the checked slot centres are safe.
   function laneOffset(edge, forward, s, wanted) {
     const { free } = clearance(edge);
     if (!free) return wanted;
-    const L = edge.path.length, index = clamp(Math.round((forward ? s : L - s) / L * (free.length - 1)), 0, free.length - 1), mask = free[index];
-    let best = wanted, gap = Infinity;
+    const L = edge.path.length, station = d => clamp(Math.round((forward ? d : L - d) / L * (free.length - 1)), 0, free.length - 1);
+    let mask = 31;
+    for (let d = s - 1; d <= s + 3; d += CHECK_STEP / 2) mask &= free[station(d)];
+    if (!mask) mask = free[station(s + 1)];
+    if (mask === 31) return wanted;
+    let best = 0, gap = Infinity;
     SLOTS.forEach((o, k) => {
-      if (!(mask >> k & 1)) return;
       const own = forward ? o : -o;
-      if (Math.abs(own - wanted) < gap) { gap = Math.abs(own - wanted); best = own; }
+      if (mask >> k & 1 && Math.abs(own - wanted) < gap) { gap = Math.abs(own - wanted); best = own; }
     });
-    return gap === Infinity ? 0 : Math.abs(best - wanted) < .3 ? wanted : best;
+    return best;
   }
   function chooseNext(person) {
     const node = endOf(person.edge, person.forward), heading = sample(person.edge, person.forward, person.edge.path.length);
@@ -116,11 +127,18 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
     const node = junctions.get(edge.junction), approach = node?.approaches[edge.approach];
     if (!node) return true;
     const duration = edge.path.length / (person.pace * 1.15) + 1;
-    // Never step out in front of a car that is already at the crossing.
-    const a = edge.path.points[0], b = edge.path.points.at(-1), dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz || 1;
+    // Never step out in front of a car that is already at the crossing, nor
+    // through one standing on it.
+    const a = edge.path.points[0], b = edge.path.points.at(-1), dx = b.x - a.x, dz = b.z - a.z, l2 = dx * dx + dz * dz || 1, steps = Math.ceil(Math.sqrt(l2) / .5);
     for (const car of cars) {
+      if (Math.abs(car.y - a.y) > 3) continue;
       const t = clamp(((car.x - a.x) * dx + (car.z - a.z) * dz) / l2, 0, 1);
-      if (car.speed > 1.5 && Math.abs(car.y - a.y) < 3 && Math.hypot(car.x - a.x - dx * t, car.z - a.z - dz * t) < 7) return false;
+      if (car.speed > 1.5 && Math.hypot(car.x - a.x - dx * t, car.z - a.z - dz * t) < 7) return false;
+      const fx = -Math.sin(car.yaw), fz = -Math.cos(car.yaw), half = (car.half ?? 2.4) + .4, width = 1.1 * (car.body?.scale?.[0] ?? 1.05) + .4;
+      for (let k = 0; k <= steps; k++) {
+        const px = a.x + dx * k / steps - car.x, pz = a.z + dz * k / steps - car.z;
+        if (Math.abs(px * fx + pz * fz) < half && Math.abs(-px * fz + pz * fx) < width) return false;
+      }
     }
     if (node.signalized) {
       const state = walkState(node, approach, time);
@@ -140,7 +158,7 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
   function place(person, edge, forward, s, offset) {
     const p = sample(edge, forward, s);
     Object.assign(person, { edge, forward, s, offset, wantOffset: offset, next: null, speed: 0, pace: person.basePace, x: p.x - p.dz * offset, z: p.z + p.dx * offset, y: p.y,
-      yaw: Math.atan2(-p.dx, -p.dz), mode: 'walk', timer: 0, leader: null, follower: null, group: null, jog: false, pauseIn: 10 + random() * 40,
+      yaw: Math.atan2(-p.dx, -p.dz), mode: 'walk', timer: 0, held: 0, leader: null, follower: null, group: null, jog: false, claim: false, pauseIn: 10 + random() * 40,
       crossBias: .4 + random() * 1.2, gesture: null, elapsed: 0, travelled: 0, shown: false, life: (person.life ?? 0) + 1 });
     person.root.position.set(person.x, person.y, person.z); person.root.rotation.y = person.yaw;
   }
@@ -149,7 +167,7 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
     if (person.group) for (const member of person.group.members) if (member !== person) { member.group = null; member.mode = member.mode === 'chat' ? 'walk' : member.mode; }
     person.mode = null; person.leader = person.follower = person.group = null;
     person.root.visible = false; if (person.root.parent) scene.remove(person.root);
-    if (person.jog) { person.avatar.setGait?.('Walk'); person.jog = false; }
+    if (person.jog) { person.avatar.setGait?.(person.gait); person.jog = false; }
   }
   const occupied = (p, gap) => walkers().some(o => Math.abs(o.y - p.y) < 3 && dist(o, p) < gap);
   function candidate(focus, radius) {
@@ -210,19 +228,33 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
     if (gated) want = Math.min(want, Math.max(0, L - person.s - .25) * 1.4);
     // Look ahead for people and the player: pass the slower, step aside for the oncoming.
     const fx = -Math.sin(person.yaw), fz = -Math.cos(person.yaw);
-    let lateral = person.wantOffset;
+    let lateral = person.wantOffset, held = false;
     for (const other of player ? [...list, player] : list) {
       if (other === person || other === person.follower || other === person.leader || Math.abs(other.y - person.y) > 2) continue;
       const rx = other.x - person.x, rz = other.z - person.z, ahead = rx * fx + rz * fz, side = rx * -fz + rz * fx;
-      if (ahead <= 0 || ahead > 2.6 || Math.abs(side) > .8) continue;
-      const heading = other.yaw === undefined ? 0 : -Math.sin(other.yaw) * fx - Math.cos(other.yaw) * fz;
-      if (heading < -.4) lateral = Math.max(lateral, person.offset + .55);
-      else if ((other.speed ?? 0) < person.speed - .15 && other !== player) lateral = (other.offset ?? 0) - .9;
-      else want = Math.min(want, Math.max(0, ahead - .8) * 1.5);
+      if (ahead <= -.3 || ahead > 2.6 || Math.abs(side) > 1.5) continue;
+      const along = other.yaw === undefined ? 0 : -Math.sin(other.yaw) * fx - Math.cos(other.yaw) * fz, speed = (other.speed ?? 0) * along;
+      const inWay = ahead > 0 && Math.abs(side) < .75;
+      if (speed >= person.pace - .15) { if (inWay) want = Math.min(want, Math.max(0, ahead - .8) * 1.5); continue; }
+      // Slower, standing or coming the other way: hold a line a metre to one side
+      // of them (the nearer side) until past. Only someone slow or still, facing
+      // the same way, means slowing down; people facing us step aside as we do.
+      // Two people in each other's way, like one stepping onto a crossing as
+      // another steps off it, never both wait: the lower id goes first. And
+      // only a queue going the same way on is waited out: anyone else standing
+      // in the path (someone at the kerb for another crossing, a chat, the
+      // player) is squeezed past after a moment.
+      lateral = person.offset + side + (side > 0 ? -1 : 1);
+      if (!inWay || along <= -.5 || other.id > person.id && inPath(other, person)) continue;
+      const queue = (other.mode === 'walk' || other.mode === 'wait') && along >= .5 && other.next?.edge === person.next?.edge;
+      const passable = (other.speed ?? 0) < .2 && !queue;
+      held ||= passable;
+      want = Math.min(want, passable && person.held >= PATIENCE ? .7 : Math.max(0, ahead - .5) * 2);
     }
+    person.held = held ? person.held + dt : 0;
     // Sidewalks leave room to pass; kerb links and crosswalks keep people in line.
     const room = edge.kind === 'sidewalk' || edge.kind === 'deck' ? 1.1 : edge.kind === 'crossing' ? .6 : .25;
-    person.offset += clamp(laneOffset(edge, person.forward, person.s + 2, clamp(lateral, -room, room)) - person.offset, -.9 * dt, .9 * dt);
+    person.offset += clamp(laneOffset(edge, person.forward, person.s, clamp(lateral, -room, room)) - person.offset, -.9 * dt, .9 * dt);
     person.speed += clamp(want - person.speed, -2.6 * dt, 1.3 * dt);
     if (gated && L - person.s < .35 && person.speed < .15) {
       person.mode = 'wait'; person.speed = 0;
@@ -233,7 +265,8 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
     }
     // Pure pursuit of a point a stride ahead, with a capped turn rate.
     let ahead = person.s + CARROT, carrotEdge = edge, carrotForward = person.forward, offset = person.offset;
-    if (ahead > L && person.next && !gated) { ahead -= L; carrotEdge = person.next.edge; carrotForward = person.next.forward; }
+    // A crossing is walked to its far kerb before the next path pulls the walker round.
+    if (ahead > L && person.next && !gated && edge.kind !== 'crossing') { ahead -= L; carrotEdge = person.next.edge; carrotForward = person.next.forward; }
     const c = sample(carrotEdge, carrotForward, Math.min(ahead, carrotEdge.path.length));
     const cx = c.x - c.dz * offset, cz = c.z + c.dx * offset, error = angleDelta(person.yaw, Math.atan2(-(cx - person.x), -(cz - person.z)));
     person.yaw += clamp(error, -TURN_RATE * dt * (person.jog ? 1.3 : 1), TURN_RATE * dt * (person.jog ? 1.3 : 1));

@@ -33,14 +33,14 @@ export function createWorld({ scene, renderer = null, quality = 'high', landmark
     stream, atmosphere, interiors, landmarks, spawn,
     landmark: id => byId.get(id) ?? null,
     buildingsNear: (x, z, radius = 1) => city.metropolis.buildingsNear(x, z, radius),
-    /** Per frame: weather and interiors follow `focus`; streaming follows the camera view. */
-    update({ camera, focus, interior = null, now, dt = 0, paused = false, force = false }) {
-      if (!paused) { atmosphere.update({ camera, focus, interior, dt }); interiors.update(focus, interior, now, dt); }
+    /** Per frame: weather and interiors follow `focus` (no interiors are built while `driving`); streaming follows the camera view. */
+    update({ camera, focus, interior = null, now, dt = 0, paused = false, force = false, driving = false }) {
+      if (!paused) { atmosphere.update({ camera, focus, interior, dt }); interiors.update(focus, interior, now, dt, { build: !driving }); }
       else atmosphere.sky.position.copy(camera.position);
       stream.update(camera, focus, now, force);
     },
     setQuality(value, { far } = {}) { stream.setQuality(value); atmosphere.setQuality(value, far); },
     snapshot: () => ({ streaming: { ...stream.stats }, blueprints: city.metropolis.blocks.size, interiors: interiors.snapshot() }),
-    dispose() { interiors.dispose(); atmosphere.dispose(); stream.dispose(); },
+    dispose() { interiors.dispose(); atmosphere.dispose(); stream.dispose(); city.dispose(); },
   };
 }

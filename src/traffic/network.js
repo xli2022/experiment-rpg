@@ -73,7 +73,12 @@ function bezier(p0, p1, p2, p3, t) {
 
 /** A sampled path: positions, cumulative length and curvature for speed limits. */
 export function createPath(points) {
-  const clean = points.filter((p, i) => i === 0 || dist(points[i - 1], p) > 1e-3);
+  // Drop near-duplicate points, but always keep the exact first and last ones.
+  const clean = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    if (dist(clean.at(-1), points[i]) > 1e-3) clean.push(points[i]);
+    else if (i === points.length - 1 && clean.length > 1) clean[clean.length - 1] = points[i];
+  }
   if (clean.length === 1) clean.push({ ...clean[0], x: clean[0].x + 1e-2 });
   const cum = cumulative(clean), curvature = clean.map((p, i) => {
     if (i === 0 || i === clean.length - 1) return 0;
@@ -235,6 +240,8 @@ export function buildNetwork(plan) {
   }
   for (const node of nodes) {
     const list = node.approaches.sort((a, b) => a.angle - b.angle), count = list.length;
+    // A node whose only roads were too short to keep has nothing to connect.
+    if (!count) { Object.assign(node, { kind: 'isolated', ground: false, signalized: false, axis: { x: 1, z: 0 }, radius: 0 }); continue; }
     list.forEach((a, i) => { a.index = i; a.node = node; a.partner = list.find(b => b !== a && b.edge.road === a.edge.road) ?? null; });
     node.kind = count >= 3 ? 'junction' : count === 2 ? 'continuation' : 'end';
     node.ground = !elevated(node) && list.every(a => a.edge.class !== 'expressway' && a.edge.class !== 'ramp');
@@ -307,31 +314,106 @@ export function buildNetwork(plan) {
     if (connectorCache.has(node)) return connectorCache.get(node);
     const list = [];
     connectorCache.set(node, list);
+    const junction = node.kind === 'junction';
+    // A dead-end stub too short to turn round in is never entered.
+    const stub = edge => edge.length < 14 && (edge.from.kind === 'end' || edge.to.kind === 'end');
     for (const a of node.approaches) for (const inLane of a.arriving) for (const b of node.approaches) {
       const uturn = b === a;
-      if (uturn && node.kind !== 'end') continue;
+      if (uturn && node.kind !== 'end' || stub(b.edge)) continue;
       const outs = b.leaving, end = samplePath(inLane.path, inLane.path.length), first = samplePath(outs[0].path, 0);
       const d0 = { x: end.dx, z: end.dz }, d1 = { x: first.dx, z: first.dz }, dot = d0.x * d1.x + d0.z * d1.z, side = d1.x * -d0.z + d1.z * d0.x;
       const turn = uturn ? 'uturn' : dot > .7 ? 'straight' : side > 0 ? 'right' : 'left';
-      if (!uturn && dot < -.8) continue;
-      // Turns go from and to the matching kerb-side lane; straight keeps its lane.
-      if (inLane.count > 1 && (turn === 'right' && inLane.index !== inLane.count - 1 || (turn === 'left' || turn === 'uturn') && inLane.index !== 0)) continue;
-      const outLane = outs[turn === 'right' ? outs.length - 1 : turn === 'straight' ? Math.min(inLane.index, outs.length - 1) : 0];
-      const p0 = { ...inLane.path.points.at(-1) }, p3 = { ...outLane.path.points[0] }, gap = dist(p0, p3);
-      const reach = uturn ? Math.max(5, gap) : Math.max(1, gap * .42);
-      const p1 = { x: p0.x + d0.x * reach, y: p0.y, z: p0.z + d0.z * reach }, p2 = { x: p3.x - d1.x * reach, y: p3.y, z: p3.z - d1.z * reach };
-      const steps = Math.max(6, Math.ceil(gap / 1.2)), points = [];
-      for (let k = 0; k <= steps; k++) {
-        const t = k / steps, p = bezier(p0, p1, p2, p3, t), y = lerp(p0.y, p3.y, t);
-        p.y = k === 0 || k === steps ? y : plan.surfaceHeight(p.x, p.z, y + .8);
+      if (junction && dot < -.8) continue;
+      // At junctions turns go from and to the matching kerb-side lane; elsewhere,
+      // and for straight on, a lane keeps its place.
+      if (junction && inLane.count > 1 && (turn === 'right' && inLane.index !== inLane.count - 1 || turn === 'left' && inLane.index !== 0)) continue;
+      const outLane = outs[junction && turn === 'right' ? outs.length - 1 : junction && turn === 'left' ? 0 : Math.min(inLane.index, outs.length - 1)];
+      const p0 = { ...inLane.path.points.at(-1) }, p3 = { ...outLane.path.points[0] };
+      const points = uturn ? uTurn(p0, d0, p3, d1) : turnPath(p0, d0, p3, d1, new Set([a.edge.road, b.edge.road]), { x: -a.dir.x, z: -a.dir.z }, b.dir, node);
+      for (const [k, p] of points.entries()) {
+        const t = k / (points.length - 1), y = lerp(p0.y, p3.y, t);
+        p.y = k === 0 || k === points.length - 1 ? y : plan.surfaceHeight(p.x, p.z, y + .8);
         if (!(Math.abs(p.y - y) < .8)) p.y = y;
         p.roll = lerp(p0.roll ?? 0, p3.roll ?? 0, t);
-        points.push(p);
       }
       list.push({ id: `${inLane.id}>${outLane.id}`, kind: 'connector', node, from: inLane, to: outLane, turn, path: createPath(points),
         speed: turn === 'straight' ? inLane.speed : Math.min(inLane.speed, 7), inApproach: a, outApproach: b, next: [outLane] });
     }
     return list;
+  }
+
+  // How far a point lies beyond the asphalt of the given roads.
+  function offRoad(p, roads) {
+    let best = Infinity;
+    for (const s of plan.roadIndex.near(p.x, p.z, 4)) {
+      if (!roads.has(s.road)) continue;
+      const dx = s.b.x - s.a.x, dz = s.b.z - s.a.z, length = Math.hypot(dx, dz) || 1e-9, overlap = s.supportOverlap ?? .12;
+      const along = ((p.x - s.a.x) * dx + (p.z - s.a.z) * dz) / length, across = Math.abs((-(p.x - s.a.x) * dz + (p.z - s.a.z) * dx) / length);
+      best = Math.min(best, Math.hypot(Math.max(0, -overlap - along, along - length - overlap), Math.max(0, across - s.width / 2)));
+    }
+    return best;
+  }
+  // A turn is a straight run into the junction, a circular arc and a straight
+  // run out, around the corner where the arriving and leaving lane lines meet.
+  // Lines are tried along the lanes' end headings, then along the approaches'
+  // straight axes (curving roads), with the widest arc that keeps the whole
+  // path on the two roads. Nearly straight connections use a gentle cubic.
+  function bezierTurn(p0, d0, p3, d1) {
+    const gap = dist(p0, p3), reach = Math.max(1, gap * .42), steps = Math.max(6, Math.ceil(gap / 1.2));
+    const p1 = { x: p0.x + d0.x * reach, y: p0.y, z: p0.z + d0.z * reach }, p2 = { x: p3.x - d1.x * reach, y: p3.y, z: p3.z - d1.z * reach };
+    return Array.from({ length: steps + 1 }, (_, k) => bezier(p0, p1, p2, p3, k / steps));
+  }
+  function* fillets(p0, e0, p3, e1) {
+    // Solve p0 + e0·t = p3 − e1·u for the corner where the two lines meet.
+    const angle = Math.acos(clamp(e0.x * e1.x + e0.z * e1.z, -1, 1)), det = e0.x * e1.z - e0.z * e1.x;
+    if (angle < .2 || Math.abs(det) < 1e-6) return;
+    const rx = p3.x - p0.x, rz = p3.z - p0.z, t = (rx * e1.z - rz * e1.x) / det, u = (e0.x * rz - e0.z * rx) / det;
+    if (!(t > .05 && u > .05)) return;
+    const corner = { x: p0.x + e0.x * t, z: p0.z + e0.z * t }, half = Math.tan(angle / 2), sign = Math.sign(e0.x * e1.z - e0.z * e1.x) || 1;
+    const run = (from, to, out) => { const n = Math.ceil(dist(from, to)); for (let k = 1; k < n; k++) out.push(lerpPoint(from, to, k / n)); };
+    for (let r = Math.min(t, u) / half, first = true; first || r > .5; r *= .85, first = false) {
+      const along = r * half, a0 = { x: corner.x - e0.x * along, y: 0, z: corner.z - e0.z * along }, a1 = { x: corner.x + e1.x * along, y: 0, z: corner.z + e1.z * along };
+      // The arc's centre lies on the inside of the turn, r from where it starts.
+      const centre = { x: a0.x - e0.z * r * sign, z: a0.z + e0.x * r * sign }, start = Math.atan2(a0.z - centre.z, a0.x - centre.x);
+      const steps = Math.max(4, Math.ceil(r * angle / .6)), points = [{ ...p0 }];
+      run(p0, a0, points);
+      for (let k = 0; k <= steps; k++) {
+        const theta = start + sign * angle * k / steps;
+        points.push({ x: centre.x + Math.cos(theta) * r, y: 0, z: centre.z + Math.sin(theta) * r });
+      }
+      run(a1, p3, points);
+      points.push({ ...p3 });
+      yield points;
+    }
+  }
+  // Through the middle of the junction, where every road overlaps: along each
+  // lane's axis to within a couple of metres of the node, rounded off.
+  function viaCentre(p0, p3, inward, outward, node) {
+    const near = (p, d, sign) => { const reach = Math.max(0, (node.x - p.x) * d.x * sign + (node.z - p.z) * d.z * sign - 2); return { x: p.x + d.x * reach * sign, y: 0, z: p.z + d.z * reach * sign }; };
+    let points = [{ ...p0 }, near(p0, inward, 1), near(p3, outward, -1), { ...p3 }];
+    for (let pass = 0; pass < 4; pass++) {
+      const next = [points[0]];
+      for (let i = 0; i < points.length - 1; i++) next.push(lerpPoint(points[i], points[i + 1], .25), lerpPoint(points[i], points[i + 1], .75));
+      next.push(points.at(-1)); points = next;
+    }
+    return points;
+  }
+  function turnPath(p0, d0, p3, d1, roads, inward, outward, node) {
+    let best = null;
+    const consider = points => {
+      const worst = Math.max(...points.map(p => offRoad(p, roads)));
+      if (!best || worst < best.worst - 1e-6) best = { points, worst };
+      return worst < .05;
+    };
+    if (Math.acos(clamp(d0.x * d1.x + d0.z * d1.z, -1, 1)) < .2 && consider(bezierTurn(p0, d0, p3, d1))) return best.points;
+    for (const [e0, e1] of [[d0, d1], [inward, outward]]) for (const points of fillets(p0, e0, p3, e1)) if (consider(points)) return points;
+    if (consider(bezierTurn(p0, d0, p3, d1)) || consider(viaCentre(p0, p3, inward, outward, node))) return best.points;
+    return best.points;
+  }
+  function uTurn(p0, d0, p3, d1) {
+    const gap = dist(p0, p3), reach = Math.max(5, gap), steps = Math.max(6, Math.ceil(gap / 1.2));
+    const p1 = { x: p0.x + d0.x * reach, y: p0.y, z: p0.z + d0.z * reach }, p2 = { x: p3.x - d1.x * reach, y: p3.y, z: p3.z - d1.z * reach };
+    return Array.from({ length: steps + 1 }, (_, k) => bezier(p0, p1, p2, p3, k / steps));
   }
 
   const walk = buildWalkGraph(plan, nodes, edges);

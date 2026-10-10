@@ -7,7 +7,8 @@ import { seededRandom } from '../core/physics.js';
 // rendering and future residents share the same rooms and unit identities.
 export const INTERIOR = Object.freeze({
   revision: 1, storey: 3.6, slab: .3, hull: .3, partition: .14, floorOffset: .12, minHeight: 2.6,
-  door: Object.freeze({ width: .95, height: 2.15, clearance: 1 }),
+  // Wide enough to walk through at an angle: a 0.86 m body keeps 12 cm either side.
+  door: Object.freeze({ width: 1.1, height: 2.15, clearance: 1 }),
   stair: Object.freeze({ lane: 1.2, divider: .2, run: 3.6, rise: 1.8, landing: 1.2 }),
   lift: 1.8, liftAbove: 3, ring: 1.2, minDepth: 3.2,
 });
@@ -24,7 +25,6 @@ const INDUSTRIAL_WINDOWS = { width: .8, sill: 2.7, head: 3.4 };
 const rect = (x0, z0, x1, z1) => [{ x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }, { x: x0, z: z1 }];
 const clip = (poly, nx, nz, c) => poly.length ? clipConvex(poly, nx, nz, c) : poly;
 const clipAll = (poly, planes) => planes.reduce((q, [nx, nz, c]) => clip(q, nx, nz, c), poly);
-const within = (poly, r) => clipAll(poly, [[1, 0, r.x1], [-1, 0, -r.x0], [0, 1, r.z1], [0, -1, -r.z0]]);
 const fits = (inner, r) => rect(r.x0, r.z0, r.x1, r.z1).every(p => pointInConvex(inner, p.x, p.z, -1e-6));
 function bounds(poly) {
   const b = { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity };
@@ -172,7 +172,9 @@ function apartmentRooms(polygon, side, random) {
       const left = random() < .5, cut = left ? span.min + 2.2 : span.max - 2.2;
       const bath = left ? clip(back, ux, uz, cut) : clip(back, -ux, -uz, -cut);
       const bed = left ? clip(back, -ux, -uz, -cut) : clip(back, ux, uz, cut);
-      rooms.push({ kind: 'bedroom', polygon: bed }, { kind: 'bath', polygon: bath });
+      // On angled or curved walls the strip can be a sliver nobody fits in.
+      if (insetConvex(bath, .5).length) rooms.push({ kind: 'bedroom', polygon: bed }, { kind: 'bath', polygon: bath });
+      else rooms.push({ kind: 'bedroom', polygon: back });
     } else rooms.push({ kind: 'bedroom', polygon: back });
     return rooms.filter(r => r.polygon.length);
   }

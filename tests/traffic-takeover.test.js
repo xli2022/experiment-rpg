@@ -17,8 +17,15 @@ test('traffic needs three separate hits before a moving car becomes drivable', (
   const { traffic, scene } = harness(), npc = traffic.cars[0], count = traffic.cars.length;
   for (let hit = 1; hit < TAKEOVER_HITS; hit++) {
     assert.deepEqual(traffic.hit(npc), { hit: true, hitsRemaining: TAKEOVER_HITS - hit, car: null });
-    for (let i = 0; i < 120; i++) traffic.update(1 / 30, { player });
-    assert.ok(traffic.cars.includes(npc), 'a damaged car brakes and carries on');
+    // It brakes hard, then drives on along its route (allowing for a red light).
+    let travelled = 0, last = { x: npc.x, z: npc.z };
+    for (let i = 0; i < 40 * 30; i++) {
+      traffic.update(1 / 30, { player });
+      if (i > 2.5 * 30) travelled += Math.hypot(npc.x - last.x, npc.z - last.z);
+      last = { x: npc.x, z: npc.z };
+    }
+    assert.ok(traffic.cars.includes(npc), 'a damaged car stays in traffic');
+    assert.ok(travelled > 10, `a damaged car carries on (${travelled.toFixed(1)} m)`);
     assert.equal(traffic.owned.length, 0);
     assert.equal(traffic.snapshot().cars.find(car => car.id === npc.id).damageHits, hit);
   }
@@ -44,6 +51,8 @@ test('a stopped car can be taken over in place, keeping its paint, body and pose
   assert.equal(traffic.hijackable({ x: npc.x + 1.8, y: npc.y, z: npc.z }), null, 'moving traffic cannot be boarded');
   npc.speed = 0; npc.spin = -5.7;
   const pose = { x: npc.x, y: npc.y, z: npc.z, yaw: npc.yaw, pitch: npc.pitch, roll: npc.roll };
+  const painted = fleet(traffic).children.find(mesh => mesh.instanceColor), instancePaint = new THREE.Color();
+  painted.getColorAt(traffic.cars.indexOf(npc), instancePaint);
   const materials = new Set(); fleet(traffic).traverse(o => { if (o.isMesh && o.geometry.type !== 'PlaneGeometry') materials.add(o.material); });
   let disposed = 0; for (const material of materials) material.addEventListener('dispose', () => disposed++);
   const car = traffic.takeOver(npc);
@@ -51,7 +60,8 @@ test('a stopped car can be taken over in place, keeping its paint, body and pose
   assert.deepEqual(car.root.position.toArray(), [pose.x, pose.y + .04, pose.z]);
   assert.deepEqual(car.root.rotation.toArray(), [pose.pitch, pose.yaw, pose.roll, 'YXZ']);
   assert.equal(car.body, npc.body.id);
-  assert.ok(car.root.children.some(mesh => mesh.isMesh && mesh.material.color.getHex() === car.paint), 'same paint as the instance');
+  assert.equal(car.paint, instancePaint.getHex(), 'same paint as its instance in the fleet');
+  assert.ok(car.root.children.some(mesh => mesh.isMesh && mesh.material.color.getHex() === car.paint), 'the model is painted that colour');
   assert.ok(car.wheels.length === 4 && car.wheels.every(wheel => wheel.rotation.x === -5.7));
   if (npc.body.id !== 'sedan') assert.ok(car.root.children.some(mesh => mesh.isMesh && mesh.scale.z !== 1), 'body proportions carry over');
   car.root.traverse(mesh => { if (mesh.isMesh) assert.equal(mesh.castShadow, false, 'moving cars use contact shadows'); });

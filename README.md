@@ -97,7 +97,7 @@ Health and armor slowly recover out of combat. Defeat returns you to your last r
 
 ## Project layout
 
-Sources are layered, and each layer imports only those before it: `core` → `world` → `traffic` → `engine` → `modes`. `actors` is shared by traffic and modes. [`tests/module-layers.test.js`](tests/module-layers.test.js) enforces this.
+Sources are layered, and each layer imports only those before it: `core` → `world` → `traffic` → `engine` → `modes`. `actors` is shared by traffic, the engine and modes. [`tests/module-layers.test.js`](tests/module-layers.test.js) enforces this.
 
 - `src/main.js` — composition root: creates the engine with the registered modes
 - `src/core/` — renderer-independent physics, collision geometry, spawn search, spatial grid, mesh helpers and quality budgets
@@ -115,7 +115,7 @@ Sources are layered, and each layer imports only those before it: `core` → `wo
   - `pedestrians.js` — walkers and the avatar pool
   - `population.js` — district budgets
   - `car-model.js` — the procedural car
-- `src/actors/` — NPC rigs, appearance, wardrobe, visitors, grounding and speed-aware animation, shared by traffic and modes
+- `src/actors/` — NPC rigs, appearance, wardrobe, visitors, grounding and speed-aware animation, shared by traffic, the engine and modes
 - `src/engine/` — the runtime every mode shares:
   - `game.js` — loop, mode host and picker flow
   - `player/` — characters, locomotion, jumping, climbing and parachute
@@ -166,11 +166,13 @@ The automated suite covers traversal, city generation, campaign state and charac
 - a five-minute drive with no collisions or red-light entries
 - crosswalk yielding
 - pedestrians keeping to sidewalks and walk signals
-- car takeovers Arrival checks include cars blocking tram and refuge destinations. Input and physics regressions cover popup focus restoration, held menu keys, cancelled touch gestures, vehicle exits at every heading, and cars blocking weapon fire. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment, consumables and waypoint elevation. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines.
+- car takeovers
+
+Arrival checks include cars blocking tram and refuge destinations. Input and physics regressions cover popup focus restoration, held menu keys, cancelled touch gestures, vehicle exits at every heading, and cars blocking weapon fire. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment, consumables and waypoint elevation. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines.
 
 Earlier browser verification covered the first chapter, driving, save continuation, workshop purchases, fast travel, story choices and journal/map layouts at desktop and phone sizes. Those checks predate the current city layout; current road, building and traversal validation is described in [CITY-RENDERING.md](docs/CITY-RENDERING.md). Mobile verification uses browser emulation, not a physical-device performance certification. Production compilation can use `npm run build -- --configLoader runner` in Windows environments that restrict esbuild’s ancestor-directory access.
 
-The geometry regression suite scans all 900 city blocks with the live story reservations. It checks building and interchange signs against rendered bridge solids, all 63 interactable labels across camera angles, tree crowns against buildings and infrastructure, supported streetlights, and rail clearance at curved road joins. The title layout uses a bounded content area, with two columns on short landscape screens and gameplay readouts hidden until play. With Playwright available, run `node scripts/check_mobile_layout.mjs` against the dev server (`LAYOUT_URL` overrides its default `http://127.0.0.1:5174`; `PLAYWRIGHT_MODULE` can select an existing installation). It renders the real mode cards and story HUD panels, checks 38 title/HUD layouts using fallback fonts and saves screenshots in `test-results/mobile-layout/`.
+The geometry regression suite scans all 900 city blocks with the live story reservations. It checks building and interchange signs against rendered bridge solids, all 63 interactable labels across camera angles, tree crowns against buildings and infrastructure, supported streetlights, and rail clearance at curved road joins. The title layout uses a bounded content area, with two columns on short landscape screens and gameplay readouts hidden until play. With Playwright available, run `node scripts/check_mobile_layout.mjs` against the dev server (`LAYOUT_URL` overrides its default `http://127.0.0.1:5174`; `PLAYWRIGHT_MODULE` can select an existing installation). It renders the real mode cards and each mode's HUD panels, checks 57 title and HUD layouts (19 viewports, each with the title, Story and Free roam) using fallback fonts, and saves screenshots in `test-results/mobile-layout/`.
 
 NPC/voice verification inspected all seven cast models and their portraits, opened Mara and Rook conversations, accepted a job, exercised replay/mute/exit, reloaded saved voice preferences, and checked portrait (390 × 844) and landscape (844 × 390) layouts. The production build loaded without console errors and omitted development diagnostics. The test browser initially reported speech playback starting, then its native service returned `synthesis-failed`, including for standalone default-voice utterances outside the game. Error fallback was verified; reliable audible playback and voice quality still require checking on the target device.
 

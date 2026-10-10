@@ -117,8 +117,8 @@ Indoors the player jogs rather than sprints, and the camera moves closer. In ver
 `interiors.js` builds merged geometry for each floor in building-local space:
 
 - **Lighting:** it is baked into vertex colors on unlit materials, so no scene lights are added and city shaders never recompile. Some units are dark, reflecting the building's lit or dark facade.
-- **Doors:** pocket doors and street doors slide open as the player approaches.
-- **What is shown:** inside, the current floor ±1. Outside, the lobby of any building whose door is within 25 m. At most one floor is built per frame, and unused floors are released after 1.5 s.
+- **Doors:** pocket doors and street doors slide open as the player approaches. Interior doorways are 1.1 m wide, so the player passes through at an angle in any building rotation.
+- **What is shown:** inside, the current floor ±1. Outside on foot, the lobby of any building whose door is within 25 m; nothing new is built while driving. At most one floor is built per frame, and unused floors are released after 1.5 s.
 - **Shell cut-outs:** the facade, industrial, stone and glass materials share a small clip uniform set. Up to four street doorways are cut out of the shell once their lobby exists. For the occupied building, its cavity discards exterior trim such as balcony rings that would otherwise cross the rooms.
 
 ## Traffic
@@ -133,20 +133,21 @@ Indoors the player jogs rather than sprints, and the camera moves closer. In ver
 - 111 bends where one street continues into another
 - 28 dead ends
 
-Junctions are at-grade crossings within 0.7 m of height, and road ends that meet another road. A bridge over a street is not a junction. Every approach measures how far along it the kerbs clear the other streets. Its crosswalk and stop line sit beyond that point; stop lines move back a little more on streets under 9 m wide, so turning cars clear the waiting queue.
+Junctions are at-grade crossings within 0.7 m of height, and road ends that meet another road. A bridge over a street is not a junction. Every approach measures how far along it the kerbs clear the other streets. Its crosswalk and stop line sit beyond that point; stop lines move back a little more on streets under 9 m wide, so turning cars clear the waiting queue. When a bend lies just before a junction and leaves a lane too short to hold a car, cars wait for the junction before the bend. In 53 places two junctions are too close for a car to wait between them; cars cross each such pair as one (see [close junctions](#vehicles)).
 
-- **Lanes.** Traffic drives on the right, with one lane each way, or two on roads at least 19 m wide. Lanes are offset from a smoothed centreline and follow the road's actual height and crossfall.
-- **Turns.** Turn connectors are cubic curves from each arriving lane to the lanes leaving the junction. Right turns use the kerb lane and left turns the inner one. U-turns happen only at dead ends.
+- **Lanes.** Traffic drives on the right, with one lane each way. Roads at least 19 m wide would get two; in the current city the widest road is 16 m, so every road has one. Lanes are offset from a smoothed centreline and follow the road's actual height and crossfall.
+- **Turns.** A turn runs straight into the junction, follows a circular arc round the corner where the two lanes' lines meet, and runs straight out. It uses the widest arc whose path stays on the asphalt. On curving roads it uses the approaches' straight axes instead, or as a last resort a path through the junction's centre. Nearly straight connections are gentle curves. Every lane stays on its road, and no turn cuts more than half a metre past a kerb. On two-lane roads, right turns use the kerb lane and left turns the inner one.
+- **Dead ends.** Cars U-turn at dead ends. They never enter a dead-end stub shorter than 14 m, which is too short to turn round in.
 - **Lazy geometry.** Lanes and connectors are built the first time traffic reaches them, so only nearby streets ever pay for their geometry.
-- **Sidewalks.** Both sides of every street-level road get a sidewalk 2 m beyond the kerb, joined at corners and across kerb-to-kerb crosswalks. Dead ends loop round the road's end. The Upper Market, Citadel concourse and Stacks terrace have their own deck loops, linked to the street by their access ramps.
+- **Sidewalks.** Both sides of street-level roads get a sidewalk 2 m beyond the kerb, joined at corners and across kerb-to-kerb crosswalks. Blocks too short to hold a sidewalk between their junctions' crosswalks have none, so 90 of the 4,768 at-grade approaches have no pedestrian crossing. Dead ends loop round the road's end. The Upper Market, Citadel concourse and Stacks terrace have their own deck loops, linked to the street by their access ramps.
 
 ### Signals
 
-`signals.js` signalizes junctions with four or more at-grade approaches, and those where a secondary or primary road meets. Quieter T-junctions of local streets are give-way junctions; the through road has priority.
+`network.js` signalizes junctions with four or more at-grade approaches, and those where a secondary or primary road meets; `signals.js` times them. Quieter T-junctions of local streets are give-way junctions; the through road has priority.
 
-- **Phases.** Approaches split into two phases by axis. Green lasts 14–22 s, longer for wider roads, followed by 3 s of amber and 1.5 s all-red. Each junction's offset comes from a hash of its ID, so the city's lights are not synchronized.
+- **Phases.** Each road direction gets its own phase. A road's two approaches always share one, and roads meeting in a straight line join it, so streets that cross never share a green. Most junctions run two phases and a few three-road junctions run three. Green lasts 14–22 s, longer for wider roads, followed by 3 s of amber and 1.5 s all-red. Each junction's offset comes from a hash of its ID, so the city's lights are not synchronized.
 - **Pure function of the clock.** No per-frame work is needed for distant junctions.
-- **Walk signal.** People may start across a street while its own traffic is held and the cross street has green. The lamp shows a flashing hand for the last 6 seconds.
+- **Walk signal.** People may start across a street while its own traffic is held and another phase has green. The lamp shows a flashing hand for the last 6 seconds.
 - **Rendering.** Six instanced meshes draw everything for junctions within 170 m: poles, mast arms, three-lamp heads, pedestrian lamps, zebra stripes and stop lines. They are rebuilt after every 40 m the player moves.
 
 ### Vehicles
@@ -156,11 +157,12 @@ Junctions are at-grade crossings within 0.7 m of height, and road ends that meet
 - **Following.** Anything on the planned path ahead counts as a leader: other traffic, the player's car, acquired cars, people and the player on foot. Curves and slower pieces ahead cap the speed for 2.6 m/s² of lateral acceleration, so cars brake before corners.
 - **Junction permission.** A car holds its stop line until it may enter:
   - the light allows it; amber means stop unless stopping would need more than 3.2 m/s²
-  - no conflicting car is inside the junction
+  - no conflicting car is inside the junction (two movements conflict if car-sized boxes swept along both paths would touch)
   - it has given way where required: left turns to oncoming traffic, and give-way approaches to the through road (they slow to look)
   - the exit has room
-- **Commitment.** Once stopping would need a firm brake, the car commits and reserves its path through the junction. Lights one short block ahead are anticipated.
-- **Crosswalks.** Turning cars wait before a crosswalk while anyone is on it, or stepping onto it.
+- **Commitment.** Once stopping would need a firm brake, the car commits and reserves its path through the junction until its tail is a metre past the turn. Lights one short block ahead are anticipated.
+- **Close junctions.** Junctions with no room to wait between them are entered together, on the first one's light and only when every turn through them is free. The car reserves them all, so cross traffic at the next one waits for it to clear, as for any car finishing a turn. Their lights are timed separately and need never be green together.
+- **Crosswalks.** While anyone is on, or stepping onto, a crosswalk the car's turn crosses, the car waits behind its stop line rather than stopping across the near crosswalk. It never moves with someone against its body or front bumper. It doesn't wait for people waiting at the kerb, who in turn never step out through a car standing on the crossing.
 - **Routes.** At each junction cars choose straight, right or left, weighted 6 : 2.5 : 1.5.
 - **Appearance.** Three body proportions and ten paints. Front wheels steer, the body pitches under braking and acceleration and rolls in turns, and brake lights and blinking indicators are separate instanced quads. The fleet is at most 16 cars in one instanced draw per car part.
 - **Spawning.** Cars spawn out of view, never at a stop line, at a speed they can stop from, and leave once out of view beyond the traffic radius. A scene cut repopulates at once.
@@ -170,8 +172,8 @@ Junctions are at-grade crossings within 0.7 m of height, and road ends that meet
 `pedestrians.js` animates the 28-avatar pool: twenty people and eight robots and aliens.
 
 - **Routes.** Walkers follow the sidewalk graph and only turn back at a dead end. They steer toward a point 1.6 m ahead, turning at no more than 2.6 rad/s.
-- **Passing.** Each walker keeps to their own side; they pass slower people and step aside for oncoming ones. Buildings, trees and props are avoided through clear lateral positions sampled every 1.5 m along each sidewalk; a stretch nobody can pass is left out.
-- **Crossing.** Walkers wait at the kerb for the walk signal, or for a gap at give-way crossings. They never step out in front of a car already at the crossing, and cross a little faster.
+- **Passing.** Each walker keeps to their own side; they pass slower people and step aside for oncoming ones. Buildings, trees and props are avoided through clear lateral positions sampled every 0.75 m along each sidewalk. Walkers keep to a position that stays clear from a metre behind to three metres ahead, and a stretch nobody can pass is left out. When two people are in each other's way, for example one stepping onto a crosswalk as another steps off it, the one with the lower ID goes first. Walkers wait behind a queue heading the same way. After 1.5 s they squeeze past anyone else standing in the path, such as someone at the kerb for another crossing, a chatting group or the player.
+- **Crossing.** Walkers wait at the kerb for the walk signal, or for a gap at give-way crossings. They never step out in front of a car already at the crossing, nor through one standing on it. They cross a little faster and finish the crossing before turning onto the next path.
 - **Everyday behaviour.** Some pause to look around or check a phone, and some stand chatting in groups of two or three, with procedural head, chest and arm gestures over their idle. Pairs walk side by side, in single file over kerbs, and a few jog using the Jog clip. Robots and aliens walk at the pace their gait was authored for.
 - **Placement.** Feet stay on the ground at all times. A 6 m visibility hysteresis prevents popping at the edge of the actor range. After the first fill, new people arrive two at a time, every 0.35 s, out of view.
 
@@ -183,7 +185,7 @@ The car becomes a full model with the same paint, proportions and pose, and join
 
 ## Modules and APIs
 
-Sources are layered: `core` ← `world` ← `traffic` ← `engine` ← `modes`. `actors` (character rigs) is shared by traffic and modes, and `tools` is unrestricted. [`tests/module-layers.test.js`](../tests/module-layers.test.js) enforces the direction. The world never imports traffic, the engine or a mode.
+Sources are layered: `core` ← `world` ← `traffic` ← `engine` ← `modes`. `actors` (character rigs) is shared by traffic, the engine and modes, and `tools` is unrestricted. [`tests/module-layers.test.js`](../tests/module-layers.test.js) enforces the direction. The world never imports traffic, the engine or a mode.
 
 ```js
 import { createWorld } from './src/world/index.js';
@@ -237,14 +239,15 @@ The automated suites cover deterministic district generation, bounded blueprint 
 
 Traffic tests build the real network and a small test grid. They check:
 
-- connectors joining the right lanes, and signal phases never giving conflicting greens
-- crosswalks on every at-grade approach, and one connected sidewalk network
-- a five-minute drive through two districts with no collisions, no red-light entries and acceleration within the model's limits; cars stop behind the line, turn both ways and show brake lights while slowing
-- turning cars waiting for people on a crosswalk, give-way junctions clearing without deadlock, and bridges ignoring people below
-- pedestrians keeping budgets and spacing, staying off the carriageway except on crosswalks, starting across only on the walk signal, turning back only at dead ends, and showing every everyday behaviour
-- the three-hit takeover and E takeovers
+- connectors joining the right lanes, every lane keeping a way out, lanes and turns staying on the asphalt, and signal phases never giving conflicting greens
+- crosswalks on every approach of a test grid's junctions, and one connected sidewalk network
+- a five-minute drive through two districts with no collisions, no red-light entries, no car touching a walker and acceleration within the model's limits; cars stop behind the line, turn both ways and show brake lights while slowing
+- turning cars waiting for people on a crosswalk, give-way junctions clearing without deadlock, close junctions crossed as one without collisions (including signalized pairs that are never green together), bridges ignoring people below, and cars stopping for the player and the player's car
+- pedestrians keeping budgets and spacing, staying off the carriageway except on crosswalks, starting across only on the walk signal, turning back only at dead ends and showing every everyday behaviour
+- walkers keeping clear of props, getting past the player, and getting past each other at corners and kerbs
+- the three-hit takeover, E takeovers and graphics quality caps
 
-Headless five-minute runs in eight districts found no collisions, no red-light entries and no stuck cars, at about 0.1 ms per frame for the whole traffic update. Sign coverage, street-facing visibility, atlas reuse and buffer release are checked for all seven building types, along with first-load visibility of distant tower tops.
+Headless three-minute runs around all thirteen districts and fifteen sampled junctions found no collisions between cars and nobody stuck. The longest waits, about 40 s, were at red lights on three-phase junctions and behind the stationary test player. No walker stood in another's way for longer than a don't-walk phase. A five-minute run with about 24 walkers had no frame where a car touched one. Excluding avatar animation, the whole traffic update takes about 0.1 ms per frame, or 0.17 ms at the 95th percentile. Sign coverage, street-facing visibility, atlas reuse and buffer release are checked for all seven building types, along with first-load visibility of distant tower tops.
 
 The building-variety checks cover distinct silhouettes and independent finishes, supported roof equipment, rotated roof raycasts versus collision, all six facade tiles, selective window emission, shared material batches and UV-buffer regeneration after eviction. District previews were inspected at Eastpoint, Ember Heights, Foundry, Citadel and Shadowmarket. The live game was checked in High and Performance modes without console or shader errors. These browser checks do not establish physical-device frame rates.
 

@@ -30,5 +30,7 @@ test('the world module builds the whole static city without any game mode', () =
   assert.equal(scene.fog.density, .0035);
   world.dispose();
   assert.equal(scene.fog, null);
+  assert.equal(scene.environment, null);
   assert.ok(!scene.children.includes(world.atmosphere.sky));
+  assert.ok(!scene.children.includes(world.ground) && !scene.children.includes(world.water), 'terrain and water leave with the world');
 });

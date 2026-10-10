@@ -5,11 +5,13 @@ import { createVerticalCity } from '../src/world/vertical-city.js';
 import { WorldStream } from '../src/world/world-stream.js';
 import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { MASTER_DISTRICTS as DISTRICTS } from '../src/world/master-plan.js';
-import { cachedInteriorPlan, levelY, INTERIOR } from '../src/world/interior-plan.js';
-import { interiorHull, interiorContext, toWorld, toLocal } from '../src/world/interior-physics.js';
-import { circleHitsBox, overlapsHeight, rayBoxDistance, rayObstructionDistance, supportHeight } from '../src/core/physics.js';
+import { cachedInteriorPlan, levelY, floorPlan, INTERIOR } from '../src/world/interior-plan.js';
+import { interiorHull, interiorContext, interiorSpatial, toWorld, toLocal } from '../src/world/interior-physics.js';
+import { circleHitsBox, overlapsHeight, rayBoxDistance, rayObstructionDistance, supportHeight, moveWithCollisions } from '../src/core/physics.js';
+import { footVelocity } from '../src/engine/player/locomotion.js';
+import { stepJump } from '../src/engine/player/jump.js';
 import { findSpawnPosition } from '../src/core/spawn.js';
-import { polygonFaces } from '../src/world/building-footprints.js';
+import { polygonFaces, pointInConvex, insetConvex } from '../src/world/building-footprints.js';
 import { interiorClipUniforms, patchInteriorClip, createFacadeMaterial } from '../src/world/building-materials.js';
 import { findPath, walk } from './helpers/interior-walk.js';
 
@@ -141,4 +143,42 @@ test('the interior clip patches exterior materials without changing their other 
   assert.match(facade.customProgramCacheKey(), /building-facade-atlas-v4\|interior-clip/);
   assert.ok(city.interiorClip.interiorDoorCenter.value.length === 4);
   assert.ok(INTERIOR.hull > 0);
+});
+
+test('unit, lift and room doors let the player through in rotated buildings, at 30 and 60 FPS, even approached off-centre', () => {
+  // Rotation away from the city grid, folded into 0–45°.
+  const tilt = p => { const a = Math.abs(((p.yaw * 180 / Math.PI) % 90 + 90) % 90); return Math.min(a, 90 - a); };
+  const rotated = [];
+  for (const d of DISTRICTS) for (const block of city.metropolis.area(d.x - 120, d.z - 120, d.x + 120, d.z + 120)) for (const p of block.buildings) {
+    const plan = tilt(p) > 20 && cachedInteriorPlan(p);
+    if (plan && plan.levels >= 2 && rotated.length < 6 && !rotated.some(r => r.plan === plan)) rotated.push({ p, plan });
+  }
+  assert.ok(rotated.length >= 4, 'the city has rotated multi-storey buildings to test');
+  let walked = 0;
+  for (const { plan } of rotated) {
+    const level = 1, y = levelY(plan, level), t = floorPlan(plan, level).template;
+    for (const door of t.doors.slice(0, 4)) {
+      const room = t.rooms.find(r => r.id === door.rooms[0]);
+      if (!t.zones.filter(z => z.room === room.id).some(z => insetConvex(z.polygon, .5).length)) continue;
+      const wall = t.walls.find(w => w.id === door.wall), length = Math.hypot(wall.b.x - wall.a.x, wall.b.z - wall.a.z);
+      const ux = (wall.b.x - wall.a.x) / length, uz = (wall.b.z - wall.a.z) / length, nx = -uz, nz = ux;
+      const outside = t.zones.filter(z => z.room === door.rooms[1] || t.rooms.find(r => r.id === door.rooms[1])?.kind === 'landing' && z.kind === 'landing');
+      const side = outside.some(z => pointInConvex(z.polygon, door.x + nx * .3, door.z + nz * .3)) ? 1 : -1;
+      for (const fps of [30, 60]) for (const [shift, turn] of [[0, 0], [.08, 0], [-.08, 0], [0, .09], [0, -.09]]) {
+        const start = { x: door.x + nx * side * .7 + ux * shift, z: door.z + nz * side * .7 + uz * shift }, from = toWorld(plan, start.x, start.z);
+        const ahead = toWorld(plan, start.x - side * nx, start.z - side * nz), yaw = Math.atan2(-(ahead.x - from.x), -(ahead.z - from.z)) + turn;
+        const player = { x: from.x, z: from.z, y, vx: 0, vz: 0, velocityY: 0, jumpPhase: '', groundY: y };
+        for (let frame = 0; frame < fps * 1.6; frame++) {
+          const spatial = interiorSpatial(city.spatial, interiorContext(plan, player.x, player.y, player.z));
+          const delta = footVelocity(player, { x: 0, y: 1 }, yaw, 1 / fps, {});
+          moveWithCollisions(player, delta.x, delta.z, .43, spatial.near(player.x, player.z, 3));
+          stepJump(player, 1 / fps, supportHeight(player.x, player.z, spatial.near(player.x, player.z, 2), player.y + .35, -100));
+        }
+        const end = toLocal(plan, player.x, player.z), through = ((end.x - door.x) * nx + (end.z - door.z) * nz) * side;
+        assert.ok(through < -.3, `${plan.id} ${door.id} (${door.kind}) at ${fps} FPS, ${shift} m off-centre, ${turn} rad: stopped ${through.toFixed(2)} m from the doorway`);
+        walked++;
+      }
+    }
+  }
+  assert.ok(walked >= 60);
 });

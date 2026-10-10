@@ -21,12 +21,14 @@ function files(dir) {
   });
 }
 const layerOf = file => path.relative(src, file).split(path.sep)[0];
+// Relative module specifiers from static (`from '…'`), side-effect (`import '…'`) and dynamic (`import('…')`) imports.
+const imports = text => [...text.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)['"](\.[^'"]+)['"]/g)].map(match => match[1]);
 
 test('layers only import from the layers beneath them', () => {
   const violations = [];
   for (const [layer, allowed] of Object.entries(ALLOWED)) for (const file of files(path.join(src, layer))) {
     const text = readFileSync(file, 'utf8');
-    for (const [, spec] of text.matchAll(/\bfrom\s*['"](\.[^'"]+)['"]/g)) {
+    for (const spec of imports(text)) {
       const target = layerOf(path.resolve(path.dirname(file), spec));
       if (!allowed.includes(target)) violations.push(`${path.relative(src, file)} → ${spec}`);
     }
@@ -39,11 +41,15 @@ test('game modes are plug-ins: they never import another mode, and the engine im
   for (const file of files(path.join(src, 'modes'))) {
     const own = path.relative(path.join(src, 'modes'), file).split(path.sep);
     if (own.length < 2) continue; // modes/index.js is the registry
-    for (const [, spec] of readFileSync(file, 'utf8').matchAll(/\bfrom\s*['"](\.[^'"]+)['"]/g)) {
+    for (const spec of imports(readFileSync(file, 'utf8'))) {
       const target = path.relative(src, path.resolve(path.dirname(file), spec)).split(path.sep);
       if (target[0] === 'modes' && target[1] !== own[0]) violations.push(`${path.relative(src, file)} → ${spec}`);
       if (target[0] === 'tools') violations.push(`${path.relative(src, file)} → ${spec}`);
     }
   }
   assert.deepEqual(violations, []);
+});
+
+test('the layer check sees every form of import', () => {
+  assert.deepEqual(imports(`import a from './a.js';\nimport './side.css';\nconst b = await import('../b.js');\nexport { c } from "./c.js";`), ['./a.js', './side.css', '../b.js', './c.js']);
 });

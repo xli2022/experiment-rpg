@@ -68,8 +68,11 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
     return list;
   }
   function people(player, vehicle) {
-    const list = pedestrians.walkers.map(p => ({ x: p.x, y: p.y, z: p.z, r: p.claim ? 1 : .35, kind: 'walker' }));
-    if (!vehicle) list.push({ x: player.x, y: player.y, z: player.z, r: .45, kind: 'player' });
+    // Someone stepping onto or crossing a crosswalk claims more of the street ahead of cars.
+    // People waiting at the kerb (and a companion waiting with them) hold back for cars.
+    const list = pedestrians.walkers.map(p => ({ x: p.x, y: p.y, z: p.z, r: p.claim ? 1 : .35, size: .35, kind: 'walker',
+      waiting: p.mode === 'wait' || p.mode === 'follow' && p.leader?.mode === 'wait' }));
+    if (!vehicle) list.push({ x: player.x, y: player.y, z: player.z, r: .45, size: .45, kind: 'player' });
     return list;
   }
   function takeOver(car) {
@@ -91,7 +94,7 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
       scanTime -= dt;
       if (scanTime <= 0 || first) { scanTime = .7; populate(player, camera); }
       vehicles.update(dt, { time, bodies: bodies(player, vehicle), walkers: people(player, vehicle), crossings: pedestrians.crossings() });
-      pedestrians.update(dt, { player, onFoot: !vehicle, camera, radius: range, time, cars, population });
+      pedestrians.update(dt, { player, onFoot: !vehicle, camera, radius: range, time, cars: owned.length ? [...cars, ...owned] : cars, population });
       props.update(time, player);
       vehicles.sync(time);
       first = false;

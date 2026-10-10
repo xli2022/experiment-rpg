@@ -1,24 +1,43 @@
 import * as THREE from 'three';
 import { rightOf } from './network.js';
 
-// Two-phase traffic signals. Every state is a pure function of the clock, so a
+// Phased traffic signals: one phase per road direction, so streets that cross
+// never share a green. Every state is a pure function of the clock, so a
 // distant junction costs nothing and a reload resumes the same cycle.
 
 export const SIGNAL_TIMING = { amber: 3, allRed: 1.5, minGreen: 14, maxGreen: 22 };
+// Roads whose axes are within this angle run together (a road and its continuation).
+const PARALLEL = 20 * Math.PI / 180;
 const hash = id => { let h = 2166136261; for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619); return (h >>> 0) / 4294967296; };
+const axisOf = dir => ((Math.atan2(dir.z, dir.x) % Math.PI) + Math.PI) % Math.PI;
+const apart = (p, q) => { const d = Math.abs(p - q) % Math.PI; return Math.min(d, Math.PI - d); };
 
-/** Phase per approach (0 runs along the junction's main axis), green times, cycle and offset. */
+/**
+ * Phases for a signalized junction: a road's approaches always share a phase,
+ * roads meeting in a line join it, and every other direction gets its own.
+ * The main road's phase comes first. Returns the phase per approach, green
+ * times, cycle length, offset and phase start times.
+ */
 export function signalPlan(node) {
   if (node.signal) return node.signal;
+  const roads = [];
+  for (const a of node.approaches) {
+    const road = roads.find(r => r.road === a.edge.road);
+    if (road) road.members.push(a); else roads.push({ road: a.edge.road, members: [a], axis: axisOf(a.dir), main: a.major, width: a.width });
+  }
+  roads.sort((p, q) => q.main - p.main || q.width - p.width);
+  const groups = [];
+  for (const road of roads) {
+    const group = groups.find(g => apart(g.axis, road.axis) < PARALLEL);
+    if (group) group.members.push(...road.members); else groups.push({ axis: road.axis, members: [...road.members] });
+  }
   const phase = new Map();
-  for (const a of node.approaches) phase.set(a, Math.abs(a.dir.x * node.axis.x + a.dir.z * node.axis.z) >= Math.SQRT1_2 ? 0 : 1);
-  if (![...phase.values()].includes(1)) for (const a of node.approaches) if (!a.major) phase.set(a, 1);
-  const green = [0, 1].map(p => {
-    const widths = node.approaches.filter(a => phase.get(a) === p).map(a => a.width);
-    return Math.min(SIGNAL_TIMING.maxGreen, Math.max(SIGNAL_TIMING.minGreen, 8 + Math.max(0, ...widths) * .65));
-  });
-  const change = SIGNAL_TIMING.amber + SIGNAL_TIMING.allRed, cycle = green[0] + green[1] + 2 * change;
-  node.signal = { phase, green, cycle, offset: hash(node.id) * cycle, starts: [0, green[0] + change] };
+  groups.forEach((group, p) => { for (const a of group.members) phase.set(a, p); });
+  const green = groups.map(group => Math.min(SIGNAL_TIMING.maxGreen, Math.max(SIGNAL_TIMING.minGreen, 8 + Math.max(...group.members.map(a => a.width)) * .65)));
+  const change = SIGNAL_TIMING.amber + SIGNAL_TIMING.allRed, starts = [];
+  let cycle = 0;
+  for (const g of green) { starts.push(cycle); cycle += g + change; }
+  node.signal = { phase, green, cycle, offset: hash(node.id) * cycle, starts, phases: groups.length };
   return node.signal;
 }
 
@@ -32,14 +51,15 @@ export function signalState(node, approach, time) {
   return { color: 'red', remaining: plan.cycle - t };
 }
 
-/** Whether pedestrians may start crossing the street of `approach`: they walk beside the green phase. */
+/** Whether pedestrians may start crossing the street of `approach`: while another phase has green. */
 export function walkState(node, approach, time) {
   if (!node.signalized) return { walk: true, remaining: Infinity, controlled: false };
-  const own = signalState(node, approach, time);
-  if (own.color !== 'red') return { walk: false, remaining: 0, controlled: true };
-  const other = node.approaches.find(a => signalPlan(node).phase.get(a) !== signalPlan(node).phase.get(approach));
-  const cross = other ? signalState(node, other, time) : { color: 'red', remaining: 0 };
-  return { walk: cross.color === 'green', remaining: cross.color === 'green' ? cross.remaining : 0, controlled: true };
+  const plan = signalPlan(node), own = plan.phase.get(approach), t = (((time + plan.offset) % plan.cycle) + plan.cycle) % plan.cycle;
+  for (let p = 0; p < plan.phases; p++) {
+    if (p === own || t < plan.starts[p] || t >= plan.starts[p] + plan.green[p]) continue;
+    return { walk: true, remaining: plan.starts[p] + plan.green[p] - t, controlled: true };
+  }
+  return { walk: false, remaining: 0, controlled: true };
 }
 
 const LAMP_COLORS = { red: [3.2, .16, .12], amber: [3, 1.35, .08], green: [.2, 2.6, 1.2], walk: [2.2, 2.4, 2.3], stop: [2.6, .7, .1] };

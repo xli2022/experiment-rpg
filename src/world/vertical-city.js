@@ -617,7 +617,17 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     return null;
   };
   const planNear = (x, z) => metropolis.buildingsNear(x, z, 1).map(cachedInteriorPlan).find(Boolean) ?? null;
-  return { ground, water, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
+  // Everything this city put in the scene, and the materials and textures it made.
+  function dispose() {
+    scene.remove(ground, water, ...signs);
+    const materials = new Set([...Object.values(mats), ...Object.values(terrain), pedestrianPaving, buildingSigns, water.material, ...signs.map(sign => sign.material)]);
+    for (const geometry of new Set([ground.geometry, water.geometry, ...signs.map(sign => sign.geometry)])) geometry.dispose();
+    for (const material of materials) {
+      for (const key of ['map', 'emissiveMap', 'normalMap', 'roughnessMap', 'alphaMap']) material[key]?.dispose?.();
+      material.dispose();
+    }
+  }
+  return { ground, water, signs, dispose, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
     interiorContextAt, planNear, interiorClip, spatialFor: context => context ? interiorSpatial(spatial, context) : spatial,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

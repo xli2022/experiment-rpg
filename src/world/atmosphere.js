@@ -65,6 +65,7 @@ export function createAtmosphere(scene, { renderer = null, quality = 'high' } = 
     },
     dispose() {
       for (const object of [sky, rain, motes, hemisphere, moon, rim]) { scene.remove(object); object.geometry?.dispose(); object.material?.dispose(); }
+      if (environment && scene.environment === environment.texture) scene.environment = null;
       environment?.dispose(); scene.fog = null;
     },
   };

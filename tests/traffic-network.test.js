@@ -5,13 +5,15 @@ import { signalPlan, signalState, walkState, SIGNAL_TIMING } from '../src/traffi
 import { createMasterPlan } from '../src/world/master-plan.js';
 import { gridPlan, streetPlan } from './helpers/street-grid.js';
 
-const plan = createMasterPlan();
-const started = performance.now(), network = buildNetwork(plan), buildTime = performance.now() - started;
+const plan = createMasterPlan(), network = buildNetwork(plan);
 const near = (a, b, tolerance = 1e-6) => Math.hypot(a.x - b.x, a.z - b.z) < tolerance && Math.abs(a.y - b.y) < tolerance;
 
 test('the city road network builds junctions, lanes and walkways quickly and deterministically', () => {
-  // About 200 ms on its own; the ceiling only guards against regressions while test files run in parallel.
-  assert.ok(buildTime < 2500, `network build took ${buildTime.toFixed(0)} ms`);
+  // About 200 ms on its own. The best of three builds, with a generous ceiling,
+  // keeps this a regression guard rather than a measure of a busy machine.
+  let fastest = Infinity;
+  for (let i = 0; i < 3; i++) { const started = performance.now(); buildNetwork(plan); fastest = Math.min(fastest, performance.now() - started); }
+  assert.ok(fastest < 2500, `network build took ${fastest.toFixed(0)} ms`);
   const junctions = network.nodes.filter(n => n.kind === 'junction');
   assert.ok(junctions.length > 1000 && network.nodes.filter(n => n.signalized).length > 400);
   assert.ok(network.nodes.some(n => n.kind === 'junction' && !n.signalized && n.ground), 'quiet T-junctions are give-way, not signalized');
@@ -35,22 +37,59 @@ test('junctions only join roads at the same grade', () => {
 });
 
 test('turn connectors join the end of one lane to the start of the right lane in every junction', () => {
-  const sample = network.nodes.filter(n => n.kind === 'junction').slice(0, 300);
   let turns = { left: 0, right: 0, straight: 0 };
-  for (const node of sample) for (const c of network.connectorsAt(node)) {
+  for (const node of network.nodes.filter(n => n.kind === 'junction')) for (const c of network.connectorsAt(node)) {
     assert.ok(near(c.path.points[0], c.from.path.points.at(-1)), `${c.id} starts where its lane ends`);
     assert.ok(near(c.path.points.at(-1), c.to.path.points[0]), `${c.id} ends where its exit lane starts`);
     assert.equal(c.from.end, node); assert.equal(c.to.start, node);
     assert.notEqual(c.turn, 'uturn', 'no U-turns inside junctions');
-    if (c.from.count > 1 && c.turn === 'right') assert.equal(c.from.index, c.from.count - 1, 'right turns leave from the kerb lane');
-    if (c.from.count > 1 && c.turn === 'left') assert.equal(c.from.index, 0, 'left turns leave from the inner lane');
-    if (c.turn === 'right') assert.equal(c.to.index, c.to.count - 1);
     turns[c.turn]++;
   }
-  assert.ok(turns.left > 100 && turns.right > 100 && turns.straight > 100);
-  for (const lane of network.lanes.slice(0, 2000)) assert.ok(lane.next.length > 0, `${lane.id} has a way out`);
-  const end = network.nodes.find(n => n.kind === 'end'), uturns = network.connectorsAt(end);
-  assert.ok(uturns.length && uturns.every(c => c.turn === 'uturn'), 'dead ends turn traffic around');
+  assert.ok(turns.left > 1000 && turns.right > 1000 && turns.straight > 1000);
+  // Every lane has a way out, except lanes into dead-end stubs too short to turn
+  // round in, which no turn ever enters.
+  const entered = new Set(network.nodes.flatMap(n => network.connectorsAt(n)).map(c => c.to));
+  for (const lane of network.lanes) {
+    if (lane.next.length) continue;
+    const stub = lane.edge.length < 14 && (lane.edge.from.kind === 'end' || lane.edge.to.kind === 'end');
+    assert.ok(stub && lane.end.kind === 'end' && !entered.has(lane), `${lane.id} has a way out`);
+  }
+  const end = network.nodes.find(n => n.kind === 'end' && network.connectorsAt(n).length), uturns = network.connectorsAt(end);
+  assert.ok(uturns.every(c => c.turn === 'uturn'), 'dead ends turn traffic around');
+});
+
+test('on two-lane roads turns use the matching lane and every lane keeps a way out', () => {
+  // The city's widest road is 16 m, so two-lane behaviour is checked on a wide test grid.
+  const wide = buildNetwork(gridPlan({ width: 20 })), checked = { left: 0, right: 0, straight: 0, uturn: 0 };
+  assert.ok(wide.lanes.every(lane => lane.count === 2));
+  for (const node of wide.nodes) for (const c of wide.connectorsAt(node)) {
+    checked[c.turn]++;
+    if (c.turn === 'right') assert.ok(c.from.index === 1 && c.to.index === 1, `${c.id}: right turns run kerb lane to kerb lane`);
+    if (c.turn === 'left') assert.ok(c.from.index === 0 && c.to.index === 0, `${c.id}: left turns run inner lane to inner lane`);
+    if (c.turn === 'straight' || c.turn === 'uturn') assert.equal(c.to.index, c.from.index, `${c.id} keeps its lane`);
+  }
+  assert.ok(checked.left && checked.right && checked.straight && checked.uturn);
+  for (const lane of wide.lanes) assert.ok(lane.next.length > 0, `${lane.id} has a way out`);
+});
+
+test('lanes and turns stay on the asphalt', () => {
+  const offRoad = (p, roads) => {
+    let best = Infinity;
+    for (const s of plan.roadIndex.near(p.x, p.z, 4)) {
+      if (!roads.includes(s.road)) continue;
+      const dx = s.b.x - s.a.x, dz = s.b.z - s.a.z, length = Math.hypot(dx, dz) || 1e-9, overlap = s.supportOverlap ?? .12;
+      const along = ((p.x - s.a.x) * dx + (p.z - s.a.z) * dz) / length, across = Math.abs((-(p.x - s.a.x) * dz + (p.z - s.a.z) * dx) / length);
+      best = Math.min(best, Math.hypot(Math.max(0, -overlap - along, along - length - overlap), Math.max(0, across - s.width / 2)));
+    }
+    return best;
+  };
+  for (const lane of network.lanes) for (const p of lane.path.points) assert.ok(offRoad(p, [lane.edge.road]) < .25, `${lane.id} leaves ${lane.edge.road.id}`);
+  let worst = 0;
+  for (const node of network.nodes) for (const c of network.connectorsAt(node)) {
+    if (c.turn === 'uturn') continue;
+    for (const p of c.path.points) worst = Math.max(worst, offRoad(p, [c.from.edge.road, c.to.edge.road]));
+  }
+  assert.ok(worst < .5, `turns cut at most a kerb's width beyond the asphalt (${worst.toFixed(2)} m)`);
 });
 
 test('lanes keep right of the centreline and follow the road surface', () => {
@@ -65,24 +104,36 @@ test('lanes keep right of the centreline and follow the road surface', () => {
   }
 });
 
-test('signal phases never show conflicting greens and always include a clearance interval', () => {
-  for (const node of network.nodes.filter(n => n.signalized).slice(0, 200)) {
-    const { cycle, phase, green } = signalPlan(node);
+test('signal phases never give crossing streets green together, and every crosswalk gets its walk', () => {
+  let phases = 0;
+  for (const node of network.nodes.filter(n => n.signalized)) {
+    const { cycle, phase, green, starts } = signalPlan(node);
     assert.ok(green.every(g => g >= SIGNAL_TIMING.minGreen && g <= SIGNAL_TIMING.maxGreen));
-    assert.equal(cycle, green[0] + green[1] + 2 * (SIGNAL_TIMING.amber + SIGNAL_TIMING.allRed));
+    assert.equal(cycle, green.reduce((sum, g) => sum + g + SIGNAL_TIMING.amber + SIGNAL_TIMING.allRed, 0));
+    assert.equal(new Set(phase.values()).size, green.length, `${node.id}: every phase has approaches`);
+    for (const a of node.approaches) if (a.partner) assert.equal(phase.get(a), phase.get(a.partner), 'a road runs as one');
+    phases = Math.max(phases, green.length);
     let allRed = 0;
+    const walked = new Set(), greened = new Set();
     for (let t = 0; t < cycle; t += .25) {
-      const states = node.approaches.map(a => [a, signalState(node, a, t)]);
-      const moving = states.filter(([, s]) => s.color !== 'red').map(([a]) => phase.get(a));
-      assert.ok(new Set(moving).size <= 1, `${node.id} gives conflicting phases right of way at ${t}`);
+      const moving = node.approaches.filter(a => signalState(node, a, t).color !== 'red');
+      // Judged by geometry, not by the phase table under test.
+      for (const a of moving) for (const b of moving) {
+        if (a.edge.road !== b.edge.road) assert.ok(Math.abs(a.dir.x * b.dir.x + a.dir.z * b.dir.z) > .9, `${node.id}: crossing streets ${a.index} and ${b.index} share a green at ${t}`);
+      }
       if (!moving.length) allRed++;
-      for (const [a, s] of states) {
+      for (const a of moving) if (signalState(node, a, t).color === 'green') greened.add(a);
+      for (const a of node.approaches) {
         const walk = walkState(node, a, t);
-        if (walk.walk) assert.equal(s.color, 'red', 'people only cross a street while its own traffic is held');
+        if (walk.walk) { walked.add(a); assert.equal(signalState(node, a, t).color, 'red', 'people only cross a street while its own traffic is held'); }
       }
     }
-    assert.ok(allRed > 0);
+    assert.ok(allRed > 0, `${node.id} has a clearance interval`);
+    assert.equal(greened.size, node.approaches.length, `${node.id}: every approach gets green`);
+    assert.equal(walked.size, node.approaches.length, `${node.id}: every crosswalk gets its walk`);
+    assert.ok(starts.every((start, p) => p === 0 || start > starts[p - 1]));
   }
+  assert.ok(phases >= 3, 'a three-road junction runs three phases');
   const offsets = new Set(network.nodes.filter(n => n.signalized).slice(0, 50).map(n => signalPlan(n).offset.toFixed(2)));
   assert.ok(offsets.size > 40, 'junctions are not synchronized');
   const t = network.nodes.find(n => n.signalized && n.approaches.length === 3);

@@ -17,7 +17,7 @@ try {
     const context = await browser.newContext({ isMobile: touch, hasTouch: touch, deviceScaleFactor: 1 });
     const page = await context.newPage();
     // Exercise the real HTML/CSS without allocating a WebGL city per viewport:
-    // the real mode cards on the title screen and the story's HUD panels in play.
+    // the real mode cards on the title screen, then each mode's own HUD panels in play.
     // Block web fonts too: fallback typography must not make text overlap.
     await page.route('https://fonts.googleapis.com/**', route => route.abort());
     // The touch class is set before the mode modules load, as the game's input does.
@@ -26,7 +26,10 @@ try {
       document.querySelector('#loading').remove();
       const [{ MODES }, { modeCards }, { createStoryHud }] = await Promise.all(['/src/modes/index.js', '/src/engine/mode-picker.js', '/src/modes/story/hud.js'].map(path => import(path)));
       document.querySelector('#mode-cards').innerHTML = modeCards(MODES, localStorage);
-      createStoryHud({ hud: { mount: element => document.getElementById('hud').append(element) }, renderer: { domElement: document.body } }, { journal() {}, medkit() {} });
+      const mount = element => document.getElementById('hud').append(element);
+      createStoryHud({ hud: { mount }, renderer: { domElement: document.body } }, { journal() {}, medkit() {} });
+      await MODES.find(mode => mode.id === 'free-roam').create({ world: { districts: Array(13), landmarks: [] }, storage: localStorage, player: { state: {} },
+        clock: {}, hud: { mount }, ui: { legend() {} } }, {});
       window.__layoutReady = true;
     ` }));
     for (const [width, height] of views) {
@@ -34,20 +37,26 @@ try {
       await page.setViewportSize({ width, height });
       await page.goto(process.env.LAYOUT_URL || 'http://127.0.0.1:5174', { waitUntil: 'networkidle' });
       await page.waitForFunction(() => window.__layoutReady);
-      for (const playing of [false, true]) {
-        await page.evaluate(playing => {
-          document.body.classList.toggle('playing', playing);
-          document.querySelector('#welcome').classList.toggle('hidden', playing);
+      for (const view of ['title', 'story', 'roam']) {
+        const playing = view !== 'title';
+        await page.evaluate(view => {
+          document.body.classList.toggle('playing', view !== 'title');
+          document.querySelector('#welcome').classList.toggle('hidden', view !== 'title');
+          // Only the active mode's panels are mounted during play.
+          // Free roam is unarmed and has no journal.
+          for (const element of document.querySelectorAll('.mission-panel, .player-panel, #journal-button, .weapon-panel')) element.style.display = view === 'story' ? '' : 'none';
+          document.querySelector('.roam-panel').style.display = view === 'roam' ? '' : 'none';
           document.querySelector('#district').textContent = 'COMMERCIAL HEIGHTS';
           document.querySelector('#map-district').textContent = 'EAST REACH';
-        }, playing);
-        const selectors = ['.brand', '.top-actions', '.world-status', ...(playing ? ['.mission-panel', '.map-panel'] : ['.welcome-tag','.welcome-kicker','.welcome h2','.mode-cards','.start-hint'])];
+        }, view);
+        const panels = { title: ['.welcome-tag','.welcome-kicker','.welcome h2','.mode-cards','.start-hint'], story: ['.mission-panel', '.map-panel'], roam: ['.roam-panel', '.map-panel'] };
+        const selectors = ['.brand', '.top-actions', '.world-status', ...panels[view]];
         const rectangles = await page.evaluate(selectors => selectors.flatMap(selector => {
           const element = document.querySelector(selector), style = getComputedStyle(element), bounds = element.getBoundingClientRect();
           if (style.display === 'none' || style.visibility === 'hidden' || !bounds.width || !bounds.height) return [];
           return [{ selector, x: bounds.x, y: bounds.y, right: bounds.right, bottom: bounds.bottom, width: bounds.width, height: bounds.height }];
         }), selectors);
-        const label = `${width}x${height}-${touch ? 'touch' : 'pointer'}-${playing ? 'hud' : 'title'}`;
+        const label = `${width}x${height}-${touch ? 'touch' : 'pointer'}-${playing ? `hud-${view}` : 'title'}`;
         for (const rectangle of rectangles) {
           assert.ok(rectangle.x >= 0 && rectangle.y >= 0 && rectangle.right <= width + .5 && rectangle.bottom <= height + .5, `${label}: ${rectangle.selector} stays in viewport: ${JSON.stringify(rectangle)}`);
         }

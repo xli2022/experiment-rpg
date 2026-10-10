@@ -1,16 +1,18 @@
-import { WORLD_REVISION } from '../../world/world-config.js';
+import { WORLD_LIMIT, WORLD_REVISION } from '../../world/world-config.js';
 
 // Free roam is the smallest complete game mode and a template for new ones:
 // it owns a save slot, a HUD panel and map markers, and uses only the engine
 // host (world, player, HUD, storage). No quests, enemies or weapon.
 const SAVE_KEY = 'afterlight.free-roam.v1';
 
-function readProgress(storage) {
+export function readProgress(storage) {
   try {
     const save = JSON.parse(storage.getItem(SAVE_KEY));
     if (!save || save.version !== 1) return null;
     const ids = list => Array.isArray(list) ? [...new Set(list.filter(id => typeof id === 'string'))] : [];
-    const p = save.position, valid = p && [p.x, p.y, p.z].every(Number.isFinite) && save.worldRevision === WORLD_REVISION;
+    // Positions must lie inside the current city, at a plausible height.
+    const p = save.position, valid = p && [p.x, p.y, p.z].every(Number.isFinite) && save.worldRevision === WORLD_REVISION &&
+      Math.abs(p.x) < WORLD_LIMIT && Math.abs(p.z) < WORLD_LIMIT && p.y >= -40 && p.y < 500;
     return { position: valid ? { x: p.x, y: p.y, z: p.z } : null, time: Number.isFinite(save.time) ? Math.max(0, save.time) : 0, districts: ids(save.districts), buildings: ids(save.buildings) };
   } catch { return null; }
 }

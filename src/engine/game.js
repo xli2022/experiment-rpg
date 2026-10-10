@@ -43,9 +43,10 @@ export async function createGame({ canvas, modes }) {
   const state = { started: false, paused: false, mapOpen: false, modal: null, time: 0 };
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
-  const vector = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
+  const vector = new THREE.Vector3(), lookPoint = new THREE.Vector3(), desiredLook = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
   let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
+  let headCam = false, headLook = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
 
   // --- Modes ---------------------------------------------------------------
@@ -63,14 +64,29 @@ export async function createGame({ canvas, modes }) {
   });
   function reportError(error) { console.error(error); hud.notify(`This mode could not start: ${error.message ?? error}`, 8); }
 
-  async function activate(id, { fresh = false } = {}) {
+  // A second click while a mode is still loading would start it twice.
+  let activating = null;
+  function activate(id, options) {
+    activating ??= start(id, options).finally(() => { activating = null; });
+    return activating;
+  }
+  async function start(id, { fresh = false } = {}) {
     if (mode) deactivate({ toPicker: false });
-    definition = modes.find(m => m.id === id);
-    storage.setItem(LAST_MODE_KEY, id);
-    host = createHost();
-    mode = await definition.create(host, { fresh });
-    const spot = mode.spawn?.() ?? world.spawn;
-    placeAt(spot, { cameraYaw: spot.cameraYaw ?? spot.yaw ?? world.spawn.yaw, cameraPitch: spot.cameraPitch ?? .12 });
+    const next = modes.find(m => m.id === id), nextHost = createHost();
+    let instance = null;
+    try {
+      instance = await next.create(nextHost, { fresh });
+      definition = next; host = nextHost; mode = instance;
+      const spot = mode.spawn?.() ?? world.spawn;
+      placeAt(spot, { cameraYaw: spot.cameraYaw ?? spot.yaw ?? world.spawn.yaw, cameraPitch: spot.cameraPitch ?? .12 });
+    } catch (error) {
+      // Leave nothing of a mode that failed to start, and stay on the picker.
+      mode = definition = host = null;
+      teardown(instance, nextHost);
+      renderPicker();
+      throw error;
+    }
+    try { storage.setItem(LAST_MODE_KEY, id); } catch { /* The choice lasts for this session. */ }
     $('brand-mode').textContent = (definition.brand ?? definition.title).toUpperCase();
     state.started = true; state.paused = false; document.body.classList.add('playing'); $('welcome').classList.add('hidden');
     input.setEnabled(true); audio.init(); renderer.compile(scene, camera);
@@ -82,14 +98,19 @@ export async function createGame({ canvas, modes }) {
     save();
     if (driving) { driving.speed = 0; driving = null; }
     for (const car of [...owned]) removeDrivableCar(car);
-    weapon.disable(); effects.clear();
-    mode.dispose(); host.cleanup();
+    const [instance, instanceHost] = [mode, host];
     mode = definition = host = null; state.started = false;
+    teardown(instance, instanceHost);
     if (toPicker) {
       ui.close(); input.setEnabled(false); document.body.classList.remove('playing'); $('brand-mode').textContent = 'CHOOSE A WAY TO PLAY';
       placeAt(world.spawn, { cameraYaw: world.spawn.yaw, cameraPitch: world.spawn.pitch });
       renderPicker(); $('welcome').classList.remove('hidden'); $('start-button')?.focus();
     }
+  }
+
+  function teardown(instance, instanceHost) {
+    weapon.disable(); effects.clear();
+    try { instance?.dispose?.(); } finally { instanceHost.cleanup(); }
   }
 
   function createHost() {
@@ -458,13 +479,20 @@ export async function createGame({ canvas, modes }) {
     }
     if (obstruction < length) desiredCamera.copy(cameraTarget).addScaledVector(direction, Math.max(indoors ? .35 : .6, obstruction - (indoors ? .2 : .35)));
     // In a tight room, look from the head rather than from inside the jacket.
-    const close = indoors && !aiming && obstruction < 1.15;
+    // Hysteresis keeps the head camera from flickering where a wall is about
+    // 1.15 m behind the player.
+    headCam = indoors && !aiming && obstruction < (headCam ? 1.45 : 1.15);
+    const close = headCam;
     if (close) desiredCamera.set(player.x, player.y + 1.62, player.z);
     if (snap) camera.position.copy(desiredCamera); else camera.position.lerp(desiredCamera, 1 - Math.exp(-12 * dt));
     const groundCorrection = Math.max(0, terrainHeight(camera.position.x, camera.position.z) + .55 - camera.position.y);
     camera.position.y += groundCorrection;
-    if (close) camera.lookAt(camera.position.x - direction.x * 5, camera.position.y - direction.y * 5 + recoil * .045, camera.position.z - direction.z * 5);
-    else camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + recoil * .045, cameraTarget.z);
+    // Blend between looking ahead from the head and looking at the player, so
+    // leaving the head camera turns the view rather than whipping it.
+    headLook = snap ? +close : damp(headLook, +close, 10, dt);
+    lookPoint.set(camera.position.x - direction.x * 5, camera.position.y - direction.y * 5, camera.position.z - direction.z * 5)
+      .lerp(desiredLook.set(cameraTarget.x, cameraTarget.y + groundCorrection, cameraTarget.z), 1 - headLook);
+    camera.lookAt(lookPoint.x, lookPoint.y + recoil * .045, lookPoint.z);
     camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     character.root.visible = !driving && !close && camera.position.distanceTo(character.root.position) > (indoors ? .8 : 1.5);
@@ -489,7 +517,7 @@ export async function createGame({ canvas, modes }) {
       updateCamera(dt); weapon.update(dt); effects.update(dt, state.time);
       if (mode) mode.update?.(dt, { now: now / 1000, time: state.time, player, driving, camera });
     }
-    world.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused });
+    world.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused, driving: !!driving });
     // Retire distant abandoned takeovers only after they are outside the visible
     // car range. Nearby cars and the vehicle being driven never disappear.
     if (owned.length > 8) for (const car of [...owned]) {
