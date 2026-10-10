@@ -38,11 +38,9 @@ Terrain is one resident heightfield with **32 m triangles**, sampled identically
 
 One directional light casts filtered shadows in a player-centered, texel-snapped area. The map refreshes at most 20 Hz on High or 10 Hz on Low, including while cells stream in, and is reused when paused. Nearby offscreen shells remain available to the shadow pass; flat ground/paint and small facade details do not cast. Trees, buildings and substantial stationary props cast shadows. Cars, characters and drones receive city shadows but never enter the throttled shadow map, which would leave their silhouettes behind between refreshes. Point lights never allocate shadow cubemaps.
 
-`contact-shadows.js` draws soft contact shadows beneath parked/driven cars, traffic, the player, pedestrians and story contacts in one instanced draw. A shared 32 px alpha texture and at most 128 quads keep the cost fixed. Current actor positions, headings and visibility update every rendered frame with no interpolation or shadow-map refresh delay. The player's contact fades when jumping, stays on its support surface and hides while climbing or driving. Flying drones have no ground contact shadow.
+`contact-shadows.js` draws soft contact shadows beneath acquired and driven cars, traffic, the player, pedestrians and story contacts in one instanced draw. A shared 32 px alpha texture and at most 128 quads keep the cost fixed. Current actor positions, headings and visibility update every rendered frame with no interpolation or shadow-map refresh delay. The player's contact fades when jumping, stays on its support surface and hides while climbing or driving. Flying drones have no ground contact shadow.
 
-Traffic uses a bounded fleet on sampled road lanes, including elevated roads. Vehicles, pedestrians and contacts receive actual surface heights. Street-level and upper-level actors are kept separate by vertical collision and interaction checks. Every traffic car can be stopped with three weapon hits, then entered and driven. The third hit replaces its fleet instance with a matching independent car at the same position, height and orientation; NPC route movement ends immediately. There are no designated parked starter cars. Stopped cars block other traffic and retain normal collision, driving, exit and contact-shadow behavior. Nearby acquired cars reserve slots in the local vehicle budget, preventing repeated takeovers from continually adding replacement traffic. New stories clear them; distant abandoned cars beyond the visible range are retired when more than eight are retained.
-
-`population.js` gives busy commercial districts more pedestrians, residential streets lighter traffic, and industrial areas fewer walkers. Targets are 12–24 pedestrians and 6–10 traffic cars on High, or 8–16 pedestrians and 4–6 cars on Low, reduced further when actual sidewalks or lanes cannot fit them. The skeletal pool stays capped at 26. Crowd slots favor the player's floor and maintain spacing across adjacent paths; later placements are limited to two per 350 ms. Traffic distributes cars across available streets according to lane capacity. Connected road ends use continuous turns that follow supported surfaces at the same height; crossing reservations prevent opposing approaches from deadlocking. The junction cache is capped at 128 cells. Visible actors finish moving out of view before a lower population target retires them, avoiding sudden disappearance.
+`population.js` gives busy commercial districts more pedestrians, residential streets lighter traffic, and industrial areas fewer walkers. Targets are 12–24 pedestrians and 6–10 traffic cars on High, or 8–16 pedestrians and 4–6 cars on Low, reduced further when nearby sidewalks cannot fit them. The rest of the street life is described under [traffic](#traffic).
 
 | Budget | High | Performance / mobile default |
 | --- | ---: | ---: |
@@ -108,11 +106,11 @@ Polygon collision uses the rendered wall planes rather than the enclosing rectan
 
 Every wing shares a full side with the landing, so each unit opens straight onto it. Units divide into living rooms, bedrooms and bathrooms. Office floors stay open-plan apart from a meeting room. Ground floors become lobbies or shops wherever a street door opens. Street doors come from `buildingEntrances()`, which matches the glazed and roll-up entrances drawn on the facade. Rooms and units have stable IDs such as `<building>/12B:kitchen`, for attaching residents and evidence later. Plans are cached, average under 1 ms each, and are identical across streaming and reloads.
 
-`interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, `main.js` switches to that building's interior context:
+`interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, the engine switches to that building's interior context:
 
 - Movement, support, the camera, shots and drone line of sight swap the solid base collider for hull walls. Their outer faces lie exactly on the same perimeter, so the swap matters only at door gaps.
 - Floor slabs are convex polygons, never overhanging the outline. Stair flights are support ramps, 1.8 m rise over 3.6 m run, separated by a solid divider. Partitions, rails and furniture are ordinary solids. Windows are glazed: they are visual openings, not exits.
-- Entrance steps outside each door are permanent support pieces. Crowds and traffic keep using the exterior colliders.
+- Entrance steps outside each door are permanent support pieces. Pedestrians and traffic keep using the exterior colliders.
 
 Indoors the player jogs rather than sprints, and the camera moves closer. In very tight rooms it switches to head height. Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
 
@@ -123,6 +121,104 @@ Indoors the player jogs rather than sprints, and the camera moves closer. In ver
 - **What is shown:** inside, the current floor ±1. Outside, the lobby of any building whose door is within 25 m. At most one floor is built per frame, and unused floors are released after 1.5 s.
 - **Shell cut-outs:** the facade, industrial, stone and glass materials share a small clip uniform set. Up to four street doorways are cut out of the shell once their lobby exists. For the occupied building, its cavity discards exterior trim such as balcony rings that would otherwise cross the rooms.
 
+## Traffic
+
+`src/traffic/` turns the road plan into living streets. It depends only on the world's plan and collision, so any mode gets the same traffic.
+
+### Road network
+
+`network.js` builds the network once from the master plan, in about 200 ms. The current city has 1,589 nodes:
+
+- 1,450 junctions, 697 of them signalized
+- 111 bends where one street continues into another
+- 28 dead ends
+
+Junctions are at-grade crossings within 0.7 m of height, and road ends that meet another road. A bridge over a street is not a junction. Every approach measures how far along it the kerbs clear the other streets. Its crosswalk and stop line sit beyond that point; stop lines move back a little more on streets under 9 m wide, so turning cars clear the waiting queue.
+
+- **Lanes.** Traffic drives on the right, with one lane each way, or two on roads at least 19 m wide. Lanes are offset from a smoothed centreline and follow the road's actual height and crossfall.
+- **Turns.** Turn connectors are cubic curves from each arriving lane to the lanes leaving the junction. Right turns use the kerb lane and left turns the inner one. U-turns happen only at dead ends.
+- **Lazy geometry.** Lanes and connectors are built the first time traffic reaches them, so only nearby streets ever pay for their geometry.
+- **Sidewalks.** Both sides of every street-level road get a sidewalk 2 m beyond the kerb, joined at corners and across kerb-to-kerb crosswalks. Dead ends loop round the road's end. The Upper Market, Citadel concourse and Stacks terrace have their own deck loops, linked to the street by their access ramps.
+
+### Signals
+
+`signals.js` signalizes junctions with four or more at-grade approaches, and those where a secondary or primary road meets. Quieter T-junctions of local streets are give-way junctions; the through road has priority.
+
+- **Phases.** Approaches split into two phases by axis. Green lasts 14–22 s, longer for wider roads, followed by 3 s of amber and 1.5 s all-red. Each junction's offset comes from a hash of its ID, so the city's lights are not synchronized.
+- **Pure function of the clock.** No per-frame work is needed for distant junctions.
+- **Walk signal.** People may start across a street while its own traffic is held and the cross street has green. The lamp shows a flashing hand for the last 6 seconds.
+- **Rendering.** Six instanced meshes draw everything for junctions within 170 m: poles, mast arms, three-lamp heads, pedestrian lamps, zebra stripes and stop lines. They are rebuilt after every 40 m the player moves.
+
+### Vehicles
+
+`vehicles.js` drives each car with the Intelligent Driver Model: 1.6 m/s² acceleration, 2.5 m/s² comfortable braking, a 2.5 m standstill gap and a 1.4 s headway.
+
+- **Following.** Anything on the planned path ahead counts as a leader: other traffic, the player's car, acquired cars, people and the player on foot. Curves and slower pieces ahead cap the speed for 2.6 m/s² of lateral acceleration, so cars brake before corners.
+- **Junction permission.** A car holds its stop line until it may enter:
+  - the light allows it; amber means stop unless stopping would need more than 3.2 m/s²
+  - no conflicting car is inside the junction
+  - it has given way where required: left turns to oncoming traffic, and give-way approaches to the through road (they slow to look)
+  - the exit has room
+- **Commitment.** Once stopping would need a firm brake, the car commits and reserves its path through the junction. Lights one short block ahead are anticipated.
+- **Crosswalks.** Turning cars wait before a crosswalk while anyone is on it, or stepping onto it.
+- **Routes.** At each junction cars choose straight, right or left, weighted 6 : 2.5 : 1.5.
+- **Appearance.** Three body proportions and ten paints. Front wheels steer, the body pitches under braking and acceleration and rolls in turns, and brake lights and blinking indicators are separate instanced quads. The fleet is at most 16 cars in one instanced draw per car part.
+- **Spawning.** Cars spawn out of view, never at a stop line, at a speed they can stop from, and leave once out of view beyond the traffic radius. A scene cut repopulates at once.
+
+### Pedestrians
+
+`pedestrians.js` animates the 28-avatar pool: twenty people and eight robots and aliens.
+
+- **Routes.** Walkers follow the sidewalk graph and only turn back at a dead end. They steer toward a point 1.6 m ahead, turning at no more than 2.6 rad/s.
+- **Passing.** Each walker keeps to their own side; they pass slower people and step aside for oncoming ones. Buildings, trees and props are avoided through clear lateral positions sampled every 1.5 m along each sidewalk; a stretch nobody can pass is left out.
+- **Crossing.** Walkers wait at the kerb for the walk signal, or for a gap at give-way crossings. They never step out in front of a car already at the crossing, and cross a little faster.
+- **Everyday behaviour.** Some pause to look around or check a phone, and some stand chatting in groups of two or three, with procedural head, chest and arm gestures over their idle. Pairs walk side by side, in single file over kerbs, and a few jog using the Jog clip. Robots and aliens walk at the pace their gait was authored for.
+- **Placement.** Feet stay on the ground at all times. A 6 m visibility hysteresis prevents popping at the edge of the actor range. After the first fill, new people arrive two at a time, every 0.35 s, out of view.
+
+### Takeovers
+
+Press **E** beside a traffic car moving slower than 2.5 m/s, for example one waiting at a red light, to take it over. In armed modes, three hits also stop a car.
+
+The car becomes a full model with the same paint, proportions and pose, and joins `traffic.owned`. Acquired cars count toward the local traffic budget. Changing mode removes them, and when more than eight are kept, distant ones out of range are retired.
+
+## Modules and APIs
+
+Sources are layered: `core` ← `world` ← `traffic` ← `engine` ← `modes`. `actors` (character rigs) is shared by traffic and modes, and `tools` is unrestricted. [`tests/module-layers.test.js`](../tests/module-layers.test.js) enforces the direction. The world never imports traffic, the engine or a mode.
+
+```js
+import { createWorld } from './src/world/index.js';
+const world = createWorld({ scene, renderer, quality: 'high' });   // landmarks default to AFTERLIGHT_LANDMARKS
+world.update({ camera, focus: player, interior, now, dt });       // streaming, weather, interiors
+```
+
+`createWorld` returns:
+
+- `masterPlan` (roads, road index, supports, terrain and surface heights)
+- `districts`, `districtAt(x, z)` and `isWater(x, z)`
+- `spatial`, `spatialFor(interiorContext)`, `interiorContextAt(x, y, z)` and `buildingsNear(x, z, r)`
+- `landmarks`, `landmark(id)` and `spawn`
+- `mapView`, `atmosphere`, `interiors` and `stream`
+- `setQuality(level, { far })`, `snapshot()` and `dispose()`
+
+Landmarks are fixed, reserved sites such as stations, decks and caches. They keep the city identical in every mode; a mode attaches its own meaning to their IDs.
+
+```js
+import { createTraffic } from './src/traffic/index.js';
+const traffic = createTraffic({ scene, world, assets });           // assets: { citizen, visitors, humanBases }
+traffic.update(dt, { player, vehicle: drivenCar, camera, range: 65 });
+```
+
+`createTraffic` returns:
+
+- `cars` and `owned`
+- `pedestrians` (`people`, `walkers`, `snapshot()`)
+- `network` and `signals.state(node, approach)`
+- `hijackable(point)`, `takeOver(car)` and `hit(car)`
+- `colliders(x, z, r)`
+- `setQuality(level)`, `reset()`, `snapshot()` and `dispose()`
+
+`buildNetwork(plan)`, `signalState(node, approach, time)` and the Intelligent Driver Model helpers are exported for tools and tests. Game modes and their host API are described in [MODES.md](MODES.md).
+
 ## Traversal, quests and saves
 
 Solid walls, piers, railings and furniture use height-aware collision. Sloped road and ramp slabs are support surfaces: they provide walking/vehicle height and ray cover without becoming invisible vertical barriers. The player can walk under a bridge, climb above it, or drive onto it through its ramp. Rooftop equipment and stepped terraces collide at their real elevations. Climbing, jumping, the following camera, car exits and contact shadows use these support heights.
@@ -131,13 +227,24 @@ Long falls automatically deploy a reusable parachute after a 12 m descent from t
 
 Story contacts, terminals, caches, rest points and station destinations were moved to the new city. Early objectives introduce the Upper Market and skybridge; later objectives take the player to the Citadel, Stacks, Void Port, Foundry and North Ridge. Quest and object IDs remain stable, preserving chapter completion, inventory, dialogue choices and rewards.
 
-Saves carry **`worldRevision: 6`**. Coordinates from earlier city layouts, including the 11 km city, are not reused after compaction: an older save resumes at its remapped rest location while retaining campaign progress. Current-world saves keep their location and elevation when it is still a valid destination. Startup, refuge returns and tram arrivals use collision-checked positions that include parked cars, leave room to walk, and search nearby on the same floor when occupied. Patrol and district-survey waypoints use the actual terrain or deck elevation.
+Saves carry **`worldRevision: 6`**. Coordinates from earlier city layouts, including the 11 km city, are not reused after compaction: an older save resumes at its remapped rest location while retaining campaign progress. Current-world saves keep their location and elevation when it is still a valid destination. Startup, refuge returns and tram arrivals use collision-checked positions that include acquired cars, leave room to walk, and search nearby on the same floor when occupied. Patrol and district-survey waypoints use the actual terrain or deck elevation.
 
 ## Verification
 
 Compaction retains all 661 roads and 23,021 segments; the regression suite compares their complete intersection graph with the authored layout. District-center samples retain median nearest roof gaps below 12 m with the varied building footprints. Every district supplies a verified jump to a nearest lower roof at 30, 60 and 120 FPS using normal sprint, collision, support and jump code. These tests include rotated roofs, rooftop equipment and braking after landing, without requiring the return jump to be possible.
 
-The automated suites cover deterministic district generation, bounded blueprint residency, road and building separation, connected approaches, ramp grades and lane clearance, actual terrain triangle heights, sloped support/ray behavior, banked road rendering and streamed instance transforms. They also retain checks for contact-shadow timing and budgets, district population/spacing, traffic behavior and three-hit vehicle takeovers, climbing, car exits, save migration and campaign consistency. Sign coverage, street-facing visibility, atlas reuse and buffer release are checked for all seven building types, along with first-load visibility of distant tower tops.
+The automated suites cover deterministic district generation, bounded blueprint residency, road and building separation, connected approaches, ramp grades and lane clearance, actual terrain triangle heights, sloped support/ray behavior, banked road rendering and streamed instance transforms. They also retain checks for contact-shadow timing and budgets, district population and spacing, climbing, car exits, save migration and campaign consistency.
+
+Traffic tests build the real network and a small test grid. They check:
+
+- connectors joining the right lanes, and signal phases never giving conflicting greens
+- crosswalks on every at-grade approach, and one connected sidewalk network
+- a five-minute drive through two districts with no collisions, no red-light entries and acceleration within the model's limits; cars stop behind the line, turn both ways and show brake lights while slowing
+- turning cars waiting for people on a crosswalk, give-way junctions clearing without deadlock, and bridges ignoring people below
+- pedestrians keeping budgets and spacing, staying off the carriageway except on crosswalks, starting across only on the walk signal, turning back only at dead ends, and showing every everyday behaviour
+- the three-hit takeover and E takeovers
+
+Headless five-minute runs in eight districts found no collisions, no red-light entries and no stuck cars, at about 0.1 ms per frame for the whole traffic update. Sign coverage, street-facing visibility, atlas reuse and buffer release are checked for all seven building types, along with first-load visibility of distant tower tops.
 
 The building-variety checks cover distinct silhouettes and independent finishes, supported roof equipment, rotated roof raycasts versus collision, all six facade tiles, selective window emission, shared material batches and UV-buffer regeneration after eviction. District previews were inspected at Eastpoint, Ember Heights, Foundry, Citadel and Shadowmarket. The live game was checked in High and Performance modes without console or shader errors. These browser checks do not establish physical-device frame rates.
 

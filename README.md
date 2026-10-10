@@ -1,6 +1,6 @@
 # AFTERLIGHT: THE LAST SIGNAL
 
-A playable cyberpunk open-world RPG for desktop and mobile browsers. Investigate a blackout that erased thousands of residents from Afterlight’s civic network, meet the people keeping the city alive, and decide who controls its future. Built with Three.js and Vite, with a procedural city, characters using CC0 MakeHuman assets, and downloaded CC0 Quaternius animations retargeted in Blender. There are no proprietary game assets or paid runtime services. See [character sources](assets/characters/SOURCES.md), [animation sources](assets/animations/quaternius/SOURCES.md), and the [story and world guide](docs/STORY.md).
+A cyberpunk open city for desktop and mobile browsers, with plug-in game modes. **The Last Signal** is a playable RPG: investigate a blackout that erased thousands of residents from Afterlight’s civic network, meet the people keeping the city alive, and decide who controls its future. **Free roam** is the same city with no missions. New modes reuse the city, its traffic and the player; see [game modes](docs/MODES.md). Built with Three.js and Vite, with a procedural city, characters using CC0 MakeHuman assets, and downloaded CC0 Quaternius animations retargeted in Blender. There are no proprietary game assets or paid runtime services. See [character sources](assets/characters/SOURCES.md), [animation sources](assets/animations/quaternius/SOURCES.md), and the [story and world guide](docs/STORY.md).
 
 ## Run
 
@@ -11,12 +11,12 @@ npm install
 npm run dev -- --port 5173
 ```
 
-Open **http://localhost:5173**. Click **Enter the city**.
+Open **http://localhost:5173**. Choose a mode on the start screen: **The Last Signal** or **Free roam**. Each card shows its save and offers Continue or New game; **Change mode** in the pause menu returns to the cards.
 
 To play on a phone, connect it to the same Wi-Fi as the computer and open the **Network** URL printed by Vite. The server listens on all interfaces. The computer's firewall must allow the development server on the private network. Landscape is recommended; portrait also works. A public deployment requires serving the `dist` directory over HTTPS.
 
 ```sh
-npm test          # Campaign, economy, saves, simulation and character checks
+npm test          # Campaign, saves, traffic simulation, city and character checks
 npm run build     # Production files in dist/
 npm run preview   # Serve the production build locally
 ```
@@ -44,7 +44,10 @@ Remove-Item Env:PAGES_BASE_PATH
 
 ## Play
 
-Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western hills and dense central neighborhoods to Blackwater Bay. The original street connections, district arrangement and coastline fit within one quarter of the former area. Building heights retain the varied skyline, while closer footprints create downward jumps from taller roofs to nearby lower ones. Start at the Eastpoint hideout and follow the pedestrian ramp south to **Mara on the Upper Market**, four metres above the street. Moving traffic cars can be stopped and taken over for longer journeys.
+Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western hills and dense central neighborhoods to Blackwater Bay. The original street connections, district arrangement and coastline fit within one quarter of the former area. Building heights retain the varied skyline, while closer footprints create downward jumps from taller roofs to nearby lower ones. In the story, start at the Eastpoint hideout and follow the pedestrian ramp south to **Mara on the Upper Market**, four metres above the street. In any mode, step up to a car waiting at a red light and press **E** to drive it.
+
+- **Living streets.** Cars keep their lanes, queue at two-phase traffic lights, give way at quiet junctions, wait for people on crosswalks, and signal and brake visibly. Pedestrians walk the sidewalks, wait for the walk signal, and stop to talk, check a phone, stroll in pairs or jog. See [traffic](docs/CITY-RENDERING.md#traffic).
+- **Free roam.** No quests, enemies or weapon: explore, climb, glide, drive and enter buildings. Its panel counts the districts visited and buildings entered, and the map shows transit stations. Free roam keeps its own save, separate from the story.
 
 - **Six campaign chapters, two evidence paths, and three playable endings.** Meet eight named contacts, ask about their lives, accept local work, and make the final broadcast.
 - **A varied, voiced cast.** Women, men and a nonbinary gardener have individual facial shapes, builds, skin tones, hairstyles, outfits, portraits and personalities. A reusable pool contains twenty-eight visual archetypes: twenty human designs (ten men and ten women), four robots and four aliens. Active counts follow district, quality and available space. Every named contact has personal conversation topics, characteristic job replies and individual reactions to all three endings.
@@ -62,15 +65,15 @@ Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western 
 | --- | --- |
 | WASD / arrow keys | Move; accelerate, reverse, and steer in a car |
 | Mouse | Look while captured; click and drag if pointer capture is unavailable |
-| Left mouse | Fire; hold for automatic fire |
+| Left mouse | Fire (story); hold for automatic fire |
 | Right mouse | Aim; can be held together with left mouse |
 | Shift / Alt | Sprint / walk; default movement is a brisk jog |
 | C | Grab or release a nearby wall; WASD climbs up/down and sideways |
 | Space | Jump; grab a wall ahead; jump away while climbing; handbrake in a car |
-| E | Talk, use terminals, collect items, rest, or enter/exit a nearby car |
+| E | Talk, use terminals, collect items, rest, use a lift, enter/exit a nearby car, or take a car waiting in traffic |
 | R | Reload the 24-round magazine; unlimited reserve ammo |
-| J | Open/close the field journal: quests, inventory, contacts and memories |
-| Q | Use a field medkit (+60 health) |
+| J | Open/close the field journal (story): quests, inventory, contacts and memories |
+| Q | Use a field medkit (story, +60 health) |
 | M | Open/close city map |
 | Escape | Pause/resume and release the mouse |
 
@@ -86,7 +89,7 @@ The city map supports dragging and zooming within the city boundary; Entire city
 
 Sound effects default to on and begin when you start playing; the speaker button mutes or unmutes them. **Spoken NPC dialogue starts enabled**, using the browser’s available English voices with per-character voice selection, pitch and pacing. Conversations have Replay and Voice on/off controls, and settings include a separate voice volume slider. Voice preferences persist independently of your story. Subtitles always remain visible. Selecting another response, leaving a conversation or hiding the page cancels playback. A missing or blocked speech service shows a message and leaves every dialogue choice usable. Device voices and quality vary; this is synthesized speech, not recorded voice acting. The game uses the [Web Speech synthesis API](https://webaudio.github.io/web-speech-api/#tts-section), needs no microphone or API key, and the browser may use local or network speech services.
 
-Traffic cars can be taken over: hit one three times to stop it, then approach and press **E** (or **USE** on touch) to drive. There are no designated parked cars. Pedestrian and traffic targets vary with the district, available street space and graphics quality.
+To borrow a car, walk up to one that is stopped or crawling in traffic and press **E** (or **USE** on touch). In the story you can also hit a moving car three times to stop it. There are no designated parked cars. Pedestrian and traffic targets vary with the district, available street space and graphics quality.
 
 High quality adds neon bloom; Performance mode uses shorter scenery/detail distances, fewer animated actors and rain particles, and a lower resolution cap. Mobile selects Performance mode automatically, and resolution adapts to sustained frame pressure. Scenery loads in nearby and visible cells, with distant instance buffers released as you travel. The map supports drag-to-pan, zoom buttons, and neighborhood/city views. See [city scale, rendering research and measured results](docs/CITY-RENDERING.md).
 
@@ -94,45 +97,42 @@ Health and armor slowly recover out of combat. Defeat returns you to your last r
 
 ## Project layout
 
-- `src/main.js` — simulation, camera, combat, vehicles, interactions and persistence integration
-- `src/content.js` — authored districts, contacts, quests, items, encounters and endings
-- `src/campaign.js` — renderer-independent quest/economy engine and validated versioned saves
-- `src/dialogue.js` — branching conversations, quest replies and final decisions
-- `src/world.js` — interactable objects and named NPCs, plus retained legacy landmarks
-- `src/rpg-ui.js` / `src/rpg.css` — journal, conversations, shops, transit map and ending panels
-- `src/master-plan.js` / `src/world-scale.js` — compact runtime terrain, roads and shared coordinate transform
-- `src/authored-plan.js` / `src/neighborhood-plan.js` / `src/infill-plan.js` — original road graph, district streets and connected infill
-- `src/vertical-city.js` — current city geometry, street-facing buildings, raised spaces and collision
-- `src/building-design.js` / `src/building-materials.js` — deterministic building variants, shared massing/collision recipes and six instanced facade finishes
-- `src/building-signs.js` — building-specific tenants, street-facing placement and shared neon sign atlas
-- `src/infrastructure-clearance.js` / `src/wayfinding.js` — shared rendered slab volumes and bridge-safe wayfinding placement
-- `src/city.js` / `src/city-scenery.js` — shared batching, signs, scenery materials and retained legacy city helpers
-- `src/city-plan.js` / `src/metropolis.js` — retained legacy downtown and regional generation
-- `src/world-stream.js` — spatial streaming, detail levels and quality budgets
-- `src/population.js` / `src/traffic.js` — district population targets, NPC road traffic and vehicle takeovers
-- `src/spatial-grid.js` / `src/world-config.js` — collision broad phase and metropolitan scale
-- `src/models.js` — procedural cars, drones, and shared mesh helpers
-- `src/characters.js` — GLB loading, skeletal animation blending, weapon attachment
-- `src/crowd.js` — full skeletal pedestrians with authored walk cycles
-- `src/npc-profiles.js` / `src/npc-appearance.js` — cast and crowd designs, fitted geometry, bone-attached wardrobe, individual idle poses and rendered portraits
-- `src/npc-visitors.js` — imported robot and alien pedestrians, independent native rigs, size and facing normalization
-- `src/npc-materials.js` / `src/npc-surfaces.js` — skin and clothing finishes, shared PBR surface textures, filtered pinstripes, makeup and scars
-- `src/npc-animation.js` / `src/npc-grounding.js` — speed-aware idle/walk transitions and animated boot contact
-- `src/npc-shape.js` / `src/npc-head-shape.js` — shared CC0 facial deformation field and fitting of eyes/accessories
-- `src/voice.js` — speech synthesis, automatic cast, cancellation, recovery and saved voice preferences
-- `src/npc.css` — portrait and voice-control layouts
-- `src/input.js` — keyboard/mouse and multi-touch controls
-- `src/jump.js` — shared jump arc and authored-animation timing
-- `src/physics.js` — oriented collision, height-aware movement, vehicle handling, and ray tests
-- `src/locomotion.js` / `src/climbing.js` / `src/climb-animation.js` — responsive movement, wall traversal and procedural hand/foot IK
-- `src/architecture.js` / `src/public-spaces.js` — retained legacy building geometry and neighborhood public spaces
-- `src/ui.js` / `src/style.css` — responsive HUD, minimap, and menus
-- `src/mobile.css` — touch controls and title/HUD layouts for compact screens
-- `src/audio.js` — locally synthesized weapon, vehicle, and interface audio
-- `tests/physics.test.js` — simulation regression tests
-- `tests/campaign.test.js` — all campaign branches, side quests, economy, persistence and content integrity
-- `tests/characters.test.js` — exported skinning, authored motion, loop continuity, and runtime blending checks
-- `tests/npc.test.js` / `tests/voice.test.js` — character diversity, source/rig integrity, accessory fitting, personalities and speech lifecycle checks
+Sources are layered, and each layer imports only those before it: `core` → `world` → `traffic` → `engine` → `modes`. `actors` is shared by traffic and modes. [`tests/module-layers.test.js`](tests/module-layers.test.js) enforces this.
+
+- `src/main.js` — composition root: creates the engine with the registered modes
+- `src/core/` — renderer-independent physics, collision geometry, spawn search, spatial grid, mesh helpers and quality budgets
+- `src/world/` — the static city behind `createWorld()`:
+  - `master-plan.js` / `authored-plan.js` / `neighborhood-plan.js` / `infill-plan.js` — terrain, the road graph, district streets and infill
+  - `vertical-city.js` / `world-stream.js` — buildings, decks, collision and streamed instancing
+  - `building-*.js` / `district-architecture.js` / `vegetation.js` / `wayfinding.js` — architecture, signs, planting and labels
+  - `interior-plan.js` / `interior-physics.js` / `interiors.js` — enterable interiors
+  - `atmosphere.js` — sky, lights, fog and rain
+  - `landmarks.js` — the fixed sites every mode can use
+- `src/traffic/` — living streets behind `createTraffic()`:
+  - `network.js` — road graph, lanes, turn connectors, crosswalks and sidewalks
+  - `signals.js` — signal timing and its props
+  - `vehicles.js` — car agents and the instanced fleet
+  - `pedestrians.js` — walkers and the avatar pool
+  - `population.js` — district budgets
+  - `car-model.js` — the procedural car
+- `src/actors/` — NPC rigs, appearance, wardrobe, visitors, grounding and speed-aware animation, shared by traffic and modes
+- `src/engine/` — the runtime every mode shares:
+  - `game.js` — loop, mode host and picker flow
+  - `player/` — characters, locomotion, jumping, climbing and parachute
+  - `hud.js` / `ui.js` / `mode-picker.js` / `map-controls.js` — HUD, map, menus and mode cards
+  - `weapon.js` / `effects.js` — the optional weapon, tracers and sparks
+  - `input.js`, `audio.js`, `shadows.js`, `contact-shadows.js`, `save.js` and `fullscreen.js`
+  - `style.css` / `ui.css` / `mobile.css` — styles
+- `src/modes/index.js` — the mode registry; see [game modes](docs/MODES.md)
+- `src/modes/story/` — The Last Signal:
+  - `campaign.js` — quest and economy engine with versioned saves
+  - `content.js` — contacts, quests, items and endings on landmark positions
+  - `dialogue.js` / `voice.js` — conversations and speech
+  - `rpg-ui.js` / `hud.js` — journal, shops, map sidebar and story panels
+  - `world-life.js` / `drones.js` — contacts in the city, and patrols
+- `src/modes/free-roam/` — Free roam, the minimal example mode
+- `src/tools/` — the development character studio
+- `tests/` — Node test suites, one per area
 - `assets/characters/afterlight-characters.blend` — editable character source with packed textures
 - `scripts/build_characters.py` — original player/citizen Blender authoring and export pipeline
 - `scripts/build_human_bases.py` — distinct female casual/tailored and male utility body/garment meshes, packed textures and retargeted motion
@@ -158,13 +158,19 @@ The named women wear distinct fitted shirts or tailored blouses and skirts, with
 
 ## Scope and verification
 
-This remains a browser-scale RPG: exterior exploration, arcade vehicles, voiced text dialogue and drone combat. Buildings are scenery. Humans share a common animated rig; robots and aliens use their source rigs. Speech has no lip synchronization or prerecorded performances. There is no multiplayer. Saves are local to this browser and origin, not synchronized across devices. UI fonts use Google Fonts with system fallbacks; game assets load locally.
+This remains a browser-scale game: open-city exploration, enterable procedural interiors, arcade vehicles, voiced text dialogue and drone combat. Humans share a common animated rig; robots and aliens use their source rigs. Speech has no lip synchronization or prerecorded performances. There is no multiplayer. Saves are local to this browser and origin, not synchronized across devices. UI fonts use Google Fonts with system fallbacks; game assets load locally.
 
-The automated suite covers traversal, city generation, campaign state and characters. Traversal checks include prompt acceleration/braking, rotated wall and roof collision, climbing and mantling at 30/60/120 FPS, blocked ledges, cancelling a mantle without getting stuck, raised-surface landings, jump-off/roof falls, the actual skeletal climbing pose, and rooftop saves. City tests cover connected roads, sloped support, building/road clearance, street-facing geometry, bounded streaming, district populations and traffic takeovers. Arrival checks include cars blocking tram and refuge destinations. Input and physics regressions cover popup focus restoration, held menu keys, cancelled touch gestures, vehicle exits at every heading, and cars blocking weapon fire. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment, consumables and waypoint elevation. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines.
+The automated suite covers traversal, city generation, campaign state and characters. Traversal checks include prompt acceleration/braking, rotated wall and roof collision, climbing and mantling at 30/60/120 FPS, blocked ledges, cancelling a mantle without getting stuck, raised-surface landings, jump-off/roof falls, the actual skeletal climbing pose, and rooftop saves. City tests cover connected roads, sloped support, building/road clearance, street-facing geometry, bounded streaming and district populations. Traffic tests build the city's junction network and check:
+
+- signal phases
+- a five-minute drive with no collisions or red-light entries
+- crosswalk yielding
+- pedestrians keeping to sidewalks and walk signals
+- car takeovers Arrival checks include cars blocking tram and refuge destinations. Input and physics regressions cover popup focus restoration, held menu keys, cancelled touch gestures, vehicle exits at every heading, and cars blocking weapon fire. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment, consumables and waypoint elevation. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines.
 
 Earlier browser verification covered the first chapter, driving, save continuation, workshop purchases, fast travel, story choices and journal/map layouts at desktop and phone sizes. Those checks predate the current city layout; current road, building and traversal validation is described in [CITY-RENDERING.md](docs/CITY-RENDERING.md). Mobile verification uses browser emulation, not a physical-device performance certification. Production compilation can use `npm run build -- --configLoader runner` in Windows environments that restrict esbuild’s ancestor-directory access.
 
-The geometry regression suite scans all 900 city blocks with the live story reservations. It checks building and interchange signs against rendered bridge solids, all 63 interactable labels across camera angles, tree crowns against buildings and infrastructure, supported streetlights, and rail clearance at curved road joins. The title layout uses a bounded content area, with two columns on short landscape screens and gameplay readouts hidden until play. With Playwright available, run `node scripts/check_mobile_layout.mjs` against the dev server (`LAYOUT_URL` overrides its default `http://127.0.0.1:5174`; `PLAYWRIGHT_MODULE` can select an existing installation). It checks 38 title/HUD layouts using fallback fonts and saves screenshots in `test-results/mobile-layout/`.
+The geometry regression suite scans all 900 city blocks with the live story reservations. It checks building and interchange signs against rendered bridge solids, all 63 interactable labels across camera angles, tree crowns against buildings and infrastructure, supported streetlights, and rail clearance at curved road joins. The title layout uses a bounded content area, with two columns on short landscape screens and gameplay readouts hidden until play. With Playwright available, run `node scripts/check_mobile_layout.mjs` against the dev server (`LAYOUT_URL` overrides its default `http://127.0.0.1:5174`; `PLAYWRIGHT_MODULE` can select an existing installation). It renders the real mode cards and story HUD panels, checks 38 title/HUD layouts using fallback fonts and saves screenshots in `test-results/mobile-layout/`.
 
 NPC/voice verification inspected all seven cast models and their portraits, opened Mara and Rook conversations, accepted a job, exercised replay/mute/exit, reloaded saved voice preferences, and checked portrait (390 × 844) and landscape (844 × 390) layouts. The production build loaded without console errors and omitted development diagnostics. The test browser initially reported speech playback starting, then its native service returned `synthesis-failed`, including for standalone default-voice utterances outside the game. Error fallback was verified; reliable audible playback and voice quality still require checking on the target device.
 

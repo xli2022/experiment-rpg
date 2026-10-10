@@ -17,6 +17,7 @@ import { GameAudio } from './audio.js';
 import { HUD } from './hud.js';
 import { createUI, button } from './ui.js';
 import { attachMapControls } from './map-controls.js';
+import { modeCards } from './mode-picker.js';
 import { createEffects } from './effects.js';
 import { createWeapon } from './weapon.js';
 import { createShadows } from './shadows.js';
@@ -30,7 +31,6 @@ import { MOVEMENT, footVelocity } from './player/locomotion.js';
 import { findClimbFace, startClimb, dropClimb, stepClimb } from './player/climbing.js';
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 /**
  * The game runtime shared by every mode: renderer, world, traffic, the player
@@ -49,18 +49,7 @@ export async function createGame({ canvas, modes }) {
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
 
   // --- Modes ---------------------------------------------------------------
-  function renderPicker() {
-    const last = storage.getItem(LAST_MODE_KEY) ?? modes[0].id;
-    const cards = modes.map(m => {
-      const summary = m.saveSummary?.(storage) ?? null, preferred = m.id === last;
-      return `<article class="mode-card${preferred ? ' preferred' : ''}" style="--mode-accent:${m.accent ?? '#deff7a'}" data-mode="${m.id}">
-        <div class="mode-kicker">${esc(m.tagline ?? '')}</div><h3>${esc(m.title)}</h3><p>${esc(m.description ?? '')}</p>
-        <div class="mode-save">${summary ? esc(summary) : 'No saved game in this browser'}</div>
-        <div class="mode-actions"><button class="primary-button" ${preferred ? 'id="start-button" ' : ''}data-mode-start="${m.id}">${summary ? 'CONTINUE' : 'START'} <span>↗</span></button>
-        ${summary ? `<button class="text-button" data-mode-new="${m.id}">New game…</button>` : ''}</div></article>`;
-    });
-    $('mode-cards').innerHTML = cards.join('');
-  }
+  function renderPicker() { $('mode-cards').innerHTML = modeCards(modes, storage); }
   $('mode-cards').addEventListener('click', e => {
     const start = e.target.closest('[data-mode-start]'), fresh = e.target.closest('[data-mode-new]'), confirmNew = e.target.closest('[data-mode-confirm]'), cancel = e.target.closest('[data-mode-cancel]');
     if (start) activate(start.dataset.modeStart).catch(reportError);

@@ -29,7 +29,7 @@ body:not(.playing) #game::before{content:'';position:absolute;inset:0;background
 .mode-card p{font-size:11px;line-height:1.6;color:#b0c3c7;margin:0;flex:1}
 .mode-save{font-size:9px;letter-spacing:.6px;color:#8aa6ad}
 .mode-actions{display:flex;flex-direction:column}
-.mode-card .primary-button{background:var(--mode-accent);gap:20px;min-height:40px;padding:12px 16px}
+.mode-card .primary-button{background:var(--mode-accent);gap:20px;min-height:44px;padding:12px 16px}
 .mode-card .text-button{margin:9px 0 0;text-align:left}
 .mode-confirm{font-size:10px;color:#e8d9a8;margin-bottom:7px}
 .roam-panel{position:absolute;top:144px;left:36px;padding-left:17px;border-left:2px solid #7ee6e3;filter:drop-shadow(0 2px 5px #000);font-size:11px;color:#b0c1c6}

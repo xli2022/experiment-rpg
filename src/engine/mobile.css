@@ -236,4 +236,6 @@ body.touch:not(.playing) #journal-button{display:none}
   .start-hint{grid-column:2;grid-row:3;align-self:center;margin:0;line-height:1.7}
 }
 @media(max-width:600px){.mode-cards{grid-template-columns:1fr;width:100%;margin:18px 0 12px;gap:9px}.mode-card{padding:13px}.mode-card h3{font-size:23px}.mode-card p{font-size:10px}}
+/* Short portrait phones: compact cards, with the start and new-game actions on one row. */
+@media(max-width:600px) and (max-height:780px){.mode-cards{margin:12px 0 10px;gap:8px}.mode-card{padding:10px 12px;gap:5px}.mode-card p{display:none}.mode-card h3{font-size:21px}.mode-actions{flex-direction:row;align-items:center;gap:14px}.mode-card .text-button{margin:0}}
 @media(max-height:560px) and (orientation:landscape){.mode-cards{grid-template-columns:repeat(2,minmax(0,1fr));margin:12px 0 8px;max-height:58vh;overflow:auto}.mode-card p{display:none}.mode-card h3{font-size:21px}}

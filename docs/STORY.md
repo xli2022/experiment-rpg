@@ -42,7 +42,7 @@ Free exploration and unfinished jobs continue after every ending. The ending can
 
 The city follows the supplied Afterlight road map across a 5.5 × 5.5 km boundary. Its original street connections and district arrangement are preserved at half the horizontal scale, while building heights retain the varied skyline and closer rooftops allow downward jumps. Its thirteen districts are Afterlight Core, Citadel, East Reach, Void Port, The Stacks, North Ridge, Ember Heights, West End, Shadowmarket, The Cut, Southward, Foundry and Silver Delta. Hills, residential terraces, corporate towers and industrial yards give the districts different silhouettes around the connected road network.
 
-The six-chapter campaign now spans this city instead of remaining in a separate older downtown. Story contacts occupy streets and raised public spaces, reached by pedestrian ramps; the first chapter introduces the Upper Market and skybridge. Sable’s survey includes all thirteen districts. Discovered tram stations provide fast travel, and traffic cars can be stopped with three weapon hits and taken over. Stable quest and object IDs preserve progress from earlier city layouts. See [city scale and streaming](CITY-RENDERING.md).
+The six-chapter campaign now spans this city instead of remaining in a separate older downtown. Story contacts occupy streets and raised public spaces, reached by pedestrian ramps; the first chapter introduces the Upper Market and skybridge. Sable’s survey includes all thirteen districts. Discovered tram stations provide fast travel. A traffic car can be taken over by stepping up to it while it waits in traffic, or stopped with three weapon hits. Stable quest and object IDs preserve progress from earlier city layouts. See [city scale and streaming](CITY-RENDERING.md).
 
 ## Cast and performance
 
@@ -59,7 +59,7 @@ The six-chapter campaign now spans this city instead of remaining in a separate 
 
 Identities are explicit in the contact data and pronouns appear with portraits. Personalities live in the dialogue, not only in labels: Mara burns toast during her seven minutes off air, Imani practices resting with bad detective books, Sable rehearses confidence, Rook disguises generosity as accounting errors, Jun argues with a pump, Orrin leaves a cup for late arrivals, and Cass hides her collection of thank-you notes. All eight contacts have individual acceptance lines, return greetings and three different post-ending reactions.
 
-The seven human contacts and twelve pedestrian archetypes share the complete animated rig, with fitted facial anatomy, different body builds, skin tones, hairstyles and clothing. Portraits are rendered from those in-world models. The writing does not assign morality or voice selection from skin tone.
+The seven human contacts and twenty human pedestrian designs share the complete animated rig, with fitted facial anatomy, different body builds, skin tones, hairstyles and clothing. Portraits are rendered from those in-world models. The writing does not assign morality or voice selection from skin tone.
 
 All human contacts are adults. The women combine fitted silhouettes, varied necklines, makeup, jewelry and individual stances. Rook and Orrin have signature equipment tied to optional personal conversations: Rook describes building his brace, his culpability as a Helix engineer and his daughter's brass bird; Orrin talks about luxury yachts, a compromised first rescue, cards and his deliberately inaccurate compass. Completing Second lives or No return address unlocks a personal follow-up for the corresponding man. These topics leave quest progress unchanged. Subtle additive chest/head poses preserve the authored animation and foot placement; named signature equipment stays exclusive to its owner.
 
@@ -77,6 +77,11 @@ Refuges provide recovery without a currency penalty. Transit requires discoverin
 
 Keep conversations personal and short. Let the specific detail carry the worldbuilding. Every quest should improve a person’s circumstances or reveal why the city works as it does. Choices show their consequence before selection. NPC optional topics never advance an unrelated quest.
 
-`src/content.js` is the content registry; object IDs and coordinates are shared by quests, map markers and save validation. `src/dialogue.js` contains authored quest replies and optional topics. `src/campaign.js` owns rewards, quest transitions and save state without depending on Three.js, allowing every branch to be exercised in Node tests.
+The story is one of the engine's plug-in game modes, in `src/modes/story/`; see [game modes](MODES.md) for the contract it implements.
+
+- **`index.js`** connects the campaign to the engine host: the weapon and drone targets, objectives and waypoints, map markers and sidebar, pause-menu items, saves, and its HUD panels from `hud.js`.
+- **`content.js`** is the content registry. Its places attach story text and types to the world's fixed landmark sites, so object IDs and coordinates are shared by quests, map markers and save validation, and the city layout is the same in every mode.
+- **`dialogue.js`** contains authored quest replies and optional topics.
+- **`campaign.js`** owns rewards, quest transitions and save state without depending on Three.js, allowing every branch to be exercised in Node tests. Saves keep the original `afterlight.last-signal.v1` key and format.
 
 Possible later arcs, not implemented here: Orrin’s first crossing beyond Afterlight; disputes between neighborhood relays after the shared-control ending; a Helix audit of Sable’s charter; and Vex repairing the last radio associated with their former name. Building interiors are walkable but hold no story content yet. Additional species or rigs, recorded voice acting and a wider regional world would be separate expansions.

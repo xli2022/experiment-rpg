@@ -16,26 +16,32 @@ try {
   for (const touch of [true, false]) {
     const context = await browser.newContext({ isMobile: touch, hasTouch: touch, deviceScaleFactor: 1 });
     const page = await context.newPage();
-    // Exercise the real HTML/CSS without allocating a WebGL city per viewport.
+    // Exercise the real HTML/CSS without allocating a WebGL city per viewport:
+    // the real mode cards on the title screen and the story's HUD panels in play.
     // Block web fonts too: fallback typography must not make text overlap.
     await page.route('https://fonts.googleapis.com/**', route => route.abort());
+    // The touch class is set before the mode modules load, as the game's input does.
     await page.route('**/src/main.js*', route => route.fulfill({ contentType: 'application/javascript', body: `
       document.body.classList.toggle('touch', navigator.maxTouchPoints > 0);
       document.querySelector('#loading').remove();
+      const [{ MODES }, { modeCards }, { createStoryHud }] = await Promise.all(['/src/modes/index.js', '/src/engine/mode-picker.js', '/src/modes/story/hud.js'].map(path => import(path)));
+      document.querySelector('#mode-cards').innerHTML = modeCards(MODES, localStorage);
+      createStoryHud({ hud: { mount: element => document.getElementById('hud').append(element) }, renderer: { domElement: document.body } }, { journal() {}, medkit() {} });
+      window.__layoutReady = true;
     ` }));
     for (const [width, height] of views) {
       if (!touch && width > 900) continue;
       await page.setViewportSize({ width, height });
       await page.goto(process.env.LAYOUT_URL || 'http://127.0.0.1:5174', { waitUntil: 'networkidle' });
+      await page.waitForFunction(() => window.__layoutReady);
       for (const playing of [false, true]) {
         await page.evaluate(playing => {
           document.body.classList.toggle('playing', playing);
           document.querySelector('#welcome').classList.toggle('hidden', playing);
           document.querySelector('#district').textContent = 'COMMERCIAL HEIGHTS';
           document.querySelector('#map-district').textContent = 'EAST REACH';
-          document.querySelector('#start-button').innerHTML = 'CONTINUE YOUR STORY <span>↗</span>';
         }, playing);
-        const selectors = ['.brand', '.top-actions', '.world-status', ...(playing ? ['.mission-panel', '.map-panel'] : ['.welcome-tag','.welcome-kicker','.welcome h2','.welcome-copy','#start-button','.start-hint'])];
+        const selectors = ['.brand', '.top-actions', '.world-status', ...(playing ? ['.mission-panel', '.map-panel'] : ['.welcome-tag','.welcome-kicker','.welcome h2','.mode-cards','.start-hint'])];
         const rectangles = await page.evaluate(selectors => selectors.flatMap(selector => {
           const element = document.querySelector(selector), style = getComputedStyle(element), bounds = element.getBoundingClientRect();
           if (style.display === 'none' || style.visibility === 'hidden' || !bounds.width || !bounds.height) return [];
@@ -58,19 +64,18 @@ try {
           assert.ok(titleOverflow.scrollWidth <= titleOverflow.clientWidth + 1 && titleOverflow.scrollHeight <= titleOverflow.clientHeight + 1, `${label}: title content and backdrop do not create scrollbars: ${JSON.stringify(titleOverflow)}`);
           const hiddenReadouts = await page.locator('.map-panel,.player-panel,.weapon-panel').evaluateAll(elements => elements.every(element => getComputedStyle(element).display === 'none'));
           assert.ok(hiddenReadouts, `${label}: gameplay readouts wait until play`);
-          const start = await page.locator('#start-button').boundingBox();
-          assert.ok(start.height >= 44, `${label}: start target remains usable`);
+          const starts = await page.locator('[data-mode-start]').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().toJSON()));
+          assert.ok(starts.length >= 2 && starts.every(start => start.height >= 44 && start.bottom <= height + .5), `${label}: every mode's start button is usable: ${JSON.stringify(starts)}`);
         }
         if (touch) {
-          const controls = await page.locator('.top-actions button:visible').evaluateAll(elements => elements.map(element => ({ width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height })));
-          assert.ok(controls.every(control => control.width >= 44 && control.height >= 44), `${label}: touch targets remain 44px`);
+          const controls = await page.locator('.top-actions button:visible').evaluateAll(elements => elements.map(element => ({ id: element.id || element.className, width: element.getBoundingClientRect().width, height: element.getBoundingClientRect().height })));
+          assert.ok(controls.every(control => control.width >= 44 && control.height >= 44), `${label}: touch targets remain 44px: ${JSON.stringify(controls)}`);
         }
-        const textOverflow = await page.evaluate(() => ['.brand h1','.welcome h2','.welcome-copy','.start-hint','.world-status'].flatMap(selector => {
-          const element = document.querySelector(selector);
+        const textOverflow = await page.evaluate(() => ['.brand h1','.welcome h2','.mode-card h3','.mode-card p','.start-hint','.world-status'].flatMap(selector => [...document.querySelectorAll(selector)].flatMap(element => {
           if (!element.getClientRects().length) return [];
           const bounds = element.getBoundingClientRect(), range = document.createRange(); range.selectNodeContents(element);
           return [...range.getClientRects()].filter(rectangle => rectangle.width && (rectangle.left < bounds.left - 1 || rectangle.right > bounds.right + 1)).map(() => selector);
-        }));
+        })));
         assert.deepEqual(textOverflow, [], `${label}: text fits its own region`);
         await page.screenshot({ path: new URL(`${label}.png`, output).pathname.replace(/^\/([A-Za-z]:)/, '$1') });
         results.push({ label, rectangles });
