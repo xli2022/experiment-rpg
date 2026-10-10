@@ -12,15 +12,15 @@ A mode adds the game on top: goals, rules, characters, its own HUD panels and it
 
 | Mode | Source | What it shows |
 | --- | --- | --- |
+| **Free roam** (default) | [`src/modes/free-roam/index.js`](../src/modes/free-roam/index.js) | The smallest complete mode, about 60 lines: a save slot, a HUD panel and map markers. No quests and no weapon. |
 | **The Last Signal** | [`src/modes/story/`](../src/modes/story/index.js) | The full RPG: six chapters, contacts and dialogue, quests, drones, the weapon, shops, the journal and endings. See [STORY.md](STORY.md). |
-| **Free roam** | [`src/modes/free-roam/index.js`](../src/modes/free-roam/index.js) | The smallest complete mode, about 60 lines: a save slot, a HUD panel and map markers. No quests and no weapon. |
 
 Each registered mode gets a card on the start screen, with its title, tagline, description and save summary, plus **Continue** (or **Start**) and **New game**. The last mode played is preselected. **Change mode** in the pause menu saves, disposes the current mode and returns to the cards without reloading the page.
 
 ## Adding a mode
 
 1. Create `src/modes/<id>/index.js` with a default-exported definition.
-2. Add it to `MODES` in [`src/modes/index.js`](../src/modes/index.js). Picker order follows the array.
+2. Add it to `MODES` in [`src/modes/index.js`](../src/modes/index.js). Picker order follows the array, and the first entry is preselected until the player has played a mode.
 
 A mode imports from `core`, `world`, `actors` and the engine helpers it needs, but **never from another mode**. The engine never imports a mode. [`tests/module-layers.test.js`](../tests/module-layers.test.js) enforces both rules.
 

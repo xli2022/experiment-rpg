@@ -4,8 +4,9 @@ const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;'
 
 /**
  * Start-screen cards, one per registered mode: title, tagline, description,
- * save summary and Continue / New game. The last played mode is preferred and
- * its primary button is `#start-button`.
+ * save summary and Continue / New game. The last played mode is preferred (the
+ * first registered mode before anything has been played), and its primary
+ * button is `#start-button`.
  */
 export function modeCards(modes, storage) {
   const last = storage.getItem(LAST_MODE_KEY) ?? modes[0].id;

@@ -1,6 +1,6 @@
 # AFTERLIGHT: THE LAST SIGNAL
 
-A cyberpunk open city for desktop and mobile browsers, with plug-in game modes. **The Last Signal** is a playable RPG: investigate a blackout that erased thousands of residents from Afterlight’s civic network, meet the people keeping the city alive, and decide who controls its future. **Free roam** is the same city with no missions. New modes reuse the city, its traffic and the player; see [game modes](docs/MODES.md). Built with Three.js and Vite, with a procedural city, characters using CC0 MakeHuman assets, and downloaded CC0 Quaternius animations retargeted in Blender. There are no proprietary game assets or paid runtime services. See [character sources](assets/characters/SOURCES.md), [animation sources](assets/animations/quaternius/SOURCES.md), and the [story and world guide](docs/STORY.md).
+A cyberpunk open city for desktop and mobile browsers, with plug-in game modes. **Free roam**, the default, is the city with no missions. **The Last Signal** is a playable RPG: investigate a blackout that erased thousands of residents from Afterlight’s civic network, meet the people keeping the city alive, and decide who controls its future. New modes reuse the city, its traffic and the player; see [game modes](docs/MODES.md). Built with Three.js and Vite, with a procedural city, characters using CC0 MakeHuman assets, and downloaded CC0 Quaternius animations retargeted in Blender. There are no proprietary game assets or paid runtime services. See [character sources](assets/characters/SOURCES.md), [animation sources](assets/animations/quaternius/SOURCES.md), and the [story and world guide](docs/STORY.md).
 
 ## Run
 
@@ -11,7 +11,7 @@ npm install
 npm run dev -- --port 5173
 ```
 
-Open **http://localhost:5173**. Choose a mode on the start screen: **The Last Signal** or **Free roam**. Each card shows its save and offers Continue or New game; **Change mode** in the pause menu returns to the cards.
+Open **http://localhost:5173**. Choose a mode on the start screen: **Free roam** (preselected the first time) or **The Last Signal**. After that, the mode you last played is preselected. Each card shows its save and offers Continue or New game; **Change mode** in the pause menu returns to the cards.
 
 To play on a phone, connect it to the same Wi-Fi as the computer and open the **Network** URL printed by Vite. The server listens on all interfaces. The computer's firewall must allow the development server on the private network. Landscape is recommended; portrait also works. A public deployment requires serving the `dist` directory over HTTPS.
 
