@@ -1,7 +1,7 @@
 import { orientedPrism } from './physics.js';
-import { footprintShape, footprintFrontage, footprintVertices } from './building-footprints.js';
+import { footprintShape, footprintFrontage, footprintVertices, polygonFaces } from './building-footprints.js';
 
-const hash = text => {
+export const hash = text => {
   let n = 2166136261;
   for (const c of text) n = Math.imul(n ^ c.charCodeAt(0), 16777619);
   // Avalanche before selecting four choices: FNV's low bits alone correlate
@@ -144,7 +144,35 @@ export function buildingVolumeColliders(p, volumes = buildingVolumes(p)) {
     part.w, part.d, p.yaw, base + part.y + part.h / 2 + (part.cap ? .5 : 0),
     i === 0 ? p.ground ?? base : base + part.y - part.h / 2,
     part.shape === 'circle' || part.shape === 'hexagon' ? part.shape : 'rectangle',
-    { id: `building:${p.id}${i ? `:volume:${i}` : ''}`, climbable: part.h > 2 }));
+    { id: `building:${p.id}${i ? `:volume:${i}` : ''}`, climbable: part.h > 2, ...(i ? {} : { buildingId: p.id }) }));
+}
+
+// Street doors in building-local space (front is +Z), matching the glazed and
+// roll-up entrances drawn by buildingDetails. `glass` is the drawn panel width;
+// `width`/`height` is the walkable opening an interior cuts through the wall.
+export function buildingEntrances(p, design = buildingDesign(p)) {
+  const { w, d, type } = p, { variant: v } = design, freight = type === 'warehouse' || type === 'factory';
+  const opening = (kind, glass) => kind === 'roller'
+    ? { width: Math.min(4, glass * .9), height: 4.2 } : { width: Math.min(2, Math.max(1.2, glass * .6)), height: 2.5 };
+  if (p.footprint && p.footprint !== 'rectangle') {
+    const front = footprintFrontage(p), kind = freight ? 'roller' : 'door', glass = front.width * .66;
+    // A curved wall can only open within one flat segment of its perimeter.
+    const face = polygonFaces(footprintVertices(p.footprint, w, d)).reduce((best, f) => f.nz > best.nz ? f : best);
+    const size = opening(kind, glass);
+    return [{ id: 'main', kind, x: face.x, z: face.z, nx: face.nx, nz: face.nz, glass, ...size, width: Math.min(size.width, face.width - .1) }];
+  }
+  const front = d / 2, at = (id, kind, x, glass) => ({ id, kind, x, z: front, nx: 0, nz: 1, glass, ...opening(kind, glass) });
+  if (type === 'market') {
+    const count = v % 2 ? 4 : 3, bay = w / count;
+    return Array.from({ length: count }, (_, i) => at(`bay-${i}`, 'door', -w / 2 + bay * (i + .5), bay * .83));
+  }
+  if (freight) {
+    const count = v % 2 ? 2 : 3, bay = w * .8 / count;
+    return Array.from({ length: count }, (_, i) => at(`bay-${i}`, 'roller', (i - (count - 1) / 2) * bay, bay * .76));
+  }
+  const entrances = [at('main', 'door', type === 'office' ? design.mirror * w * .18 : 0, w * (type === 'civic' ? .45 : .27))];
+  if (type === 'terrace') for (const side of [-1, 1]) entrances.push(at(side < 0 ? 'west' : 'east', 'door', side * w / 3, w * .14));
+  return entrances;
 }
 
 // All decoration is batched with the existing city materials. Larger features

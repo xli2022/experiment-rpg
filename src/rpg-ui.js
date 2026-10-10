@@ -88,6 +88,7 @@ export class RPGUI {
     if (kind === 'memory') this.openMemory(id);
     if (kind === 'filter') { this.mapFilter = id; this.renderMap(); }
     if (kind === 'place') { this.selectedPlace = id; const place = placeById(id); if (place) Object.assign(this.cb.mapView, { x: place.x, z: place.z }); this.renderMap(); }
+    if (kind === 'floor') this.cb.elevator(Number(id));
     if (kind === 'travel') { const result = this.cb.travel(id); if (result !== true) this.cb.notify(result); else this.cb.close(); }
     if (kind === 'clear-pin') { this.game.pin = null; this.renderMap(); }
     // Replacing a quest or map list removes its focused button from the DOM.
@@ -174,6 +175,11 @@ export class RPGUI {
   openMemory(id) {
     const m = placeById(id); this.cb.open('service'); $('service-kicker').textContent = `MEMORY FRAGMENT / ${m.author}`; $('service-title').textContent = m.name;
     $('service-content').innerHTML = `<p class="memory-reading">${esc(m.description)}</p><p class="service-note">Saved to your journal’s memory archive.</p>${button('Keep moving ↗', 'close', 'accent')}`;
+  }
+  openElevator(levels, current) {
+    this.cb.open('service'); $('service-kicker').textContent = 'BUILDING / ELEVATOR'; $('service-title').textContent = 'Choose a floor.';
+    const floors = Array.from({ length: levels }, (_, i) => levels - 1 - i);
+    $('service-content').innerHTML = `<div class="elevator-floors">${floors.map(level => button(String(level + 1), `floor:${level}`, level === current ? '' : 'accent', level === current)).join('')}</div>`;
   }
   showTerminal(place, text) {
     this.cb.open('service'); $('service-kicker').textContent = 'AFTERLIGHT / LOCAL TERMINAL'; $('service-title').textContent = place.name;

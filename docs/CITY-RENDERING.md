@@ -14,7 +14,7 @@ Citywide infill extends the neighborhood pattern into the remaining sparse land.
 
 Eastpoint introduces the vertical layout immediately: a street-level hideout, an **+4 m Upper Market**, a pedestrian skywalk and bay terrace, and the expressway above them. Both ends of the pedestrian route have walkable access ramps. The Citadel has a **+6 m concourse**, and the Stacks has a raised community terrace. Railings leave openings at adjoining decks and access ramps. Viaduct piers are excluded from lower traffic and pedestrian routes.
 
-Authored towers frame Eastpoint within walking distance, following the footprint and height bounds of their region. The eight candidate anchors, kiosks, planters and signs use compressed local offsets around the reference-map interchange; footprint clearance can omit an anchor where a traced road needs the space. Their stepped podiums, upper floors and roof terraces have matching physical geometry. Procedural districts add corporate towers, residential slabs with balconies, old terraces, markets, factories and warehouse yards. Footprints, lot spacing and setbacks use the compact layout, while regional height profiles give each skyline a distinct scale. Closer neighboring roofs support sprint jumps from taller buildings to lower buildings; routes need not work in both directions. Road clearance and reserved story locations are applied before placing buildings. Scenery buildings have no interiors.
+Authored towers frame Eastpoint within walking distance, following the footprint and height bounds of their region. The eight candidate anchors, kiosks, planters and signs use compressed local offsets around the reference-map interchange; footprint clearance can omit an anchor where a traced road needs the space. Their stepped podiums, upper floors and roof terraces have matching physical geometry. Procedural districts add corporate towers, residential slabs with balconies, old terraces, markets, factories and warehouse yards. Footprints, lot spacing and setbacks use the compact layout, while regional height profiles give each skyline a distinct scale. Closer neighboring roofs support sprint jumps from taller buildings to lower buildings; routes need not work in both directions. Road clearance and reserved story locations are applied before placing buildings. Every building's base volume can be entered; see [interiors](#interiors).
 
 `building-design.js` supplies four architectural variants for each of the seven uses. Offices combine setbacks, split towers and offset upper floors; residences use paired wings, balcony slabs and garden terraces. Row houses have separate stepped parapets, civic buildings have piers and raised halls, markets have striped awnings and clerestories, and industrial sheds have different roof monitors and chimney arrangements. Paint, accents and handedness are selected independently from each building's stable ID, then the paint is blended with its district palette. The same solid volumes supply visible walls, roof slabs, equipment, climbing targets and landing support. Each recipe fits its reserved lot.
 
@@ -98,6 +98,31 @@ Region membership is resolved at each building's center, including boundary lots
 
 Polygon collision uses the rendered wall planes rather than the enclosing rectangle. Walking, vehicles, camera/projectile rays and roof support leave the unused corners open. Climbing follows the actual faces and allows sideways movement around circular and hexagonal perimeters. Tests compare physics with independent mesh raycasts, check whole-map regional averages and boundaries, and exercise climbing and roof landings on both shapes.
 
+## Interiors
+
+`interior-plan.js` derives each building's interior from its blueprint, with no Three.js dependency. Volume 0, the full-footprint base tier, becomes the cavity. Floors start 0.12 m above the plinth and repeat every 3.6 m, the same storey height as the facade window grid; the top floor takes the remainder. Warehouses and factories are single open halls with an enclosed office. Other buildings get a switchback stair core, plus a lift above three storeys:
+
+- **Pinwheel** layouts put the core in the middle, with a ring landing and four convex wings.
+- **Side-core** layouts place it against the back wall when the footprint is under about 15 m across.
+- **Single** layouts are one-storey rooms without a core.
+
+Every wing shares a full side with the landing, so each unit opens straight onto it. Units divide into living rooms, bedrooms and bathrooms. Office floors stay open-plan apart from a meeting room. Ground floors become lobbies or shops wherever a street door opens. Street doors come from `buildingEntrances()`, which matches the glazed and roll-up entrances drawn on the facade. Rooms and units have stable IDs such as `<building>/12B:kitchen`, for attaching residents and evidence later. Plans are cached, average under 1 ms each, and are identical across streaming and reloads.
+
+`interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, `main.js` switches to that building's interior context:
+
+- Movement, support, the camera, shots and drone line of sight swap the solid base collider for hull walls. Their outer faces lie exactly on the same perimeter, so the swap matters only at door gaps.
+- Floor slabs are convex polygons, never overhanging the outline. Stair flights are support ramps, 1.8 m rise over 3.6 m run, separated by a solid divider. Partitions, rails and furniture are ordinary solids. Windows are glazed: they are visual openings, not exits.
+- Entrance steps outside each door are permanent support pieces. Crowds and traffic keep using the exterior colliders.
+
+Indoors the player jogs rather than sprints, and the camera moves closer. In very tight rooms it switches to head height. Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
+
+`interiors.js` builds merged geometry for each floor in building-local space:
+
+- **Lighting:** it is baked into vertex colors on unlit materials, so no scene lights are added and city shaders never recompile. Some units are dark, reflecting the building's lit or dark facade.
+- **Doors:** pocket doors and street doors slide open as the player approaches.
+- **What is shown:** inside, the current floor ±1. Outside, the lobby of any building whose door is within 25 m. At most one floor is built per frame, and unused floors are released after 1.5 s.
+- **Shell cut-outs:** the facade, industrial, stone and glass materials share a small clip uniform set. Up to four street doorways are cut out of the shell once their lobby exists. For the occupied building, its cavity discards exterior trim such as balcony rings that would otherwise cross the rooms.
+
 ## Traversal, quests and saves
 
 Solid walls, piers, railings and furniture use height-aware collision. Sloped road and ramp slabs are support surfaces: they provide walking/vehicle height and ray cover without becoming invisible vertical barriers. The player can walk under a bridge, climb above it, or drive onto it through its ramp. Rooftop equipment and stepped terraces collide at their real elevations. Climbing, jumping, the following camera, car exits and contact shadows use these support heights.
@@ -117,6 +142,17 @@ The automated suites cover deterministic district generation, bounded blueprint 
 The building-variety checks cover distinct silhouettes and independent finishes, supported roof equipment, rotated roof raycasts versus collision, all six facade tiles, selective window emission, shared material batches and UV-buffer regeneration after eviction. District previews were inspected at Eastpoint, Ember Heights, Foundry, Citadel and Shadowmarket. The live game was checked in High and Performance modes without console or shader errors. These browser checks do not establish physical-device frame rates.
 
 With Vite running and Playwright available, `node scripts/check_building_windows.mjs` checks the actual WebGL output for all six facades and all three footprints. It measures dominant light levels, rejects repeating floor/column patterns at 4–32-window intervals, checks separate seeds/faces/sections, and verifies identical windows after chunk eviction. Circular and hexagonal tests locate real pane interiors with mesh raycasts before sampling their pixels. `LAYOUT_URL`, `PLAYWRIGHT_MODULE` and `CHROMIUM_EXECUTABLE` can select the server and local browser installation; results are saved in `test-results/building-windows/`.
+
+Interior suites generate plans for buildings across every district. They check:
+- convex zones that tile each floor inside the walls
+- reachability of every room from a street door or stair landing
+- stairs and lifts where required, and doors matching the drawn entrances
+- unique unit IDs, floors above the terrain, and furniture clear of doorways
+
+Physics tests check:
+- that the hull matches the shell for collision and rays outside door gaps
+- a walk from the street up one storey at 20, 30, 60 and 120 FPS with no falls or wall overlaps
+- rays from inside, indoor save validation, and entrance step heights
 
 The renderer audit checks all 63 remapped world objects with surrounding arrival positions against the generated solid geometry. The road audit samples both road edges and ramp routes against terrain and collision metadata. Current city changes should be checked with `npm test` and `npm run build -- --configLoader runner`, followed by desktop and mobile browser traversal. Development-only `window.__AFTERLIGHT__.snapshot()` reports renderer submissions, streaming residency, blueprint counts, actor activity and CPU update/submission costs. These counters and desktop browser frame rates are not physical-phone GPU measurements.
 

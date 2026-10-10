@@ -58,6 +58,62 @@ const windowHashGLSL = `
   }
 `;
 
+// Exterior materials can be cut open around the building the player occupies:
+// up to four street doorways (world boxes) and that building's interior cavity,
+// where exterior trim such as balcony rings would otherwise cross the rooms.
+export const INTERIOR_CLIP_DOORS = 4;
+export function interiorClipUniforms() {
+  return {
+    interiorDoorCenter: { value: Array.from({ length: INTERIOR_CLIP_DOORS }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    interiorDoorHalf: { value: Array.from({ length: INTERIOR_CLIP_DOORS }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    interiorCavity: { value: new THREE.Vector4(0, 0, 0, 0) },
+    interiorCavityRange: { value: new THREE.Vector4(0, 0, 0, 0) },
+  };
+}
+export function patchInteriorClip(material, uniforms) {
+  const previous = material.onBeforeCompile, key = material.customProgramCacheKey();
+  material.onBeforeCompile = (shader, renderer) => {
+    previous.call(material, shader, renderer);
+    Object.assign(shader.uniforms, uniforms);
+    shader.vertexShader = `varying vec3 vInteriorClip;\n${shader.vertexShader}`.replace('#include <project_vertex>', `#include <project_vertex>
+      vec4 interiorClipWorld = vec4(transformed, 1.0);
+      #ifdef USE_INSTANCING
+        interiorClipWorld = instanceMatrix * interiorClipWorld;
+      #endif
+      vInteriorClip = (modelMatrix * interiorClipWorld).xyz;`);
+    shader.fragmentShader = `varying vec3 vInteriorClip;
+      uniform vec4 interiorDoorCenter[${INTERIOR_CLIP_DOORS}];
+      uniform vec4 interiorDoorHalf[${INTERIOR_CLIP_DOORS}];
+      uniform vec4 interiorCavity;
+      uniform vec4 interiorCavityRange;
+      ${shader.fragmentShader}`.replace('void main() {', `void main() {
+      for (int i = 0; i < ${INTERIOR_CLIP_DOORS}; i++) {
+        vec4 door = interiorDoorCenter[i], size = interiorDoorHalf[i];
+        if (size.w < .5) continue;
+        vec3 d = vInteriorClip - door.xyz;
+        float c = cos(door.w), s = sin(door.w);
+        vec2 local = vec2(d.x * c - d.z * s, d.x * s + d.z * c);
+        if (abs(local.x) < size.x && abs(d.y) < size.y && abs(local.y) < size.z) discard;
+      }
+      if (interiorCavity.w > .5 && vInteriorClip.y > interiorCavityRange.x && vInteriorClip.y < interiorCavityRange.y) {
+        vec2 d = vInteriorClip.xz - interiorCavity.xy;
+        float c = cos(interiorCavity.z), s = sin(interiorCavity.z);
+        vec2 local = vec2(d.x * c - d.y * s, d.x * s + d.y * c);
+        bool inside = true;
+        if (interiorCavity.w < 1.5) inside = abs(local.x) < interiorCavityRange.z && abs(local.y) < interiorCavityRange.w;
+        else if (interiorCavity.w < 2.5) {
+          for (int k = 0; k < 6; k++) {
+            float a = .5235988 + float(k) * 1.0471976;
+            if (dot(local, vec2(cos(a), sin(a))) > interiorCavityRange.z) inside = false;
+          }
+        } else inside = length(local) < interiorCavityRange.z;
+        if (inside) discard;
+      }`);
+  };
+  material.customProgramCacheKey = () => `${key}|interior-clip-v1`;
+  return material;
+}
+
 export function createFacadeMaterial() {
   const diffuse = new Uint8Array(WIDTH * HEIGHT * 4), emission = new Uint8Array(diffuse.length);
   for (let tile = 0; tile < 16; tile++) for (let y = 0; y < TILE; y++) for (let x = 0; x < TILE; x++) {

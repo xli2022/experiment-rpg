@@ -3,8 +3,10 @@ import { signTexture } from './city.js';
 import { createTerrainMaterials } from './terrain-materials.js';
 import { buildingSign, createBuildingSignMaterial } from './building-signs.js';
 import { createInfrastructureIndex, geometryVolume, infrastructureIntersections, roadSolidRecipes, supportSolidRecipe } from './infrastructure-clearance.js';
-import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetails } from './building-design.js';
-import { createFacadeMaterial, facadeUV } from './building-materials.js';
+import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetails, buildingEntrances } from './building-design.js';
+import { cachedInteriorPlan } from './interior-plan.js';
+import { entranceSteps, interiorContext, interiorSpatial } from './interior-physics.js';
+import { createFacadeMaterial, facadeUV, interiorClipUniforms, patchInteriorClip } from './building-materials.js';
 import { DISTRICT_ARCHITECTURE, sampleArchitecture, buildingUseAtHeight } from './district-architecture.js';
 import { footprintShape } from './building-footprints.js';
 import { segmentHitsBox } from './city-plan.js';
@@ -313,6 +315,7 @@ export class VerticalMetropolis {
     for (const p of this.anchors) {
       if (!inBounds(p, bx * BLOCK_SIZE, bz * BLOCK_SIZE, (bx + 1) * BLOCK_SIZE, (bz + 1) * BLOCK_SIZE)) continue;
       const physical = buildingBoxes(p); p.box = physical[0]; p.sign = buildingSign(p, this.plan); buildings.push(p); colliders.push(...physical);
+      p.steps = entranceSteps(p, buildingEntrances(p), terrainHeight); colliders.push(...p.steps);
     }
     // Each block considers a halo wider than two maximum lot radii. A stable
     // priority comparison against every overlapping candidate produces the
@@ -325,6 +328,7 @@ export class VerticalMetropolis {
         (other.candidate.priority < p.priority || other.candidate.priority === p.priority && other.candidate.id < p.id) && lotsOverlap(p.lot, other))) continue;
       const physical = buildingBoxes(p);
       p.box = physical[0]; p.sign = buildingSign(p, this.plan); buildings.push(p); colliders.push(...physical);
+      p.steps = entranceSteps(p, buildingEntrances(p), terrainHeight); colliders.push(...p.steps);
       const yard = localPoint(p, 0, -p.d / 2 - 2.5), freight = districtStyle(districtAt(p.x, p.z)).freight;
       const yardBox = orientedBox(yard.x, yard.z, 7, 3.6, p.yaw);
       if (p.variation > .35 && !frontageBlocked(yardBox, this.plan, 3) && !isWater(yard.x, yard.z)) {
@@ -376,6 +380,10 @@ export class VerticalMetropolis {
       if (Math.abs(x * BLOCK_SIZE) < WORLD_LIMIT + BLOCK_SIZE && Math.abs(z * BLOCK_SIZE) < WORLD_LIMIT + BLOCK_SIZE) blocks.push(this.block(x, z));
     }
     return blocks;
+  }
+  buildingsNear(x, z, radius = 1) {
+    return this.area(x - radius, z - radius, x + radius, z + radius).flatMap(block => block.buildings.filter(p =>
+      p.box.minX - radius <= x && p.box.maxX + radius >= x && p.box.minZ - radius <= z && p.box.maxZ + radius >= z));
   }
   collidersIn(minX, minZ, maxX, maxZ) {
     const box = { minX, minZ, maxX, maxZ };
@@ -468,7 +476,8 @@ function addWeather(scene) {
 
 export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   const masterPlan = createMasterPlan(), metropolis = new VerticalMetropolis(masterPlan, reservedWorldObjects), mats = palette(), terrain = createTerrainMaterials({ vertexColors: true });
-  const buildingSigns = createBuildingSignMaterial();
+  const buildingSigns = createBuildingSignMaterial(), interiorClip = interiorClipUniforms();
+  for (const material of [mats.facade, mats.industrial, mats.stone, mats.glass]) patchInteriorClip(material, interiorClip);
   terrain.grass.vertexColors = false;
   // Pedestrian structures reuse the existing paving map on their actual slab,
   // keeping texture scale stable without adding a second coplanar top surface.
@@ -513,6 +522,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
         w: volume.w * .46, h: .32, d: volume.d * .46, tint: 0x799660 }, true);
     }
     for (const piece of buildingDetails(p, design, volumes)) part(piece, piece.detail);
+    for (const s of p.steps ?? []) add(mats.stone, s.x, (s.minY + s.maxY) / 2, s.z, s.w, s.maxY - s.minY, s.d, s.yaw, 0x7d8a8c, false);
     const sign = p.sign;
     add(mats.stone, sign.x - Math.sin(sign.yaw) * .13, sign.y, sign.z - Math.cos(sign.yaw) * .13, sign.w + .24, sign.h + .2, .18, sign.yaw, colors.dark, false);
     add(buildingSigns, sign.x, sign.y, sign.z, sign.w, sign.h, 1, sign.yaw, undefined, false, 'plane', 0, 0, sign.uv);
@@ -615,6 +625,16 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     }
   }
   const plan = { ...masterPlan, buildings: [], trees: [], features: [], props: [] };
+  // Interiors: a building's context swaps its solid shell for walkable rooms.
+  const interiorContextAt = (x, y, z) => {
+    for (const p of metropolis.buildingsNear(x, z, 1)) {
+      const context = interiorContext(cachedInteriorPlan(p), x, y, z);
+      if (context) return context;
+    }
+    return null;
+  };
+  const planNear = (x, z) => metropolis.buildingsNear(x, z, 1).map(cachedInteriorPlan).find(Boolean) ?? null;
   return { ...weather, ground, water, cars, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
+    interiorContextAt, planNear, interiorClip, spatialFor: context => context ? interiorSpatial(spatial, context) : spatial,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

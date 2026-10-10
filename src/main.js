@@ -31,6 +31,10 @@ import { createContactShadows } from './contact-shadows.js';
 import { createTraffic } from './traffic.js';
 import { findSpawnPosition } from './spawn.js';
 import { setupFullscreen } from './fullscreen.js';
+import { createInteriors } from './interiors.js';
+import { levelY, roomAt } from './interior-plan.js';
+import { toLocal } from './interior-physics.js';
+import { pointInConvex } from './building-footprints.js';
 import './npc.css';
 
 const $ = id => document.getElementById(id);
@@ -39,9 +43,9 @@ const storage = { getItem: key => window.localStorage.getItem(key), setItem: (ke
 const saved = readSave(storage), campaign = new Campaign(saved.progress);
 const state = { started: false, paused: false, mapOpen: false, modal: null, health: 100, armor: campaign.maxArmor, ammo: 24, reloading: 0, cooldown: 0, damageAt: -100, time: campaign.data.elapsed };
 const arrival = placeById('home');
-const player = { x: arrival.x, y: arrival.y ?? 0, z: arrival.z, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: arrival.y ?? 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null };
+const player = { x: arrival.x, y: arrival.y ?? 0, z: arrival.z, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: arrival.y ?? 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null, interior: null };
 let renderer, composer, bloom, city, character, hud, input, scene, camera, crowd, worldLife, rpgUI;
-let worldStream, sky, shadows, traffic, contactShadows, parachute;
+let worldStream, sky, shadows, traffic, contactShadows, parachute, interiors;
 const resolution = new ResolutionGovernor();
 const frameCosts = { updateMs: 0, renderMs: 0 };
 let driving = null, nearestCar = null, quality = 'high', animationId;
@@ -78,7 +82,7 @@ async function init() {
   await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 1000))]);
   $('loading-text').textContent = 'BUILDING AFTERLIGHT / STREETS, SKYWAYS & STORIES...';
   const characterAssets = await loadCharacterAssets();
-  city = createVerticalCity(scene, worldStream, WORLD_OBJECTS);
+  city = createVerticalCity(scene, worldStream, WORLD_OBJECTS); interiors = createInteriors(scene, city);
   crowd = createCrowd(scene, characterAssets.citizen, city, characterAssets.visitors, characterAssets.humanBases); character = createCharacter(characterAssets.player); scene.add(character.root);
   parachute = createParachute(); character.root.add(parachute.root);
   worldLife = createWorldLife(scene, characterAssets.citizen, campaign, characterAssets.humanBases);
@@ -87,8 +91,10 @@ async function init() {
   if (!spawn) throw new Error('No clear refuge arrival is available.');
   Object.assign(player, spawn, { groundY: spawn.y });
   const resume = saved.worldRevision === WORLD_REVISION ? saved.position : null;
-  if (saved.loaded && resume && !nearbyColliders(resume.x, resume.z, 2).some(box => !box.supportOnly && overlapsHeight(box, resume.y ?? 0) && circleHitsBox(resume.x, resume.z, .43, box))) {
-    player.x = resume.x; player.z = resume.z; player.y = Math.max(resume.y ?? 0, terrainHeight(resume.x, resume.z));
+  // A save made indoors resumes in that building's interior context.
+  const resumeContext = resume && city.interiorContextAt(resume.x, resume.y ?? 0, resume.z);
+  if (saved.loaded && resume && !city.spatialFor(resumeContext).near(resume.x, resume.z, 2).some(box => !box.supportOnly && overlapsHeight(box, resume.y ?? 0) && circleHitsBox(resume.x, resume.z, .43, box))) {
+    player.x = resume.x; player.z = resume.z; player.y = Math.max(resume.y ?? 0, terrainHeight(resume.x, resume.z)); player.interior = resumeContext;
     player.groundY = groundAt(player.x, player.z, player.y + .5);
   }
   if (saved.loaded && saved.worldRevision !== WORLD_REVISION) saved.warning = 'AFTERLIGHT COMPACTED // Your story is preserved. You have returned to your refuge in the smaller city.';
@@ -107,7 +113,7 @@ async function init() {
   contactShadows = createContactShadows(scene);
   hud = new HUD(city, campaign);
   input = new Input(canvas, { interact, reload, jump, climb: toggleClimb, fire: shoot, map: toggleMap, journal: toggleJournal, medkit: useMedkit, pause: togglePause, blur: () => { voice.stop(); if (state.started && !state.paused) setPause(true); }, audio: () => audio.init() });
-  rpgUI = new RPGUI(campaign, { voice, portraits, mapView: city.mapView, position: () => player, open: openModal, close: closeMenus, notify: (text) => hud.notify(text), changed: campaignChanged, medkit: useMedkit, health: () => state.health, upgraded: () => { state.armor = campaign.maxArmor; }, travel: fastTravel, newStory });
+  rpgUI = new RPGUI(campaign, { voice, portraits, mapView: city.mapView, position: () => player, open: openModal, close: closeMenus, notify: (text) => hud.notify(text), changed: campaignChanged, medkit: useMedkit, health: () => state.health, upgraded: () => { state.armor = campaign.maxArmor; }, travel: fastTravel, newStory, elevator: level => { if (useLift(level)) closeMenus(); else hud.notify('Step fully into the elevator to choose a floor.', 2); } });
   quality = input.touch ? 'low' : 'high'; $('quality').value = quality;
   setQuality(quality);
   setupUI(); updateCamera(.016, true); updateCharacter(.016);
@@ -132,7 +138,9 @@ async function init() {
     character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: crowd.count, crowdDrawCalls: crowd.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
     camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
     cars: city.cars.map(c => ({ x: c.x, y: c.y, z: c.z, trafficId: c.trafficId })), drones: drones.map(d => { const projected = d.root.position.clone().project(camera); return { x: d.root.position.x, y: d.root.position.y, z: d.root.position.z, health: d.health, dead: d.dead, screen: { x: projected.x, y: projected.y, z: projected.z } }; }),
-    colliders: city.colliders, objective: objective(), campaign: structuredClone(campaign.data), interaction: worldLife.nearest(player)?.id ?? null, renderer: renderer.capabilities.isWebGL2 ? 'WebGL2' : 'WebGL',
+    interior: player.interior && { building: player.interior.id, level: player.interior.level, levels: player.interior.plan.levels, inside: player.interior.inside, layout: player.interior.plan.layout,
+      room: player.interior.inside ? roomAt(player.interior.plan, player.interior.level, player.interior.local.x, player.interior.local.z)?.id ?? null : null, lift: nearLift() },
+    interiors: interiors.snapshot(), colliders: city.colliders, objective: objective(), campaign: structuredClone(campaign.data), interaction: worldLife.nearest(player)?.id ?? null, renderer: renderer.capabilities.isWebGL2 ? 'WebGL2' : 'WebGL',
   }) };
 }
 
@@ -252,8 +260,36 @@ function applyResolution() {
   renderer.setPixelRatio(Math.min(devicePixelRatio, RENDER_PROFILES[quality].dpr) * resolution.scale);
   if (composer) { composer.setPixelRatio(renderer.getPixelRatio()); composer.setSize(innerWidth, innerHeight); }
 }
-function nearbyColliders(x, z, radius = 8, exclude = null) {
-  return city.spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider));
+// The player's building context swaps that building's shell for its interior.
+function scenery() { return city.spatialFor(player.interior); }
+function nearbyColliders(x, z, radius = 8, exclude = null, spatial = scenery()) {
+  return spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider));
+}
+// Walls are only climbable from outside a building's outline.
+function climbColliders() { return player.interior?.inside ? nearbyColliders(player.x, player.z, 3) : nearbyColliders(player.x, player.z, 3, null, city.spatial); }
+function updateInterior() {
+  player.interior = driving || player.climb ? null : city.interiorContextAt(player.x, player.y, player.z);
+}
+function nearLift() {
+  const context = player.interior, lift = context?.inside && context.plan.core?.lift;
+  if (!lift || context.plan.levels < 2 || Math.abs(player.y - levelY(context.plan, context.level)) > .3) return false;
+  const p = toLocal(context.plan, player.x, player.z);
+  return p.x > lift.x0 && p.x < lift.x1 && p.z > lift.z0 && p.z < lift.z1;
+}
+function useLift(level) {
+  const context = player.interior;
+  if (!context || !nearLift() || level === context.level) return false;
+  // Every floor shares the same shaft: arrive at the same spot in the car.
+  const y = levelY(context.plan, level), target = city.interiorContextAt(player.x, y, player.z), spatial = city.spatialFor(target);
+  const floor = supportHeight(player.x, player.z, spatial.near(player.x, player.z, 2), y + .3, terrainHeight(player.x, player.z));
+  if (Math.abs(floor - y) > .05 || nearbyColliders(player.x, player.z, 2, null, spatial).some(box => !box.supportOnly && overlapsHeight(box, y) && circleHitsBox(player.x, player.z, .43, box))) return false;
+  resetTraversal(); player.y = player.groundY = y; player.interior = target;
+  player.vx = player.vz = player.speed = player.velocityY = 0; player.jumpPhase = '';
+  updateCharacter(.016); updateCamera(.016, true); input.clear();
+  hud.notify(`FLOOR ${level + 1}`, 2); return true;
+}
+function liftPlace() {
+  return nearLift() ? { id: 'lift', type: 'lift', name: `Elevator / floor ${player.interior.level + 1} of ${player.interior.plan.levels}` } : null;
 }
 function allCars() { return traffic ? city.cars.concat(traffic.cars) : city.cars; }
 function removeDrivableCar(car) {
@@ -263,7 +299,7 @@ function removeDrivableCar(car) {
   // Car materials are cached and shared with the remaining traffic.
   city.cars.splice(city.cars.indexOf(car), 1);
 }
-function groundAt(x, z, ceiling = Infinity) { return supportHeight(x, z, city.spatial.near(x, z, 2), ceiling, terrainHeight(x, z)); }
+function groundAt(x, z, ceiling = Infinity) { return supportHeight(x, z, scenery().near(x, z, 2), ceiling, terrainHeight(x, z)); }
 function refugeArrival(refuge) {
   const offset = refuge.arrivalOffset ?? { x: 0, z: -2 };
   return findSpawnPosition({ x: refuge.x + offset.x, y: refuge.y ?? terrainHeight(refuge.x, refuge.z), z: refuge.z + offset.z }, nearbyColliders, groundAt);
@@ -373,6 +409,7 @@ function interact() {
     player.vx = player.vz = player.speed = 0; player.jumpPhase = '';
     hud.notify(input.touch ? 'Weapon ready. Aim with the right side; tap the crosshair to fire.' : 'Back on foot. Left click to fire. Right click to aim.', 3);
   } else {
+    if (nearLift()) { rpgUI.openElevator(player.interior.plan.levels, player.interior.level); return; }
     const place = worldLife.nearest(player);
     if (place) { useWorldObject(place); return; }
     nearestCar = findNearestCar(); if (!nearestCar) {
@@ -399,7 +436,7 @@ function jump() {
   if (!grabWall(true)) beginJump(player);
 }
 function grabWall(requireFacing = false) {
-  const boxes = nearbyColliders(player.x, player.z, 3);
+  const boxes = climbColliders();
   if (!startClimb(player, findClimbFace(player, boxes, cameraYaw, requireFacing), boxes)) return false;
   cameraYaw = player.yaw; cameraPitch = .05;
   input.firing = input.aiming = false; state.reloading = 0;
@@ -411,7 +448,7 @@ function toggleClimb() {
   else if (!grabWall()) hud.notify('Move within arm’s reach of a building wall to climb.', 2);
 }
 function resetTraversal() {
-  player.climb = player.climbCandidate = null; player.groundY = player.pushTime = 0;
+  player.climb = player.climbCandidate = player.interior = null; player.groundY = player.pushTime = 0;
   resetFall(player);
   if (parachute) updateParachute(parachute, player, 0);
 }
@@ -468,7 +505,7 @@ function shoot() {
   if (state.ammo === 0) { reload(); return; }
   state.ammo--; state.cooldown = .2; shotRecoil = 1; character.flash.visible = true; characterShot(character); audio.shot();
   raycaster.setFromCamera(new THREE.Vector2(0, .02), camera); const ray = raycaster.ray;
-  let hitDistance = Math.min(150, rayObstructionDistance(ray.origin, ray.direction, 150, city.spatial, city.cars)), hitDrone = null, hitCar = null;
+  let hitDistance = Math.min(150, rayObstructionDistance(ray.origin, ray.direction, 150, scenery(), city.cars)), hitDrone = null, hitCar = null;
   for (const car of traffic.cars) {
     const distance = rayBoxDistance(ray.origin, ray.direction, carCollider(car), hitDistance);
     if (distance < hitDistance) { hitDistance = distance; hitCar = car; }
@@ -489,14 +526,14 @@ function shoot() {
       const distance = drone.root.position.distanceTo(ray.origin);
       if (vector.z < 1 && Math.hypot(vector.x, vector.y - .02) < .11 && distance < hitDistance) {
         direction.subVectors(drone.root.position, ray.origin).normalize();
-        if (rayObstructionDistance(ray.origin, direction, distance, city.spatial, allCars()) === Infinity) { hitDrone = drone; hitDistance = distance; break; }
+        if (rayObstructionDistance(ray.origin, direction, distance, scenery(), allCars()) === Infinity) { hitDrone = drone; hitDistance = distance; break; }
       }
     }
   }
   const endpoint = hitDrone ? hitDrone.root.position.clone() : ray.at(hitDistance, new THREE.Vector3());
   character.muzzle.getWorldPosition(muzzlePoint);
   direction.subVectors(endpoint, muzzlePoint); const length = direction.length(); direction.normalize();
-  const muzzleBlock = rayObstructionDistance(muzzlePoint, direction, length, city.spatial, allCars(), hitCar);
+  const muzzleBlock = rayObstructionDistance(muzzlePoint, direction, length, scenery(), allCars(), hitCar);
   if (muzzleBlock < length - .1) { endpoint.copy(muzzlePoint).addScaledVector(direction, muzzleBlock); hitDrone = null; hitCar = null; }
   tracer(muzzlePoint, endpoint);
   if (hitDrone) damageDrone(hitDrone, campaign.damage);
@@ -506,7 +543,9 @@ function shoot() {
 
 function updatePlayer(dt) {
   const axes = input.axes(), look = input.look();
-  cameraYaw -= look.x; cameraPitch = clamp(cameraPitch + look.y, -.65, 1.03);
+  updateInterior();
+  const indoors = !!player.interior?.inside;
+  cameraYaw -= look.x; cameraPitch = clamp(cameraPitch + look.y, -.65, indoors ? .6 : 1.03);
   if (driving) {
     const delta = stepVehicle(driving, axes.y, axes.x, input.keys.has('Space'), dt);
     const previousSpeed = driving.speed;
@@ -534,7 +573,8 @@ function updatePlayer(dt) {
     for (const drone of drones) if (!drone.dead && drone.root.position.distanceTo(driving.root.position) < 3.5 && Math.abs(driving.speed) > 9) damageDrone(drone, 100);
   } else {
     const amount = Math.hypot(axes.x, axes.y);
-    const sprint = input.keys.has('ShiftLeft') || input.keys.has('ShiftRight') || (input.touch && amount > .9);
+    // Indoors stays at a jog so stairs keep their footing at low frame rates.
+    const sprint = !indoors && (input.keys.has('ShiftLeft') || input.keys.has('ShiftRight') || (input.touch && amount > .9));
     const colliders = nearbyColliders(player.x, player.z, 3);
     if (player.climb) {
       const result = stepClimb(player, axes, dt, colliders, sprint);
@@ -557,7 +597,8 @@ function updatePlayer(dt) {
         hud.notify(input.touch ? 'PARACHUTE OPEN // Use the stick to steer toward a roof or the street.' : 'PARACHUTE OPEN // WASD to steer toward a roof or the street.', 4);
       }
     }
-    player.climbCandidate = player.climb ? null : findClimbFace(player, colliders);
+    updateInterior();
+    player.climbCandidate = player.climb ? null : findClimbFace(player, climbColliders());
     updateCharacter(dt); audio.update(0, false);
     if (input.firing) shoot();
     nearestCar = findNearestCar();
@@ -602,28 +643,36 @@ function updateContactShadows() {
 }
 
 function updateCamera(dt, snap = false) {
-  const glide = player.parachute?.openness ?? 0;
+  const glide = player.parachute?.openness ?? 0, indoors = !driving && !!player.interior?.inside;
   const aiming = !driving && !player.climb && !player.parachute && input?.aiming;
   // Leave room for the full canopy even in a narrow portrait viewport.
   const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect));
-  const distance = driving ? 10.4 : aiming ? 3.3 : 5.9 + glide * (glideDistance - 5.9);
+  const distance = driving ? 10.4 : aiming ? (indoors ? 2.2 : 3.3) : indoors ? 2.6 : 5.9 + glide * (glideDistance - 5.9);
   const targetHeight = driving ? 1.45 : 1.35 + glide * 1.25;
   cameraTarget.set(player.x, player.y + targetHeight, player.z);
-  const shoulder = driving ? .35 : aiming ? .8 : .68 * (1 - glide * .7);
+  const shoulder = driving ? .35 : aiming ? (indoors ? .55 : .8) : indoors ? .4 : .68 * (1 - glide * .7);
   cameraTarget.x += Math.cos(cameraYaw) * shoulder; cameraTarget.z -= Math.sin(cameraYaw) * shoulder;
   desiredCamera.set(cameraTarget.x + Math.sin(cameraYaw) * Math.cos(cameraPitch) * distance, cameraTarget.y + Math.sin(cameraPitch) * distance + .5, cameraTarget.z + Math.cos(cameraYaw) * Math.cos(cameraPitch) * distance);
   // Prevent the follow camera from clipping through nearby buildings.
   direction.subVectors(desiredCamera, cameraTarget); const length = direction.length(); direction.normalize();
   let obstruction = length;
-  for (const box of city.spatial.along(cameraTarget, direction, length)) obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, { ...box, w: box.w === undefined ? undefined : box.w + .5, d: box.d === undefined ? undefined : box.d + .5, minX: box.minX - .25, maxX: box.maxX + .25, minZ: box.minZ - .25, maxZ: box.maxZ + .25 }, length));
-  if (obstruction < length) desiredCamera.copy(cameraTarget).addScaledVector(direction, Math.max(.6, obstruction - .35));
+  const pad = indoors ? .12 : .25;
+  for (const box of scenery().along(cameraTarget, direction, length)) {
+    if (box.faces) { obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, box, length)); continue; }
+    obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, { ...box, w: box.w === undefined ? undefined : box.w + pad * 2, d: box.d === undefined ? undefined : box.d + pad * 2, minX: box.minX - pad, maxX: box.maxX + pad, minZ: box.minZ - pad, maxZ: box.maxZ + pad }, length));
+  }
+  if (obstruction < length) desiredCamera.copy(cameraTarget).addScaledVector(direction, Math.max(indoors ? .35 : .6, obstruction - (indoors ? .2 : .35)));
+  // In a tight room, look from the head rather than from inside the jacket.
+  const close = indoors && !aiming && obstruction < 1.15;
+  if (close) desiredCamera.set(player.x, player.y + 1.62, player.z);
   if (snap) camera.position.copy(desiredCamera); else camera.position.lerp(desiredCamera, 1 - Math.exp(-12 * dt));
   const groundCorrection = Math.max(0, terrainHeight(camera.position.x, camera.position.z) + .55 - camera.position.y);
   camera.position.y += groundCorrection;
-  camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + shotRecoil * .045, cameraTarget.z);
+  if (close) camera.lookAt(camera.position.x - direction.x * 5, camera.position.y - direction.y * 5 + shotRecoil * .045, camera.position.z - direction.z * 5);
+  else camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + shotRecoil * .045, cameraTarget.z);
   camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();
   camera.updateMatrixWorld();
-  character.root.visible = !driving && camera.position.distanceTo(character.root.position) > 1.5;
+  character.root.visible = !driving && !close && camera.position.distanceTo(character.root.position) > (indoors ? .8 : 1.5);
 }
 
 function damagePlayer(amount) {
@@ -656,7 +705,7 @@ function updateDrones(dt) {
       if (drone.fireTimer <= 0) {
         drone.fireTimer = 2.1 + Math.random() * .6;
         direction.subVectors(targetPosition, pos).normalize();
-        const visible = rayObstructionDistance(pos, direction, distance, city.spatial, allCars(), driving) === Infinity;
+        const visible = rayObstructionDistance(pos, direction, distance, scenery(), allCars(), driving) === Infinity;
         if (visible) { drone.engaged = true; tracer(pos, targetPosition, 0xff4967, .13); damagePlayer(driving ? 3 : 6); }
       }
     }
@@ -684,6 +733,9 @@ function updateWeather(dt) {
     positions.setY(i, y); positions.setY(i + 1, y + .52);
   }
   positions.needsUpdate = true; city.rain.position.set(player.x, player.y, player.z); city.motes.position.set(player.x, player.y, player.z); city.motes.rotation.y += dt * .012;
+  // Rain stays outside: hide it while the camera is within the occupied building.
+  const plan = player.interior?.plan, local = plan && toLocal(plan, camera.position.x, camera.position.z);
+  city.rain.visible = city.motes.visible = !(plan && camera.position.y < plan.top && pointInConvex(plan.outline, local.x, local.z));
 }
 
 function frame(now) {
@@ -697,7 +749,7 @@ function frame(now) {
     traffic.update(dt, player, driving, camera, crowd.people);
     if (state.started) updatePlayer(dt);
     if (!state.started) updateCharacter(dt);
-    updateCamera(dt); updateDrones(dt); updateEffects(dt); updateWeather(dt); crowd.update(dt, player, camera, RENDER_PROFILES[quality].actors); worldLife.update(dt, state.time, player, RENDER_PROFILES[quality].actors, camera);
+    updateCamera(dt); interiors.update(player, player.interior, now / 1000, dt); updateDrones(dt); updateEffects(dt); updateWeather(dt); crowd.update(dt, player, camera, RENDER_PROFILES[quality].actors); worldLife.update(dt, state.time, player, RENDER_PROFILES[quality].actors, camera);
   }
   sky.position.copy(camera.position);
   worldStream.update(camera, player, now / 1000);
@@ -717,7 +769,7 @@ function frame(now) {
   const goal = objective(); hud.waypoint(camera, goal, player, vector, state.started && !state.paused);
   $('crosshair').classList.toggle('aim', !!input.aiming);
   if (now - lastUI > 85) {
-    hud.update(state, player, driving, nearestCar, goal, fps, worldLife.nearest(player)); hud.drawMap(player, cameraYaw, drones, goal);
+    hud.update(state, player, driving, nearestCar, goal, fps, liftPlace() ?? worldLife.nearest(player)); hud.drawMap(player, cameraYaw, drones, goal);
     if (state.mapOpen) hud.drawMap(player, cameraYaw, drones, goal, true);
     const minute = 48 + Math.floor(state.time / 45); $('game-time').textContent = `${String((23 + Math.floor(minute / 60)) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
     lastUI = now;

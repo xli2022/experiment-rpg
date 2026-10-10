@@ -6,6 +6,7 @@ import { coastX } from './master-plan.js';
 import { WORLD_LIMIT } from './world-config.js';
 import { CITY_SCALE } from './world-scale.js';
 import { constrainMapView, MAP_WORLD_SPAN } from './map-viewport.js';
+import { roomAt } from './interior-plan.js';
 
 const $ = id => document.getElementById(id);
 export class HUD {
@@ -61,7 +62,7 @@ export class HUD {
     n.interaction.classList.toggle('hidden', !canInteract);
     if (canInteract) {
       n['interact-caption'].textContent = nearby ? nearby.name.toUpperCase() : 'ARCHER GT / AVAILABLE';
-      n['interact-label'].textContent = nearby ? ({ contact: 'Talk', cache: 'Search supplies', memory: 'Recover memory', terminal: 'Access terminal', transit: 'Open transit map', rest: 'Rest & recover', board: 'Browse local jobs' }[nearby.type]) : 'Take the wheel';
+      n['interact-label'].textContent = nearby ? ({ contact: 'Talk', cache: 'Search supplies', memory: 'Recover memory', terminal: 'Access terminal', transit: 'Open transit map', rest: 'Rest & recover', board: 'Browse local jobs', lift: 'Choose a floor' }[nearby.type]) : 'Take the wheel';
     }
     if (performance.now() > this.notificationUntil) n.notification.classList.add('hidden');
     const distance = Math.round(Math.hypot(player.x - objective.x, player.z - objective.z));
@@ -72,7 +73,7 @@ export class HUD {
     n['objective-text'].textContent = objective.text;
     n['mission-reward'].textContent = objective.quest ? `+${formatCurrency(objective.quest.reward)}` : 'J / FIELD JOURNAL';
     const district = districtAt(player.x, player.z).name.toUpperCase();
-    n.district.textContent = district; n['map-district'].textContent = district;
+    n.district.textContent = player.interior?.inside ? interiorLabel(player.interior) : district; n['map-district'].textContent = district;
   }
   waypoint(camera, objective, player, vector, active) {
     const el = this.nodes.waypoint;
@@ -201,4 +202,11 @@ export class HUD {
     }
     ctx.drawImage(cache.canvas, -128 + (cache.x - cx) * scale, -128 + (cache.z - cz) * scale);
   }
+}
+
+// "Building · floor · unit or room", e.g. NORTHLIGHT HOMES · FLOOR 12 · 12B.
+export function interiorLabel({ plan, level, local }) {
+  const room = roomAt(plan, level, local.x, local.z);
+  const where = room?.unit ? room.unit.slice(plan.id.length + 1) : room ? room.kind.toUpperCase() : null;
+  return [(plan.name ?? plan.type).toUpperCase(), `FLOOR ${level + 1}`, where].filter(Boolean).join(' · ');
 }
