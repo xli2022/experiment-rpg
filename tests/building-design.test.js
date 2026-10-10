@@ -6,7 +6,7 @@ import { createFacadeMaterial, FACADE_STYLES, facadeUV } from '../src/world/buil
 import { createVerticalCity } from '../src/world/vertical-city.js';
 import { WorldStream, WORLD_GEOMETRY } from '../src/world/world-stream.js';
 import { SHOWCASE } from '../src/world/master-plan.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { boxContainsPoint, supportHeight } from '../src/core/physics.js';
 
 const types = ['office', 'apartment', 'terrace', 'civic', 'market', 'warehouse', 'factory'];
@@ -109,7 +109,7 @@ test('facade atlas banks contain uniform dark/lit panes for per-window shader se
 });
 
 test('facade variants batch by footprint with one shared material and release their per-chunk UV buffers', () => {
-  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, LANDMARKS);
   const buildings = city.metropolis.area(SHOWCASE.x - 180, SHOWCASE.z - 180, SHOWCASE.x + 180, SHOWCASE.z + 180).flatMap(b => b.buildings);
   const materials = new Set(), tiles = new Set();
   try {

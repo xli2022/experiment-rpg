@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { DISTRICT_ARCHITECTURE, BUILDING_FOOTPRINTS, SKYSCRAPER_HEIGHT } from '../src/world/district-architecture.js';
 import { MASTER_DISTRICTS, createMasterPlan, districtAt } from '../src/world/master-plan.js';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { WORLD_LIMIT } from '../src/world/world-config.js';
 import { buildingVolumes, buildingVolumeColliders } from '../src/world/building-design.js';
 import { WORLD_GEOMETRY } from '../src/world/world-stream.js';
@@ -15,7 +15,7 @@ import { findClimbFace, startClimb, stepClimb } from '../src/engine/player/climb
 const worldPoint = (p, x, z, y = 0) => new THREE.Vector3(p.x + x * Math.cos(p.yaw) + z * Math.sin(p.yaw), y, p.z - x * Math.sin(p.yaw) + z * Math.cos(p.yaw));
 
 test('all districts enforce their footprint, height range and average, including boundary lots and landmarks', () => {
-  const metro = new VerticalMetropolis(createMasterPlan(), WORLD_OBJECTS);
+  const metro = new VerticalMetropolis(createMasterPlan(), LANDMARKS);
   const buildings = metro.area(-WORLD_LIMIT, -WORLD_LIMIT, WORLD_LIMIT, WORLD_LIMIT).flatMap(b => b.buildings);
   assert.ok(buildings.length > 12000);
   for (const district of MASTER_DISTRICTS) {

@@ -459,21 +459,6 @@ function palette() {
   return materials;
 }
 
-function addWeather(scene) {
-  const random = seededRandom(92311), positions = new Float32Array(1100 * 6), motesArray = new Float32Array(160 * 3);
-  for (let i = 0; i < 1100; i++) {
-    const x = random() * 90 - 45, y = random() * 37, z = random() * 90 - 45;
-    positions.set([x, y, z, x - .055, y + .52, z], i * 6);
-  }
-  const rainGeometry = new THREE.BufferGeometry(); rainGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const rain = new THREE.LineSegments(rainGeometry, new THREE.LineBasicMaterial({ color: 0x8db3ce, transparent: true, opacity: .16, depthWrite: false }));
-  rain.frustumCulled = false; scene.add(rain);
-  for (let i = 0; i < 160; i++) motesArray.set([random() * 100 - 50, random() * 9 + .3, random() * 100 - 50], i * 3);
-  const motesGeometry = new THREE.BufferGeometry(); motesGeometry.setAttribute('position', new THREE.BufferAttribute(motesArray, 3));
-  const motes = new THREE.Points(motesGeometry, new THREE.PointsMaterial({ color: 0xc3ffe4, size: .05, transparent: true, opacity: .4, depthWrite: false }));
-  scene.add(motes); return { rain, motes };
-}
-
 export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   const masterPlan = createMasterPlan(), metropolis = new VerticalMetropolis(masterPlan, reservedWorldObjects), mats = palette(), terrain = createTerrainMaterials({ vertexColors: true });
   const buildingSigns = createBuildingSignMaterial(), interiorClip = interiorClipUniforms();
@@ -489,7 +474,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   ground.receiveShadow = true; ground.userData.resident = true; ground.matrixAutoUpdate = false; scene.add(ground);
   const water = new THREE.Mesh(new THREE.PlaneGeometry(WORLD_LIMIT * 2 + 500, WORLD_LIMIT * 2 + 500), new THREE.MeshStandardMaterial({ color: 0x123444, roughness: .88, metalness: .03 }));
   water.name = 'Blackwater Bay'; water.rotation.x = -Math.PI / 2; water.position.y = WATER_LEVEL; water.userData.resident = true; scene.add(water);
-  const weather = addWeather(scene), signs = [], cars = [], supportCache = new WeakMap();
+  const signs = [], cars = [], supportCache = new WeakMap();
   function supportCollider(s) {
     if (supportCache.has(s)) return supportCache.get(s);
     const box = s.a ? { ...s, supportOnly: true, walkable: true, slabThickness: .65, minY: s.minY ?? Math.min(s.a.y, s.b.y) - .65, maxY: s.maxY ?? Math.max(s.a.y, s.b.y) } :
@@ -634,7 +619,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     return null;
   };
   const planNear = (x, z) => metropolis.buildingsNear(x, z, 1).map(cachedInteriorPlan).find(Boolean) ?? null;
-  return { ...weather, ground, water, cars, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
+  return { ground, water, cars, signs, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
     interiorContextAt, planNear, interiorClip, spatialFor: context => context ? interiorSpatial(spatial, context) : spatial,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

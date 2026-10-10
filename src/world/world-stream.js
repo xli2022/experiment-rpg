@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
-import { SHADOW_PROFILES } from '../engine/shadows.js';
+import { RENDER_PROFILES, SHADOW_PROFILES } from '../core/quality.js';
 import { buildingBoxGeometry, buildingPrismGeometry } from './building-geometry.js';
 
 export const WORLD_GEOMETRY = {
@@ -15,10 +15,7 @@ export const WORLD_GEOMETRY = {
 const transform = new THREE.Object3D(), color = new THREE.Color();
 const distanceToCell = (p, c) => Math.hypot(Math.max(c.coverage.minX - p.x, 0, p.x - c.coverage.maxX), Math.max(c.coverage.minZ - p.z, 0, p.z - c.coverage.maxZ));
 
-export const RENDER_PROFILES = {
-  high: { far: 510, detail: 135, actors: 65, dpr: 1.5, minScale: .7, rain: 1100, budget: 2.5 },
-  low: { far: 340, detail: 85, actors: 42, dpr: 1, minScale: .65, rain: 250, budget: 1.5 },
-};
+export { RENDER_PROFILES } from '../core/quality.js';
 
 export class WorldStream {
   constructor(scene, populate = null) {

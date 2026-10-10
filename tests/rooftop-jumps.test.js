@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { createMasterPlan, MASTER_DISTRICTS } from '../src/world/master-plan.js';
 import { WORLD_LIMIT } from '../src/world/world-config.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { orientedBox } from '../src/core/physics.js';
 import { findRepeatableJump, nearestRoofPairs, roofGap, traversalSpatial } from './helpers/rooftop-traversal.js';
 
@@ -16,7 +16,7 @@ test('roof-gap measurement follows rotated footprint edges', () => {
 });
 
 test('each compact district supports a jump to a nearest lower roof at 30–120 FPS', async t => {
-  const plan = createMasterPlan(), metro = new VerticalMetropolis(plan, WORLD_OBJECTS), scale = WORLD_LIMIT / 5500;
+  const plan = createMasterPlan(), metro = new VerticalMetropolis(plan, LANDMARKS), scale = WORLD_LIMIT / 5500;
   const radius = 260 * scale, routes = [];
   for (const district of MASTER_DISTRICTS) await t.test(district.name, () => {
     const blocks = metro.area(district.x - radius, district.z - radius, district.x + radius, district.z + radius);

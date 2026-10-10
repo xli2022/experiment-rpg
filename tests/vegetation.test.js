@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createVerticalCity } from '../src/world/vertical-city.js';
 import { WorldStream, WORLD_GEOMETRY } from '../src/world/world-stream.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { buildingVolumes } from '../src/world/building-design.js';
 import { SpatialGrid } from '../src/core/spatial-grid.js';
 import { geometryVolume } from '../src/world/infrastructure-clearance.js';
@@ -27,7 +27,7 @@ function crownHits(vertices, index) {
 let audit;
 function worldAudit() {
   if (audit) return audit;
-  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, LANDMARKS);
   const trees = [], shrubs = [], beds = [], buildings = [], planters = [];
   for (let x = -15; x < 15; x++) for (let z = -15; z < 15; z++) {
     const block = city.metropolis.block(x, z);
@@ -81,7 +81,7 @@ test('actual tree and shrub meshes clear buildings, roads, infrastructure and st
     }
     if (plant.source === 'pocket' || !plant.type) {
       assert.equal(city.masterPlan.onRoad(plant.x, plant.z, 2), false, `${plant.id} clears sidewalks and road shoulders`);
-      assert.ok(WORLD_OBJECTS.every(p => Math.hypot(p.x - plant.x, p.z - plant.z) > 8), 'story interaction and arrival areas stay open');
+      assert.ok(LANDMARKS.every(p => Math.hypot(p.x - plant.x, p.z - plant.z) > 8), 'story interaction and arrival areas stay open');
       assert.equal(plant.y, terrainHeight(plant.x, plant.z));
     }
   }

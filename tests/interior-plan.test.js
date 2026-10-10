@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
-import { DISTRICTS } from '../src/modes/story/content.js';
+import { MASTER_DISTRICTS as DISTRICTS } from '../src/world/master-plan.js';
 import { terrainHeight } from '../src/world/master-plan.js';
 import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } from '../src/world/building-design.js';
 import { interiorPlan, floorPlan, buildingUnits, levelY, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';

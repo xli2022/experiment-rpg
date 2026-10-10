@@ -6,7 +6,7 @@ import { createVerticalCity, VerticalMetropolis } from '../src/world/vertical-ci
 import { createMasterPlan, MASTER_DISTRICTS, SHOWCASE } from '../src/world/master-plan.js';
 import { WorldStream, WORLD_GEOMETRY } from '../src/world/world-stream.js';
 import { WORLD_LIMIT } from '../src/world/world-config.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { SpatialGrid } from '../src/core/spatial-grid.js';
 import { footprintVertices, polygonFaces } from '../src/world/building-footprints.js';
 import { createInfrastructureIndex, geometryVolume, infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
@@ -16,7 +16,7 @@ function entireWorld() {
   if (worldAudit) return worldAudit;
   // Match live reserved landmarks: suppressing a frontage candidate can also
   // change which neighboring candidate wins the deterministic lot selection.
-  const plan = createMasterPlan(), metro = new VerticalMetropolis(plan, WORLD_OBJECTS);
+  const plan = createMasterPlan(), metro = new VerticalMetropolis(plan, LANDMARKS);
   const blocks = metro.area(-WORLD_LIMIT, -WORLD_LIMIT, WORLD_LIMIT, WORLD_LIMIT);
   const buildings = blocks.flatMap(block => block.buildings);
   const infrastructure = createInfrastructureIndex(plan, blocks.flatMap(block => block.infrastructure));
@@ -77,7 +77,7 @@ test('clearance checks use the actual pitched slab and diagonal footprint instea
 });
 
 test('sign faces are visible from the street for every building type and share a single draw per chunk', () => {
-  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS), examples = new Map(), materials = new Set();
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, LANDMARKS), examples = new Map(), materials = new Set();
   try {
     for (const d of MASTER_DISTRICTS) for (const b of city.metropolis.area(d.x - 200, d.z - 200, d.x + 200, d.z + 200)) {
       for (const p of b.buildings) if (!examples.has(p.type)) examples.set(p.type, p);
@@ -109,7 +109,7 @@ test('sign faces are visible from the street for every building type and share a
 });
 
 test('sign instance UV buffers are released with chunks and regenerate without losing the shared atlas', () => {
-  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, LANDMARKS);
   const p = city.metropolis.area(SHOWCASE.x - 150, SHOWCASE.z - 150, SHOWCASE.x + 150, SHOWCASE.z + 150).flatMap(b => b.buildings)[0];
   const cell = stream.cell(Math.floor(p.x / 96), Math.floor(p.z / 96));
   try {

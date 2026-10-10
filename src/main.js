@@ -3,9 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { addSky } from './world/atmosphere.js';
-import { createVerticalCity } from './world/vertical-city.js';
+import { createWorld } from './world/index.js';
 import { terrainHeight, SHOWCASE } from './world/master-plan.js';
 import { WORLD_LIMIT } from './world/world-config.js';
 import { createDrone } from './modes/story/drones.js';
@@ -25,16 +23,14 @@ import { createWorldLife } from './modes/story/world-life.js';
 import { RPGUI } from './modes/story/rpg-ui.js';
 import { createNPCPortraits } from './actors/npc-appearance.js';
 import { DialogueVoice } from './modes/story/voice.js';
-import { WorldStream, RENDER_PROFILES, ResolutionGovernor } from './world/world-stream.js';
+import { RENDER_PROFILES, ResolutionGovernor } from './world/world-stream.js';
 import { createShadows } from './engine/shadows.js';
 import { createContactShadows } from './engine/contact-shadows.js';
 import { createTraffic } from './traffic/traffic.js';
 import { findSpawnPosition } from './core/spawn.js';
 import { setupFullscreen } from './engine/fullscreen.js';
-import { createInteriors } from './world/interiors.js';
 import { levelY, roomAt } from './world/interior-plan.js';
 import { toLocal } from './world/interior-physics.js';
-import { pointInConvex } from './world/building-footprints.js';
 import './modes/story/npc.css';
 
 const $ = id => document.getElementById(id);
@@ -68,21 +64,13 @@ async function init() {
   renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.18;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.info.autoReset = false;
-  scene = new THREE.Scene(); scene.fog = new THREE.FogExp2(0x1b2940, .0035);
-  sky = addSky(scene);
-  worldStream = new WorldStream(scene); scene.userData.worldStream = worldStream;
+  scene = new THREE.Scene();
   camera = new THREE.PerspectiveCamera(62, innerWidth / innerHeight, .12, 760);
-  const hemisphere = new THREE.HemisphereLight(0xb9d9fc, 0x3a3051, 1.7); scene.add(hemisphere);
-  const moon = new THREE.DirectionalLight(0xc5d8ff, 2.3); moon.position.set(-45, 85, 25); scene.add(moon);
-  const rim = new THREE.DirectionalLight(0xb282c9, .7); rim.position.set(40, 20, -45); scene.add(rim);
-  const environment = new RoomEnvironment(); const pmrem = new THREE.PMREMGenerator(renderer);
-  const envMap = pmrem.fromScene(environment, .025); scene.environment = envMap.texture; scene.environmentIntensity = .24;
-  environment.dispose(); pmrem.dispose();
   // Wait briefly for the local UI font before drawing the permanent shop textures.
   await Promise.race([document.fonts.ready, new Promise(resolve => setTimeout(resolve, 1000))]);
   $('loading-text').textContent = 'BUILDING AFTERLIGHT / STREETS, SKYWAYS & STORIES...';
   const characterAssets = await loadCharacterAssets();
-  city = createVerticalCity(scene, worldStream, WORLD_OBJECTS); interiors = createInteriors(scene, city);
+  city = createWorld({ scene, renderer }); worldStream = city.stream; sky = city.atmosphere.sky; interiors = city.interiors;
   crowd = createCrowd(scene, characterAssets.citizen, city, characterAssets.visitors, characterAssets.humanBases); character = createCharacter(characterAssets.player); scene.add(character.root);
   parachute = createParachute(); character.root.add(parachute.root);
   worldLife = createWorldLife(scene, characterAssets.citizen, campaign, characterAssets.humanBases);
@@ -105,7 +93,7 @@ async function init() {
     drones.push({ ...model, id, group: encounter.id, homeX: x, homeY, homeZ: z, health: dead ? 0 : 100, dead, phase: i * 2.3, fireTimer: 2 + i * .5, engaged: false });
   }));
   traffic = createTraffic(scene, city);
-  shadows = createShadows(renderer, scene, moon, { dynamicRoots: [
+  shadows = createShadows(renderer, scene, city.atmosphere.moon, { dynamicRoots: [
     ...city.cars.map(c => c.root), traffic.root, character.root,
     ...crowd.people.map(p => p.root), ...Object.values(worldLife.avatars).map(a => a.root),
     ...drones.map(d => d.root),
@@ -242,7 +230,7 @@ function toggleJournal() {
 }
 function setQuality(value) {
   quality = value;
-  resolution.reset(); worldStream.setQuality(quality);
+  resolution.reset();
   shadows.setQuality(quality); traffic.setQuality(quality); crowd.setQuality(quality);
   if (quality === 'high' && !composer) {
     composer = new EffectComposer(renderer); composer.addPass(new RenderPass(scene, camera));
@@ -250,10 +238,8 @@ function setQuality(value) {
   } else if (quality === 'low' && composer) {
     for (const pass of composer.passes) pass.dispose?.(); composer.dispose(); composer = bloom = null;
   }
-  scene.fog.density = quality === 'high' ? .0035 : .005;
   camera.far = quality === 'high' ? 720 : 600; camera.updateProjectionMatrix();
-  sky.scale.setScalar(camera.far / 700);
-  city.rain.geometry.setDrawRange(0, RENDER_PROFILES[quality].rain * 2);
+  city.setQuality(quality, { far: camera.far });
   applyResolution();
 }
 function applyResolution() {
@@ -726,18 +712,6 @@ function updateEffects(dt) {
   $('damage-flash').style.opacity = state.time < damageFlashUntil ? '.35' : '0'; $('hitmarker').style.opacity = state.time < hitUntil ? '1' : '0';
 }
 
-function updateWeather(dt) {
-  const positions = city.rain.geometry.attributes.position;
-  for (let i = 0; i < city.rain.geometry.drawRange.count; i += 2) {
-    let y = positions.getY(i) - dt * 15; if (y < 0) y = 37;
-    positions.setY(i, y); positions.setY(i + 1, y + .52);
-  }
-  positions.needsUpdate = true; city.rain.position.set(player.x, player.y, player.z); city.motes.position.set(player.x, player.y, player.z); city.motes.rotation.y += dt * .012;
-  // Rain stays outside: hide it while the camera is within the occupied building.
-  const plan = player.interior?.plan, local = plan && toLocal(plan, camera.position.x, camera.position.z);
-  city.rain.visible = city.motes.visible = !(plan && camera.position.y < plan.top && pointInConvex(plan.outline, local.x, local.z));
-}
-
 function frame(now) {
   animationId = requestAnimationFrame(frame);
   if (document.hidden) { lastFrame = now; return; }
@@ -749,10 +723,9 @@ function frame(now) {
     traffic.update(dt, player, driving, camera, crowd.people);
     if (state.started) updatePlayer(dt);
     if (!state.started) updateCharacter(dt);
-    updateCamera(dt); interiors.update(player, player.interior, now / 1000, dt); updateDrones(dt); updateEffects(dt); updateWeather(dt); crowd.update(dt, player, camera, RENDER_PROFILES[quality].actors); worldLife.update(dt, state.time, player, RENDER_PROFILES[quality].actors, camera);
+    updateCamera(dt); updateDrones(dt); updateEffects(dt); crowd.update(dt, player, camera, RENDER_PROFILES[quality].actors); worldLife.update(dt, state.time, player, RENDER_PROFILES[quality].actors, camera);
   }
-  sky.position.copy(camera.position);
-  worldStream.update(camera, player, now / 1000);
+  city.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused });
   // Retire distant abandoned takeovers only after they are outside the visible
   // car range. Nearby cars and the vehicle being driven never disappear.
   if (city.cars.length > 8) for (const car of [...city.cars]) {

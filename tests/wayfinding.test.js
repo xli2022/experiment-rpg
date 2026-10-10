@@ -2,13 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createMasterPlan, terrainHeight } from '../src/world/master-plan.js';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { WAYFINDING_SIGNS, placeWayfindingSign, wayfindingSigns } from '../src/world/wayfinding.js';
 import { geometryVolume, infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
 import { SpatialGrid } from '../src/core/spatial-grid.js';
 
 test('Eastpoint wayfinding signs stay clear of both decks, ramp shoulders and railings', () => {
-  const metro = new VerticalMetropolis(createMasterPlan(), WORLD_OBJECTS), index = metro.infrastructureIndex;
+  const metro = new VerticalMetropolis(createMasterPlan(), LANDMARKS), index = metro.infrastructureIndex;
   const original = WAYFINDING_SIGNS.map(p => ({ ...p, y: terrainHeight(p.x, p.z) + 5.8, d: .06 }));
   const neon = original.find(p => p.id === 'neon-spine');
   assert.ok(infrastructureIntersections(neon, index).some(p => p.id.startsWith('eastpoint-ramp:')), 'reproduce the sign cutting through the ramp');

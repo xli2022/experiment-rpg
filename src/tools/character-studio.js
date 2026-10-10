@@ -3,9 +3,9 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { loadCharacterAssets } from '../engine/player/characters.js';
-import { createNPC } from './npc-appearance.js';
-import { NPC_PROFILES, CROWD_PROFILES } from './npc-profiles.js';
-import { createVisitor, VISITOR_PROFILES } from './npc-visitors.js';
+import { createNPC } from '../actors/npc-appearance.js';
+import { NPC_PROFILES, CROWD_PROFILES } from '../actors/npc-profiles.js';
+import { createVisitor, VISITOR_PROFILES } from '../actors/npc-visitors.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 
 const $ = id => document.getElementById(id);

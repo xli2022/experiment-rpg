@@ -1,9 +1,7 @@
 import * as THREE from 'three';
 
-export const SHADOW_PROFILES = {
-  high: { radius: 72, size: 2048, hz: 20, casters: 100 },
-  low: { radius: 48, size: 1024, hz: 10, casters: 72 },
-};
+import { SHADOW_PROFILES } from '../core/quality.js';
+export { SHADOW_PROFILES };
 const sunDirection = new THREE.Vector3(-45, 85, 25).normalize();
 const right = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), sunDirection).normalize();
 const up = new THREE.Vector3().crossVectors(sunDirection, right).normalize();

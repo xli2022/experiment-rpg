@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { createVerticalCity } from '../src/world/vertical-city.js';
 import { WorldStream } from '../src/world/world-stream.js';
-import { WORLD_OBJECTS, DISTRICTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
+import { MASTER_DISTRICTS as DISTRICTS } from '../src/world/master-plan.js';
 import { cachedInteriorPlan, levelY, INTERIOR } from '../src/world/interior-plan.js';
 import { interiorHull, interiorContext, toWorld, toLocal } from '../src/world/interior-physics.js';
 import { circleHitsBox, overlapsHeight, rayBoxDistance, rayObstructionDistance, supportHeight } from '../src/core/physics.js';
@@ -12,7 +13,7 @@ import { polygonFaces } from '../src/world/building-footprints.js';
 import { interiorClipUniforms, patchInteriorClip, createFacadeMaterial } from '../src/world/building-materials.js';
 import { findPath, walk } from './helpers/interior-walk.js';
 
-const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, WORLD_OBJECTS);
+const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, LANDMARKS);
 const byLayout = new Map();
 for (const d of DISTRICTS) for (const block of city.metropolis.area(d.x - 90, d.z - 90, d.x + 90, d.z + 90)) for (const p of block.buildings) {
   const plan = cachedInteriorPlan(p);

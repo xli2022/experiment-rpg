@@ -1,5 +1,5 @@
-import { MASTER_DISTRICTS, districtAt as masterDistrictAt, createMasterPlan, terrainHeight, SHOWCASE, nearestOnSegment } from '../../world/master-plan.js';
-import { CITY_SCALE, authoredToWorld, atEastpoint } from '../../world/world-scale.js';
+import { MASTER_DISTRICTS, districtAt as masterDistrictAt, terrainHeight } from '../../world/master-plan.js';
+import { landmarkById } from '../../world/landmarks.js';
 // Authored world content. Coordinates are shared by the simulation, journal and map.
 export const DISTRICTS = MASTER_DISTRICTS.map(d => ({ ...d, color: `#${d.color.toString(16).padStart(6, '0')}` }));
 
@@ -57,25 +57,7 @@ export const MEMORIES = [
 ].map(([id, name, x, z, author, text]) => object(id, name, 'memory', x, z, text, { author }));
 
 export const CACHES = [[8, 91], [-8, -47], [-64, -92], [64, 104], [-118, 65], [122, -113], [-239, 12], [-180, -42], [190, 42], [238, -43], [-32, 185], [42, -192]].map(([x, z], i) => object(`cache-${i}`, 'Salvage cache', 'cache', x, z, 'Abandoned supplies: credits, components and a chance to keep going.'));
-const masterPlan = createMasterPlan();
-function roadside(x, z, offset = 4) {
-  let best;
-  for (const road of masterPlan.roads) {
-    if (road.level !== 0 || road.kind !== 'road') continue;
-    for (let i = 1; i < road.points.length; i++) {
-      const a = road.points[i - 1], b = road.points[i], hit = nearestOnSegment(x, z, a, b);
-      if (!best || hit.distance < best.distance) {
-        const length = Math.hypot(b.x - a.x, b.z - a.z), side = road.width / 2 + offset;
-        best = { ...hit, x: hit.x - (b.z - a.z) / length * side, z: hit.z + (b.x - a.x) / length * side };
-      }
-    }
-  }
-  return { x: best.x, z: best.z, y: terrainHeight(best.x, best.z) };
-}
-export const REGIONAL_STOPS = DISTRICTS.map(d => {
-  const p = roadside(d.x, d.z + 75 * CITY_SCALE);
-  return object(`metro-district-${d.id}`, `${d.name} Station`, 'transit', p.x, p.z, 'Discover this station on foot, then use the night tram to travel between districts.', { y: p.y, district: d.id });
-});
+export const REGIONAL_STOPS = DISTRICTS.map(d => object(`metro-district-${d.id}`, `${d.name} Station`, 'transit', 0, 0, 'Discover this station on foot, then use the night tram to travel between districts.'));
 export const WORLD_OBJECTS = [...PLACES, ...MEMORIES, ...CACHES, ...REGIONAL_STOPS];
 export const placeById = id => WORLD_OBJECTS.find(p => p.id === id);
 
@@ -117,68 +99,12 @@ export const ENDINGS = {
   together: { name: 'A thousand small lights', text: 'You divide the network among neighborhood relays. The clinic, gardens and docks each hold a key. ECHO becomes a chorus of local voices. Vesper will never again have a single switch someone can turn off.' },
 };
 
-// The story now lives in the master plan. Keep stable IDs so existing chapter,
-// inventory and dialogue progress survives the replacement of the old map.
-const deck = id => masterPlan.supports.find(s => s.id === id);
-// Layout coordinates stay in the authored plan; only these boundary helpers
-// convert them. SHOWCASE and DISTRICTS already contain runtime coordinates.
-const onDeck = (id, x, z) => ({ ...(id.startsWith('eastpoint-') ? atEastpoint(x, z) : authoredToWorld(x, z)), y: deck(id).maxY });
-const ground = (x, z) => ({ x, z, y: terrainHeight(x, z) });
-const groundAtPosition = p => ground(p.x, p.z);
-const authoredGround = (x, z) => groundAtPosition(authoredToWorld(x, z));
-const eastpointGround = (x, z) => groundAtPosition(atEastpoint(x, z));
-const inDistrict = (id, dx = 0, dz = 0) => {
-  const d = DISTRICTS.find(d => d.id === id);
-  return roadside(d.x + dx * CITY_SCALE, d.z + dz * CITY_SCALE, 6);
-};
-const layout = {
-  home: ground(SHOWCASE.spawn.x, SHOWCASE.spawn.z),
-  mara: onDeck('eastpoint-concourse', 2498, 680),
-  cass: onDeck('eastpoint-concourse', 2506, 712),
-  trace: onDeck('eastpoint-terrace', 2615, 697),
-  board: eastpointGround(2468, 675),
-  'metro-neon': ground(SHOWCASE.transit.x, SHOWCASE.transit.z),
-  sable: onDeck('citadel-concourse', 1265, -1050),
-  archive: onDeck('citadel-concourse', 1330, -1050),
-  jun: onDeck('stacks-garden', -380, -3740),
-  solar: onDeck('stacks-garden', -345, -3726),
-  'garden-relay': onDeck('stacks-garden', -420, -3757),
-  'garden-rest': onDeck('stacks-garden', -360, -3757),
-  'valve-west': onDeck('stacks-garden', -420, -3726),
-  'valve-east': onDeck('stacks-garden', -338, -3757),
-  imani: inDistrict('shadowmarket'),
-  rook: inDistrict('foundry'),
-  orrin: inDistrict('void-port'),
-  echo: inDistrict('north-ridge'),
-  blackbox: inDistrict('void-port', 70, 110),
-  'breaker-west': inDistrict('north-ridge', -130, -90),
-  'breaker-east': inDistrict('north-ridge', 130, -90),
-  uplink: inDistrict('north-ridge', 0, -240),
-  medicine: inDistrict('foundry', -140, 80),
-  'freight-manifest': inDistrict('foundry', 140, 100),
-  parcel: inDistrict('east-reach', -150, 50),
-  'metro-north': authoredGround(1134, -934),
-  'metro-garden': authoredGround(-456, -3624),
-  'metro-freight': inDistrict('foundry', -70, 60),
-  'metro-dock': inDistrict('void-port', -80, 80),
-  'metro-ridge': inDistrict('north-ridge', -90, 70),
-  'lore-radio': onDeck('eastpoint-concourse', 2506, 653),
-  'lore-clinic': inDistrict('shadowmarket', 100, 40),
-  'lore-helix': onDeck('citadel-concourse', 1295, -1050),
-  'lore-garden': onDeck('stacks-garden', -400, -3744),
-  'lore-freight': inDistrict('foundry', 70, -70),
-  'lore-dock': inDistrict('void-port', -120, -90),
-  'lore-ridge': inDistrict('north-ridge', 110, 90),
-  'lore-vex': inDistrict('core', 60, 60),
-};
+// Every story object stands on a named Afterlight landmark: the world keeps
+// those sites clear, and stable IDs preserve chapter, inventory and dialogue
+// progress across city layouts.
 for (const p of [...WORLD_OBJECTS, ...CONTACTS]) {
-  const position = layout[p.id] ?? (p.type === 'cache' ? inDistrict(DISTRICTS[Number(p.id.split('-')[1]) % DISTRICTS.length].id, 160, -160) : null);
-  if (position) Object.assign(p, position, { district: districtAt(position.x, position.z).id });
-}
-for (const p of WORLD_OBJECTS) {
-  if (p.y < terrainHeight(p.x, p.z) + 3) continue;
-  const rampId = p.district === 'stacks' ? 'stacks-garden-access' : p.district === 'citadel' ? 'citadel-concourse-access' : p.x > SHOWCASE.x + 40 * CITY_SCALE ? 'eastpoint-east-walk-ramp' : 'eastpoint-west-walk-ramp';
-  p.approach = masterPlan.supports.find(s => s.id === rampId);
+  const { id, station, ...site } = landmarkById(p.id);
+  Object.assign(p, site);
 }
 Object.assign(placeById('home'), { name: 'Eastpoint hideout', description: 'Your shelter beneath the interchange. Rest here to restore health, armor and ammunition.', arrivalOffset: { x: 0, z: 7 } });
 Object.assign(placeById('trace'), { name: 'Skybridge relay', description: 'Cross the Upper Market skybridge to recover the relay’s last transmission.' });

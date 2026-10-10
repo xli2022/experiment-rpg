@@ -3,11 +3,11 @@ import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { createMasterPlan, terrainHeight } from '../src/world/master-plan.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { infrastructureIntersections } from '../src/world/infrastructure-clearance.js';
 
 test('streetlights across the entire city rest on terrain or a real bridge shoulder and clear surrounding structures', () => {
-  const metro = new VerticalMetropolis(createMasterPlan(), WORLD_OBJECTS);
+  const metro = new VerticalMetropolis(createMasterPlan(), LANDMARKS);
   let count = 0, elevated = 0, sloped = 0;
   for (let x = -15; x < 15; x++) for (let z = -15; z < 15; z++) {
     for (const lamp of metro.block(x, z).props.filter(p => p.kind === 'lamp')) {

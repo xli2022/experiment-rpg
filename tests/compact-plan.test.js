@@ -4,7 +4,7 @@ import * as authored from '../src/world/authored-plan.js';
 import * as runtime from '../src/world/master-plan.js';
 import { CITY_SCALE, authoredToWorld, atEastpoint } from '../src/world/world-scale.js';
 import { WORLD_LIMIT } from '../src/world/world-config.js';
-import { WORLD_OBJECTS } from '../src/modes/story/content.js';
+import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { rayBoxDistance } from '../src/core/physics.js';
 
@@ -119,7 +119,7 @@ test('rebuilt spatial bounds contain road surface corners and deck supports', ()
 });
 
 test('human-scale streetlights do not protrude through compact viaducts and pedestrian decks', () => {
-  const metro = new VerticalMetropolis(plan, WORLD_OBJECTS);
+  const metro = new VerticalMetropolis(plan, LANDMARKS);
   let lamps = 0, covered = 0;
   for (let bx = Math.floor(-WORLD_LIMIT / 192); bx <= Math.floor(WORLD_LIMIT / 192); bx++) {
     for (let bz = Math.floor(-WORLD_LIMIT / 192); bz <= Math.floor(WORLD_LIMIT / 192); bz++) {
