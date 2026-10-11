@@ -115,11 +115,30 @@ function furniturePiece(builder, f, y, shade) {
   }
 }
 
-// One floor's static geometry plus its door leaves and glazing.
-export function buildFloor(plan, level) {
+// Jagged teeth of glass left round a broken pane's frame, pointing inward.
+function shards(builder, corner, along, up, width, height, seed) {
+  let n = seed >>> 0;
+  const random = () => (n = Math.imul(n ^ n >>> 15, 0x2c1b3c6d) + 0x9e3779b9 >>> 0) / 4294967296;
+  const at = (s, t) => ({ x: corner.x + along.x * s + up.x * t, y: corner.y + up.y * t, z: corner.z + along.z * s + up.z * t });
+  const edges = [[[0, 0], [1, 0], [0, 1]], [[1, 0], [1, 1], [-1, 0]], [[1, 1], [0, 1], [0, -1]], [[0, 1], [0, 0], [1, 0]]];
+  for (const [[s0, t0], [s1, t1], [is, it]] of edges) {
+    const span = Math.hypot((s1 - s0) * width, (t1 - t0) * height), teeth = Math.max(2, Math.ceil(span / .22));
+    for (let k = 0; k < teeth; k++) {
+      if (random() < .3) continue;
+      const a = k / teeth, b = (k + 1) / teeth, m = (a + b) / 2, reach = .05 + random() * .2;
+      const point = f => [(s0 + (s1 - s0) * f) * width, (t0 + (t1 - t0) * f) * height];
+      const [ax, ay] = point(a), [bx, by] = point(b), [mx, my] = point(m + (random() - .5) * .4 / teeth);
+      for (const q of [at(ax, ay), at(bx, by), at(mx + is * reach, my + it * reach)]) builder.vertex(q.x, q.y, q.z, [1, 1, 1]);
+    }
+  }
+}
+
+// One floor's static geometry plus its door leaves and glazing. `broken` holds
+// the building's broken panes (key → pieces); they lose their glass.
+export function buildFloor(plan, level, broken = new Map()) {
   const floor = floorPlan(plan, level), t = floor.template, y = floor.y, top = level >= plan.levels - 1 ? plan.top : levelY(plan, level + 1);
   const shadeFor = lighting(plan, floor), zones = new Map(t.zones.map(z => [z.id, z]));
-  const surfaces = new Builder(), fixtures = new Builder(), glass = new Builder(), doors = [];
+  const surfaces = new Builder(), fixtures = new Builder(), glass = new Builder(), shattered = new Builder(), doors = [];
   const stairZone = t.zones.find(z => z.kind === 'stair');
   for (const zone of t.zones) {
     if (zone !== stairZone || level === 0) polygonSurface(surfaces, zone.polygon, y + .002, false, shadeFor(zone.id, rgb(FLOOR[zone.kind] ?? 0x888888)));
@@ -146,7 +165,10 @@ export function buildFloor(plan, level) {
       for (const tt of [o.from, o.to]) surfaces.quad(p(tt, y + o.bottom, 0), p(tt, y + o.bottom, depth), p(tt, y + o.top, depth), p(tt, y + o.top, 0), q => reveal(q, normal));
       surfaces.quad(p(o.from, y + o.top, 0), p(o.to, y + o.top, 0), p(o.to, y + o.top, depth), p(o.from, y + o.top, depth), q => reveal(q, [0, -1, 0]));
       if (o.bottom > 0) surfaces.quad(p(o.from, y + o.bottom, 0), p(o.to, y + o.bottom, 0), p(o.to, y + o.bottom, depth), p(o.from, y + o.bottom, depth), q => reveal(q, [0, 1, 0]));
-      if (o.window) glass.quad(p(o.from, y + o.bottom, depth + .05), p(o.to, y + o.bottom, depth + .05), p(o.to, y + o.top, depth + .05), p(o.from, y + o.top, depth + .05), () => [1, 1, 1]);
+      if (o.window && o.pane && broken.has(`${o.pane}:${level}`)) {
+        const corner = p(o.from, y + o.bottom, depth + .05);
+        shards(shattered, corner, { x: ux, z: uz }, { x: 0, y: 1, z: 0 }, o.to - o.from, o.top - o.bottom, [...`${o.pane}:${level}`].reduce((n, c) => Math.imul(n ^ c.charCodeAt(0), 16777619), 2166136261));
+      } else if (o.window) glass.quad(p(o.from, y + o.bottom, depth + .05), p(o.to, y + o.bottom, depth + .05), p(o.to, y + o.top, depth + .05), p(o.from, y + o.top, depth + .05), () => [1, 1, 1]);
       if (o.entrance) {
         const mid = (o.from + o.to) / 2, half = (o.to - o.from) / 2;
         for (const side of [-1, 1]) doors.push({ kind: 'entrance', x: seg.a.x + ux * (mid + side * half / 2) - uz * (depth / 2), z: seg.a.z + uz * (mid + side * half / 2) + ux * (depth / 2),
@@ -212,7 +234,7 @@ export function buildFloor(plan, level) {
     const yy = floor.ceiling - .01, h = .32;
     fixtures.quad({ x: l.x - h, y: yy, z: l.z - h }, { x: l.x + h, y: yy, z: l.z - h }, { x: l.x + h, y: yy, z: l.z + h }, { x: l.x - h, y: yy, z: l.z + h }, () => glow);
   }
-  return { floor, surfaces, fixtures, glass, doors };
+  return { floor, surfaces, fixtures, glass, shattered, doors };
 }
 
 function pointInZone(zone, p) {
@@ -238,6 +260,7 @@ export function createInteriors(scene, city) {
     glass: new THREE.MeshBasicMaterial({ color: 0x9fc4d6, transparent: true, opacity: .14, depthWrite: false, side: THREE.DoubleSide }),
     leaf: new THREE.MeshBasicMaterial({ color: 0xffffff }),
     glassLeaf: new THREE.MeshBasicMaterial({ color: 0x9fc4d6, transparent: true, opacity: .32, depthWrite: false }),
+    shard: new THREE.MeshBasicMaterial({ color: 0xc6dde6, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide }),
   };
   for (const [name, m] of Object.entries(materials)) m.name = `interior-${name}`;
   // One hidden triangle per material lets the initial renderer.compile cover them.
@@ -254,9 +277,9 @@ export function createInteriors(scene, city) {
   function disposeBuilding(b) { for (const f of b.floors.values()) disposeFloor(f); b.group.removeFromParent(); }
 
   function materialize(b, level, now) {
-    const { floor, surfaces, fixtures, glass, doors } = buildFloor(b.plan, level), group = new THREE.Group();
+    const { floor, surfaces, fixtures, glass, shattered, doors } = buildFloor(b.plan, level, city.windows?.of(b.plan.id)), group = new THREE.Group();
     group.name = `Interior ${b.plan.id} level ${level}`;
-    for (const [builder, material] of [[surfaces, materials.surface], [fixtures, materials.fixture], [glass, materials.glass]]) {
+    for (const [builder, material] of [[surfaces, materials.surface], [fixtures, materials.fixture], [glass, materials.glass], [shattered, materials.shard]]) {
       if (builder.empty) continue;
       const mesh = new THREE.Mesh(builder.geometry(), material); mesh.matrixAutoUpdate = false; mesh.castShadow = false; mesh.receiveShadow = false; group.add(mesh);
     }
@@ -273,7 +296,7 @@ export function createInteriors(scene, city) {
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
     }
     group.matrixAutoUpdate = false; b.group.add(group);
-    const entry = { level, group, leaves, floor, lastWanted: now, triangles: (surfaces.position.length + fixtures.position.length + glass.position.length) / 9 };
+    const entry = { level, group, leaves, floor, lastWanted: now, triangles: (surfaces.position.length + fixtures.position.length + glass.position.length + shattered.position.length) / 9 };
     animateDoors(entry, null, 0, true);
     return entry;
   }
@@ -324,13 +347,19 @@ export function createInteriors(scene, city) {
       if (!plan) continue;
       const group = new THREE.Group(); group.name = `Interior ${p.id}`;
       group.position.set(plan.origin.x, 0, plan.origin.z); group.rotation.y = plan.origin.yaw; group.updateMatrix(); group.matrixAutoUpdate = false;
-      root.add(group); active.set(p.id, { plan, group, floors: new Map(), lastWanted: now });
+      root.add(group); active.set(p.id, { plan, group, floors: new Map(), lastWanted: now, windows: city.windows?.version(p.id) ?? 0 });
     }
     const ids = new Set(wanted.map(p => p.id));
     let budget = 1;
     for (const [id, b] of active) {
       if (ids.has(id)) b.lastWanted = now;
       else if (now - b.lastWanted > 2) { disposeBuilding(b); active.delete(id); continue; }
+      // A window broke: rebuild the floors already standing, glass and all.
+      const windows = city.windows?.version(id) ?? 0;
+      if (windows !== b.windows) {
+        b.windows = windows;
+        for (const [level, f] of b.floors) { disposeFloor(f); b.floors.set(level, materialize(b, level, now)); }
+      }
       const levels = context?.id === id ? [context.level, context.level - 1, context.level + 1] : [0];
       for (const level of levels) {
         if (level < 0 || level >= b.plan.levels) continue;

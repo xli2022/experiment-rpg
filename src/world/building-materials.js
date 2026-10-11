@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { FACADE_PANES } from './facade-windows.js';
 
 const TILE = 256, GUTTER = 8, INNER = TILE - GUTTER * 2, WIDTH = TILE * 4, HEIGHT = TILE * 4;
 export const FACADE_STYLES = ['curtain-wall', 'limestone', 'brick', 'ribbon-windows', 'metal-grid', 'stucco'];
@@ -10,33 +11,30 @@ export function facadeUV(style, windowLighting = 'dark') {
 
 function facadePixel(style, x, y, lit) {
   const bx = x % 60, by = y % 60;
-  const noise = (x * 13 + y * 7) % 7 - 3;
-  let color, window = false, frame = false;
+  const noise = (x * 13 + y * 7) % 7 - 3, [x0, x1, y0, y1] = FACADE_PANES[style];
+  // Panes come from the shared table, so interiors and breakage match them.
+  const window = bx >= x0 && bx < x1 && by >= y0 && by < y1;
+  let color, frame = false;
   if (style === 0) {
     // Closely spaced curtain-wall mullions with dark opaque spandrels.
     color = by < 13 ? [63, 85, 94] : [117, 151, 162];
-    window = by > 15 && bx > 3; frame = bx < 3 || by === 14 || by === 59;
+    frame = bx < 3 || by === 14 || by === 59;
   } else if (style === 1) {
     color = [207 + noise, 203 + noise, 188 + noise];
     if (by < 3 || bx < 2) color = [151, 153, 142];
-    window = bx > 19 && bx < 42 && by > 11 && by < 51;
     frame = bx >= 16 && bx <= 44 && by >= 8 && by <= 53 && !window;
   } else if (style === 2) {
     const mortar = y % 8 === 0 || (x + (Math.floor(y / 8) % 2) * 12) % 24 === 0;
     color = mortar ? [149, 141, 128] : [187 + noise, 146 + noise, 124 + noise];
-    window = bx > 14 && bx < 44 && by > 14 && by < 48;
     frame = bx >= 11 && bx <= 47 && by >= 11 && by <= 51 && !window;
   } else if (style === 3) {
     color = by < 10 ? [158, 165, 160] : [214 + noise, 217 + noise, 204 + noise];
-    window = by > 18 && by < 46 && bx > 2 && bx < 58;
     frame = by === 17 || by === 47 || bx < 2;
   } else if (style === 4) {
     color = [105 + noise, 128 + noise, 129 + noise];
-    window = bx > 7 && bx < 54 && by > 6 && by < 51;
     frame = bx < 5 || by < 4 || (by > 52 && by < 56);
   } else {
     color = [216 + noise, 211 + noise, 192 + noise];
-    window = bx > 20 && bx < 42 && by > 17 && by < 46;
     frame = bx >= 17 && bx <= 45 && by >= 14 && by <= 49 && !window;
     if (by > 52 && by < 56) color = [164, 167, 153];
   }

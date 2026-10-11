@@ -113,10 +113,10 @@ Every wing shares a full side with the landing, so each unit opens straight onto
 `interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, the engine switches to that building's interior context:
 
 - Movement, support, the camera, shots and drone line of sight swap the solid base collider for hull walls. Their outer faces lie exactly on the same perimeter, so the swap matters only at door gaps.
-- Floor slabs are convex polygons, never overhanging the outline. Stair flights are support ramps, 1.8 m rise over 3.6 m run, separated by a solid divider. Partitions, rails and furniture are ordinary solids. Windows are glazed: they are visual openings, not exits.
+- Floor slabs are convex polygons, never overhanging the outline. Stair flights are support ramps, 1.8 m rise over 3.6 m run, separated by a solid divider. Partitions, rails and furniture are ordinary solids. Windows are glazed and solid until they break (see [broken windows](#broken-windows)).
 - Entrance steps outside each door are permanent support pieces. Pedestrians and traffic keep using the exterior colliders.
 
-Indoors the player jogs rather than sprints, and the camera moves closer. In very tight rooms it switches to head height. Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
+Indoors the player jogs rather than sprints, and the camera moves closer. The camera stays third person everywhere: where a wall or a tight room leaves too little room behind the player, it swings up over their head, as far as the ceiling allows, rather than closing in. Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
 
 `interiors.js` builds merged geometry for each floor in building-local space:
 
@@ -124,6 +124,18 @@ Indoors the player jogs rather than sprints, and the camera moves closer. In ver
 - **Doors:** doors open as the player approaches. Room and lift doors fold into one side of their frame, and paired street doors part to both sides, so an open door never reaches past its doorway, for example over the stair beside a lift. Interior doorways are 1.1 m wide, so the player passes through at an angle in any building rotation.
 - **What is shown:** inside, the current floor ±1. Outside on foot, the lobby of any building whose door is within 25 m; nothing new is built while driving. At most one floor is built per frame, and unused floors are released after 1.5 s.
 - **Shell cut-outs:** the facade, industrial, stone and glass materials share a small clip uniform set. Up to four street doorways are cut out of the shell once their lobby exists. For the occupied building, its cavity discards exterior trim such as balcony rings that would otherwise cross the rooms.
+
+### Broken windows
+
+Windows are the panes the facade atlas paints: one per 2.7 m bay and 3.6 m storey, at a position that depends on the facade style. `facade-windows.js` holds that pane table, and the atlas is drawn from it. Each facade volume's walls count their bays from the corner where their texture starts. A box face runs from its second corner back to its first, a prism face from first to second, and a circle continues round its whole perimeter. Rooms open exactly these panes on the base volume, so a window seen from the street is the window in the room. A pane split by a partition opens on both sides of it. Industrial sheds keep their clerestory band and don't break.
+
+Any facade pane breaks when shot, or with **E** (USE on touch) within arm's reach. Cladding and frames don't break. A broken pane:
+
+- shows from outside as a dark opening ringed with jagged glass, drawn in one instanced pass for panes within 260 m
+- loses its glass in the room, leaving shards round the frame
+- on the base volume, which holds the rooms, opens through the interior hull, so the player can climb in or out; the parachute opens for long falls. Upper tiers have no rooms behind them
+
+Breaking a window shatters glass outward from the side it was hit from. The session remembers up to 600 broken panes, after which the oldest are glazed again. A building's floors and hull colliders rebuild when one of its panes breaks.
 
 ## Traffic
 

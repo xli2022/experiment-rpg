@@ -1,6 +1,7 @@
 import { buildingDesign, buildingVolumes, buildingEntrances, hash } from './building-design.js';
 import { footprintVertices, polygonFaces, polygonArea, polygonCentroid, clipConvex, insetConvex, pointInConvex } from './building-footprints.js';
 import { seededRandom } from '../core/physics.js';
+import { facadeWalls, wallPanes, wallPoint } from './facade-windows.js';
 
 // Procedural interiors. Everything here is plain data in building-local space
 // (front is +Z), derived deterministically from a city blueprint. Physics,
@@ -14,12 +15,8 @@ export const INTERIOR = Object.freeze({
 });
 const OPEN_KINDS = new Set(['landing', 'lobby', 'office', 'shop', 'hall']);
 const PUBLIC = { market: 'shop', terrace: 'shop', apartment: 'lobby', office: 'lobby', civic: 'lobby' };
-// Window bands per facade style (building-materials.js order), as fractions of
-// a 2.7 m bay with sill and head heights above the floor.
-const WINDOW_STYLES = [
-  { width: .9, sill: .25, head: 3.05 }, { width: .42, sill: .9, head: 2.6 }, { width: .5, sill: .9, head: 2.5 },
-  { width: .95, sill: 1, head: 2.4 }, { width: .8, sill: .45, head: 2.9 }, { width: .42, sill: 1, head: 2.5 },
-];
+// Industrial sheds keep high clerestory bands as fractions of a 2.7 m bay.
+// Other buildings open the facade's own panes (facade-windows.js).
 const INDUSTRIAL_WINDOWS = { width: .8, sill: 2.7, head: 3.4 };
 
 const rect = (x0, z0, x1, z1) => [{ x: x0, z: z0 }, { x: x1, z: z0 }, { x: x1, z: z1 }, { x: x0, z: z1 }];
@@ -312,10 +309,12 @@ function buildWalls(plan, ctx, template, level) {
   template.walls = walls; template.doors = doors;
 }
 
-// Perimeter windows sit on a bay grid along each inner wall. A window never
-// straddles a partition or cuts through a street door.
+// Windows open the panes the facade paints on the base volume's walls, at the
+// same positions and heights, so a window seen from the street is the window
+// in the room and can break through. A pane split by a partition opens on both
+// sides of it. Industrial sheds keep a clerestory band on a centred bay grid.
+// No window cuts through a street door.
 function placeWindows(plan, ctx, template, level) {
-  const style = plan.industrial ? INDUSTRIAL_WINDOWS : WINDOW_STYLES[plan.surface] ?? WINDOW_STYLES[1];
   const perimeter = [], windows = [];
   for (const zone of template.zones) {
     const faces = polygonFaces(zone.polygon);
@@ -325,10 +324,10 @@ function placeWindows(plan, ctx, template, level) {
       if (innerFace >= 0) perimeter.push({ zone: zone.id, face: innerFace, a, b, openings: [] });
     });
   }
+  const ceiling = ctx.storey - INTERIOR.slab - .05;
   for (const seg of perimeter) {
     const face = plan.innerFaces[seg.face], start = plan.inner[seg.face];
-    const ux = -face.nz, uz = face.nx, t0 = (seg.a.x - start.x) * ux + (seg.a.z - start.z) * uz, t1 = (seg.b.x - start.x) * ux + (seg.b.z - start.z) * uz;
-    const length = t1 - t0;
+    const ux = -face.nz, uz = face.nx, length = Math.hypot(seg.b.x - seg.a.x, seg.b.z - seg.a.z);
     if (level === 0) for (const e of plan.entrances) {
       if (Math.abs(e.nx * face.nx + e.nz * face.nz - 1) > 1e-3) continue;
       const along = (e.x - e.nx * INTERIOR.hull - seg.a.x) * ux + (e.z - e.nz * INTERIOR.hull - seg.a.z) * uz;
@@ -336,19 +335,30 @@ function placeWindows(plan, ctx, template, level) {
         seg.openings.push({ from: Math.max(0, along - e.width / 2), to: Math.min(length, along + e.width / 2), bottom: 0, top: e.height, entrance: e.id });
       }
     }
-    const kind = template.zones.find(z => z.id === seg.zone).kind;
-    if (['lift', 'shaft', 'void'].includes(kind)) continue;
-    const bay = Math.min(2.7, face.width), count = Math.max(face.width >= 1 ? 1 : 0, Math.floor(face.width / 2.7));
-    const margin = (face.width - count * bay) / 2;
+    const add = (from, to, bottom, top, pane = null) => {
+      from = Math.max(0, from); to = Math.min(length, to);
+      if (to - from < .3 || seg.openings.some(o => o.entrance && o.from < to + .2 && o.to > from - .2)) return;
+      seg.openings.push({ from, to, bottom, top: Math.min(top, ceiling), window: true, ...(pane ? { pane } : {}) });
+      windows.push({ zone: seg.zone, face: seg.face, x: seg.a.x + ux * (from + to) / 2, z: seg.a.z + uz * (from + to) / 2, width: to - from, bottom, top: Math.min(top, ceiling), nx: face.nx, nz: face.nz, ...(pane ? { pane } : {}) });
+    };
+    const wall = ctx.facade.find(w => w.volume === 0 && Math.abs(w.normal.x * face.nx + w.normal.z * face.nz - 1) < 1e-6);
+    if (wall) {
+      // Sills and heads are measured from the volume's base, the floor sits above it.
+      for (const pane of wallPanes(wall, 0)) {
+        const along = s => { const p = wallPoint(wall, s); return (p.x - seg.a.x) * ux + (p.z - seg.a.z) * uz; };
+        const [from, to] = [along(pane.s0), along(pane.s1)].sort((p, q) => p - q);
+        add(from, to, pane.v0 - INTERIOR.floorOffset, pane.v1 - INTERIOR.floorOffset, pane.key.replace(/:\d+$/, ''));
+      }
+      continue;
+    }
+    if (!plan.industrial) continue;
+    const t0 = (seg.a.x - start.x) * ux + (seg.a.z - start.z) * uz, style = INDUSTRIAL_WINDOWS;
+    const bay = Math.min(2.7, face.width), count = Math.max(face.width >= 1 ? 1 : 0, Math.floor(face.width / 2.7)), margin = (face.width - count * bay) / 2;
     for (let i = 0; i < count; i++) {
       const center = margin + bay * (i + .5), half = bay * style.width / 2;
-      // Trim to this wall segment; drop slivers left beside a partition.
       const from = Math.max(.15, center - half - t0), to = Math.min(length - .15, center + half - t0);
-      if (to - from < .6) continue;
-      const head = Math.min(style.head, ctx.storey - .45);
-      if (seg.openings.some(o => o.from < to + .2 && o.to > from - .2)) continue;
-      seg.openings.push({ from, to, bottom: style.sill, top: head, window: true });
-      windows.push({ zone: seg.zone, face: seg.face, x: seg.a.x + ux * (from + to) / 2, z: seg.a.z + uz * (from + to) / 2, width: to - from, bottom: style.sill, top: head, nx: face.nx, nz: face.nz });
+      if (to - from < .6 || seg.openings.some(o => o.from < to + .2 && o.to > from - .2)) continue;
+      add(from, to, style.sill, style.head);
     }
   }
   template.perimeter = perimeter; template.windows = windows;
@@ -478,7 +488,7 @@ export function interiorPlan(p) {
     surface: design.surface, windowLighting: design.windowLighting, industrial: freight, color: design.color, accent: design.accent,
     outline, inner, innerFaces: polygonFaces(inner), entrances, core: null, templates: null,
   };
-  const ctx = { layout, storey: levels === 1 ? top - floor0 : INTERIOR.storey, regions: core?.regions ?? [], core: null };
+  const ctx = { layout, storey: levels === 1 ? top - floor0 : INTERIOR.storey, regions: core?.regions ?? [], core: null, facade: facadeWalls(p, design, volumes) };
   if (core) {
     const zones = coreZones(core);
     ctx.core = zones;

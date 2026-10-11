@@ -22,6 +22,20 @@ export function createEffects(scene) {
       const mesh = new THREE.Points(geometry, new THREE.PointsMaterial({ color, size: .09, transparent: true, depthWrite: false }));
       scene.add(mesh); live.push({ mesh, life: .5, max: .5, velocities });
     },
+    // Shards across a pane, thrown along its normal (away from whoever broke it) and falling.
+    shatter(pane, direction, count = 46) {
+      const geometry = new THREE.BufferGeometry(), vertices = new Float32Array(count * 3), velocities = [];
+      const side = Math.sign(direction.x * pane.normal.x + direction.z * pane.normal.z) || -1, tx = -pane.normal.z, tz = pane.normal.x;
+      for (let i = 0; i < count; i++) {
+        const along = (Math.random() - .5) * pane.width, up = (Math.random() - .5) * pane.height;
+        vertices.set([pane.x + tx * along, pane.y + up, pane.z + tz * along], i * 3);
+        const out = side * (1 + Math.random() * 3.5), drift = (Math.random() - .5) * 2.4;
+        velocities.push(new THREE.Vector3(pane.normal.x * out + tx * drift, Math.random() * 2.2 - .4, pane.normal.z * out + tz * drift));
+      }
+      geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+      const mesh = new THREE.Points(geometry, new THREE.PointsMaterial({ color: 0xd2ecf4, size: .07, transparent: true, depthWrite: false }));
+      scene.add(mesh); live.push({ mesh, life: 1.1, max: 1.1, velocities });
+    },
     damageFlash(duration = .19) { damageUntil = time + duration; },
     hitMarker(duration = .13) { hitUntil = time + duration; },
     update(dt, now) {

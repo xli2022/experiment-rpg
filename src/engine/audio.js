@@ -38,6 +38,16 @@ export class GameAudio {
   reload() { this.tone(450, .12, 'triangle', .2, 180); }
   reward() { this.tone(520, .15, 'sine', .3, 900); setTimeout(() => this.tone(1050, .3, 'sine', .25, 1300), 100); }
   explosion() { this.tone(90, .65, 'sawtooth', .7, 15); }
+  // A burst of bright noise, then a few falling tinkles.
+  glass() {
+    if (!this.context || !this.enabled) return;
+    const context = this.context, length = Math.floor(context.sampleRate * .45), buffer = context.createBuffer(1, length, context.sampleRate), data = buffer.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length) ** 3;
+    const source = context.createBufferSource(), filter = context.createBiquadFilter(), gain = context.createGain();
+    source.buffer = buffer; filter.type = 'highpass'; filter.frequency.value = 2200; gain.gain.value = .55;
+    source.connect(filter); filter.connect(gain); gain.connect(this.master); source.start();
+    for (let k = 0; k < 5; k++) setTimeout(() => this.tone(2600 + Math.random() * 3000, .05 + Math.random() * .08, 'sine', .06, 1800 + Math.random() * 1500), 60 + k * 45 + Math.random() * 50);
+  }
   update(speed, active) {
     if (!this.context) return;
     const now = this.context.currentTime;

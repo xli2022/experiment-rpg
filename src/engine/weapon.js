@@ -58,7 +58,8 @@ export function createWeapon({ camera, character, audio, effects, hud, input, tr
       effects.tracer(muzzle, end);
       if (target) target.hit(options.damage?.() ?? 34, end);
       else if (car) hitTrafficCar(car, end);
-      else if (distance < 150 || blocked < length) effects.sparks(end, 0xf9e8b7, 5);
+      // A pane breaks; an open window swallows the shot; anything else sparks.
+      else if ((distance < 150 || blocked < length) && !world.breakWindow?.(end, direction)) effects.sparks(end, 0xf9e8b7, 5);
     },
     update(dt) {
       if (weapon.reloading > 0) {

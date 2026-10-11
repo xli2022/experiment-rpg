@@ -7,6 +7,7 @@ import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetai
 import { cachedInteriorPlan } from './interior-plan.js';
 import { entranceSteps, interiorContext, interiorSpatial } from './interior-physics.js';
 import { createFacadeMaterial, facadeUV, interiorClipUniforms, patchInteriorClip } from './building-materials.js';
+import { createWindowBreakage } from './broken-windows.js';
 import { DISTRICT_ARCHITECTURE, sampleArchitecture, buildingUseAtHeight } from './district-architecture.js';
 import { footprintShape } from './building-footprints.js';
 import { segmentHitsBox } from '../core/geometry.js';
@@ -608,6 +609,8 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     }
   }
   const plan = { ...masterPlan, buildings: [], trees: [], features: [], props: [] };
+  // Windows broken this session: drawn on the facades, open in the hulls.
+  const windows = createWindowBreakage(scene, metropolis);
   // Interiors: a building's context swaps its solid shell for walkable rooms.
   const interiorContextAt = (x, y, z) => {
     for (const p of metropolis.buildingsNear(x, z, 1)) {
@@ -619,6 +622,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   const planNear = (x, z) => metropolis.buildingsNear(x, z, 1).map(cachedInteriorPlan).find(Boolean) ?? null;
   // Everything this city put in the scene, and the materials and textures it made.
   function dispose() {
+    windows.dispose();
     scene.remove(ground, water, ...signs);
     const materials = new Set([...Object.values(mats), ...Object.values(terrain), pedestrianPaving, buildingSigns, water.material, ...signs.map(sign => sign.material)]);
     for (const geometry of new Set([ground.geometry, water.geometry, ...signs.map(sign => sign.geometry)])) geometry.dispose();
@@ -628,6 +632,6 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     }
   }
   return { ground, water, signs, dispose, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
-    interiorContextAt, planNear, interiorClip, spatialFor: context => context ? interiorSpatial(spatial, context) : spatial,
+    interiorContextAt, planNear, interiorClip, windows, spatialFor: context => context ? interiorSpatial(spatial, context, windows) : spatial,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

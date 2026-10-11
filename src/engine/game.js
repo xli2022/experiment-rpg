@@ -9,7 +9,7 @@ import { levelY, roomAt } from '../world/interior-plan.js';
 import { toLocal } from '../world/interior-physics.js';
 import { ResolutionGovernor } from '../world/world-stream.js';
 import { createTraffic } from '../traffic/index.js';
-import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, circleHitsBox, overlapsHeight, supportHeight } from '../core/physics.js';
+import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from '../core/physics.js';
 import { findSpawnPosition } from '../core/spawn.js';
 import { RENDER_PROFILES } from '../core/quality.js';
 import { Input } from './input.js';
@@ -43,10 +43,9 @@ export async function createGame({ canvas, modes }) {
   const state = { started: false, paused: false, mapOpen: false, modal: null, time: 0 };
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
-  const vector = new THREE.Vector3(), lookPoint = new THREE.Vector3(), desiredLook = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
+  const vector = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
   let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
-  let headCam = false, headLook = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
 
   // --- Modes ---------------------------------------------------------------
@@ -308,6 +307,29 @@ export async function createGame({ canvas, modes }) {
   }
   function liftPrompt() { return nearLift() ? { caption: `ELEVATOR / FLOOR ${player.interior.level + 1} OF ${player.interior.plan.levels}`, label: 'Choose a floor' } : null; }
 
+  // --- Windows ---------------------------------------------------------------
+  // Shots break the pane they hit; on foot, E smashes the window in arm's reach.
+  function breakWindow(point, direction) {
+    const pane = world.breakWindowAt(point);
+    if (pane?.fresh) { effects.shatter(pane, direction); audio.glass(); }
+    return pane;
+  }
+  const reachOrigin = new THREE.Vector3(), reachDirection = new THREE.Vector3();
+  function windowAhead() {
+    if (driving || player.climb || player.parachute || !state.started) return null;
+    reachDirection.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
+    // Low sills, tall plinths: try the hands at a few heights.
+    for (const height of [1.3, 1, 1.6]) {
+      reachOrigin.set(player.x, player.y + height, player.z);
+      const distance = rayObstructionDistance(reachOrigin, reachDirection, 1.4, scenery());
+      if (!(distance < 1.4)) continue;
+      const point = reachOrigin.clone().addScaledVector(reachDirection, distance), hit = world.windows.find(point);
+      if (hit && !world.windows.has(hit.p.id, hit.pane.key)) return { point, direction: reachDirection.clone() };
+    }
+    return null;
+  }
+  function windowPrompt() { return !nearestCar && windowAhead() ? { caption: 'WINDOW / GLASS', label: 'Smash the glass' } : null; }
+
   // --- Player actions ----------------------------------------------------------
   function interact() {
     if (!state.started || state.paused) return;
@@ -326,12 +348,14 @@ export async function createGame({ canvas, modes }) {
       const target = mode?.interactable?.(player);
       if (target) { target.use(); return; }
       nearestCar = findNearestCar();
+      const glass = nearestCar ? null : windowAhead();
+      if (glass) { breakWindow(glass.point, glass.direction); return; }
       // A traffic car waiting beside you (at a red light, in a queue) can be taken.
       const stopped = nearestCar ? null : traffic.hijackable(player);
       if (stopped) nearestCar = traffic.takeOver(stopped);
       if (!nearestCar) {
         const nearTraffic = traffic.cars.some(car => Math.abs(player.y - car.y) < 2 && Math.hypot(player.x - car.x, player.z - car.z) < 9);
-        hud.notify(nearTraffic ? `Step up to a car while it waits at a light, then press E${weapon.enabled ? ', or hit it three times to stop it' : ''}.` : mode?.interactHint?.() ?? 'Approach a door, an elevator or a stopped vehicle. E to interact.', 3);
+        hud.notify(nearTraffic ? `Step up to a car while it waits at a light, then press E${weapon.enabled ? ', or hit it three times to stop it' : ''}.` : mode?.interactHint?.() ?? 'Approach a window, an elevator or a stopped vehicle. E to interact.', 3);
         return;
       }
       resetTraversal();
@@ -468,34 +492,35 @@ export async function createGame({ canvas, modes }) {
     cameraTarget.set(player.x, player.y + targetHeight, player.z);
     const shoulder = driving ? .35 : aiming ? (indoors ? .55 : .8) : indoors ? .4 : .68 * (1 - glide * .7);
     cameraTarget.x += Math.cos(cameraYaw) * shoulder; cameraTarget.z -= Math.sin(cameraYaw) * shoulder;
-    desiredCamera.set(cameraTarget.x + Math.sin(cameraYaw) * Math.cos(cameraPitch) * distance, cameraTarget.y + Math.sin(cameraPitch) * distance + .5, cameraTarget.z + Math.cos(cameraYaw) * Math.cos(cameraPitch) * distance);
-    // Prevent the follow camera from clipping through nearby buildings.
-    direction.subVectors(desiredCamera, cameraTarget); const length = direction.length(); direction.normalize();
-    let obstruction = length;
-    const pad = indoors ? .12 : .25;
-    for (const box of scenery().along(cameraTarget, direction, length)) {
-      if (box.faces) { obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, box, length)); continue; }
-      obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, { ...box, w: box.w === undefined ? undefined : box.w + pad * 2, d: box.d === undefined ? undefined : box.d + pad * 2, minX: box.minX - pad, maxX: box.maxX + pad, minZ: box.minZ - pad, maxZ: box.maxZ + pad }, length));
+    // Prevent the follow camera from clipping through nearby buildings. Where a
+    // wall or a tight room leaves too little room behind the player, the boom
+    // swings up over their head instead of closing in, so the view stays third
+    // person: behind and above the player, never inside them.
+    const pad = indoors ? .12 : .25, margin = indoors ? .2 : .35, closest = indoors ? .35 : .6, room = aiming ? 1.1 : indoors ? 1.5 : 2;
+    const reach = pitch => {
+      direction.set(Math.sin(cameraYaw) * Math.cos(pitch) * distance, Math.sin(pitch) * distance + .5, Math.cos(cameraYaw) * Math.cos(pitch) * distance);
+      const length = direction.length(); direction.normalize();
+      let obstruction = length;
+      for (const box of scenery().along(cameraTarget, direction, length)) {
+        if (box.faces) { obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, box, length)); continue; }
+        obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, { ...box, w: box.w === undefined ? undefined : box.w + pad * 2, d: box.d === undefined ? undefined : box.d + pad * 2, minX: box.minX - pad, maxX: box.maxX + pad, minZ: box.minZ - pad, maxZ: box.maxZ + pad }, length));
+      }
+      return obstruction < length ? Math.max(closest, obstruction - margin) : length;
+    };
+    let pitch = cameraPitch, clear = reach(pitch), best = { pitch, clear };
+    for (let lift = .25; clear < room && pitch < 1.3; lift += .25) {
+      pitch = Math.min(1.3, cameraPitch + lift); clear = reach(pitch);
+      if (clear > best.clear) best = { pitch, clear };
     }
-    if (obstruction < length) desiredCamera.copy(cameraTarget).addScaledVector(direction, Math.max(indoors ? .35 : .6, obstruction - (indoors ? .2 : .35)));
-    // In a tight room, look from the head rather than from inside the jacket.
-    // Hysteresis keeps the head camera from flickering where a wall is about
-    // 1.15 m behind the player.
-    headCam = indoors && !aiming && obstruction < (headCam ? 1.45 : 1.15);
-    const close = headCam;
-    if (close) desiredCamera.set(player.x, player.y + 1.62, player.z);
+    if (best.pitch !== pitch) clear = reach(best.pitch);
+    desiredCamera.copy(cameraTarget).addScaledVector(direction, clear);
     if (snap) camera.position.copy(desiredCamera); else camera.position.lerp(desiredCamera, 1 - Math.exp(-12 * dt));
     const groundCorrection = Math.max(0, terrainHeight(camera.position.x, camera.position.z) + .55 - camera.position.y);
     camera.position.y += groundCorrection;
-    // Blend between looking ahead from the head and looking at the player, so
-    // leaving the head camera turns the view rather than whipping it.
-    headLook = snap ? +close : damp(headLook, +close, 10, dt);
-    lookPoint.set(camera.position.x - direction.x * 5, camera.position.y - direction.y * 5, camera.position.z - direction.z * 5)
-      .lerp(desiredLook.set(cameraTarget.x, cameraTarget.y + groundCorrection, cameraTarget.z), 1 - headLook);
-    camera.lookAt(lookPoint.x, lookPoint.y + recoil * .045, lookPoint.z);
+    camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + recoil * .045, cameraTarget.z);
     camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
-    character.root.visible = !driving && !close && camera.position.distanceTo(character.root.position) > (indoors ? .8 : 1.5);
+    character.root.visible = !driving;
   }
   function drawMaps(expandedOnly = false) {
     const goal = mode?.objective?.() ?? null;
@@ -535,7 +560,7 @@ export async function createGame({ canvas, modes }) {
     hud.waypoint(camera, goal, player, vector, state.started && !state.paused);
     $('crosshair').classList.toggle('aim', !!input.aiming);
     if (now - lastUI > 85) {
-      hud.update({ state, player, driving, nearestCar, fps, prompt: liftPrompt() ?? (state.started ? mode?.interactable?.(player) ?? hijackPrompt() : null), weapon, label: mode?.label ?? definition?.title?.toUpperCase() ?? 'AFTERLIGHT' });
+      hud.update({ state, player, driving, nearestCar, fps, prompt: liftPrompt() ?? (state.started ? mode?.interactable?.(player) ?? windowPrompt() ?? hijackPrompt() : null), weapon, label: mode?.label ?? definition?.title?.toUpperCase() ?? 'AFTERLIGHT' });
       if (state.started) mode?.hud?.({ player, goal, time: state.time });
       drawMaps();
       const minute = 48 + Math.floor(state.time / 45); $('game-time').textContent = `${String((23 + Math.floor(minute / 60)) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
@@ -603,7 +628,7 @@ export async function createGame({ canvas, modes }) {
     owned = traffic.owned;
     weapon = createWeapon({ camera, character, audio, effects, hud, input, traffic }, {
       canAct: () => state.started && !state.paused && !driving && !player.climb && !player.parachute,
-      scenery, ownedCars: () => owned, allCars, shot: () => characterShot(character),
+      scenery, ownedCars: () => owned, allCars, shot: () => characterShot(character), breakWindow,
     });
     attachMapControls({ view: world.mapView, canvas: $('full-map'), position: () => player, onPick: (x, y) => mode?.mapPick?.(x, y) });
     quality = input.touch ? 'low' : 'high'; $('quality').value = quality;

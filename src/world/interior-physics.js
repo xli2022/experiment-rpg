@@ -42,23 +42,33 @@ function polygonSlab(plan, polygon, minY, maxY, extra) {
   };
 }
 
-// Solid pieces of a wall line between openings (door gaps, lintels, sills).
+// Solid pieces of a wall line between openings (door gaps, broken windows):
+// between each pair of gap edges, the wall's height less the gaps across it.
+// Glazed windows stay solid.
 function wallPieces(plan, a, b, thickness, minY, maxY, openings, id, offset = 0) {
   const length = Math.hypot(b.x - a.x, b.z - a.z), boxes = [], extra = n => ({ id: `${id}:${n}`, climbable: false, interior: plan.id });
-  const gaps = openings.filter(o => !o.window).sort((p, q) => p.from - q.from);
-  let cursor = 0, n = 0;
-  for (const gap of gaps) {
-    if (gap.from > cursor + 1e-4) boxes.push(segmentBox(plan, a, b, thickness, minY, maxY, extra(n++), offset, cursor, gap.from));
-    if (gap.topY < maxY) boxes.push(segmentBox(plan, a, b, thickness, gap.topY, maxY, extra(n++), offset, gap.from, gap.to));
-    if (gap.bottomY > minY) boxes.push(segmentBox(plan, a, b, thickness, minY, gap.bottomY, extra(n++), offset, gap.from, gap.to));
-    cursor = Math.max(cursor, gap.to);
+  const gaps = openings.filter(o => !o.window && o.to > o.from).map(o => ({ ...o, from: Math.max(0, o.from), to: Math.min(length, o.to) }));
+  const edges = [...new Set([0, length, ...gaps.flatMap(g => [g.from, g.to])])].filter(t => t >= 0 && t <= length).sort((p, q) => p - q);
+  let n = 0;
+  for (let i = 1; i < edges.length; i++) {
+    const t0 = edges[i - 1], t1 = edges[i], mid = (t0 + t1) / 2;
+    if (t1 - t0 < 1e-4) continue;
+    let y = minY;
+    for (const gap of gaps.filter(g => g.from < mid && g.to > mid).sort((p, q) => p.bottomY - q.bottomY)) {
+      if (gap.bottomY > y + 1e-4) boxes.push(segmentBox(plan, a, b, thickness, y, gap.bottomY, extra(n++), offset, t0, t1));
+      y = Math.max(y, gap.topY);
+    }
+    if (maxY > y + 1e-4) boxes.push(segmentBox(plan, a, b, thickness, y, maxY, extra(n++), offset, t0, t1));
   }
-  if (length > cursor + 1e-4) boxes.push(segmentBox(plan, a, b, thickness, minY, maxY, extra(n++), offset, cursor, length));
   return boxes;
 }
 
-/** Perimeter walls flush with the shell collider, door gaps and a roof cap. */
-export function interiorHull(plan) {
+/**
+ * Perimeter walls flush with the shell collider, door gaps and a roof cap.
+ * `broken` (key → pieces, from createBrokenWindows) opens broken panes of the
+ * base volume, so people can climb in and out through them.
+ */
+export function interiorHull(plan, broken = new Map()) {
   const faces = polygonFaces(plan.outline), boxes = [];
   plan.outline.forEach((a, i) => {
     const b = plan.outline[(i + 1) % plan.outline.length], face = faces[i];
@@ -67,6 +77,12 @@ export function interiorHull(plan) {
       if (Math.abs(e.nx * face.nx + e.nz * face.nz - 1) > 1e-3 || Math.abs((e.x - a.x) * face.nx + (e.z - a.z) * face.nz) > .02) continue;
       const along = (e.x - a.x) * ux + (e.z - a.z) * uz;
       openings.push({ from: along - e.width / 2, to: along + e.width / 2, bottomY: plan.floor0, topY: plan.floor0 + e.height });
+    }
+    for (const { pieces } of broken.values()) for (const pane of pieces) {
+      if (pane.volume !== 0 || pane.face !== i) continue;
+      const along = s => (pane.wall.start.x + pane.wall.dir.x * s - a.x) * ux + (pane.wall.start.z + pane.wall.dir.z * s - a.z) * uz;
+      const [from, to] = [along(pane.s0), along(pane.s1)].sort((p, q) => p - q);
+      openings.push({ from, to, bottomY: pane.wall.bottom + pane.v0, topY: pane.wall.bottom + pane.v1 });
     }
     // Walls are built along the inward-facing side: the outer face is the outline.
     boxes.push(...wallPieces(plan, a, b, INTERIOR.hull, plan.ground, plan.roof, openings, `interior:${plan.id}:hull:${i}`, INTERIOR.hull / 2));
@@ -152,15 +168,15 @@ function cached(key, make) {
   while (colliderCache.size > 64) colliderCache.delete(colliderCache.keys().next().value);
   return value;
 }
-export function interiorColliders(plan, level) {
-  const hull = cached(`${plan.id}:hull`, () => interiorHull(plan)), floors = [];
+export function interiorColliders(plan, level, windows = null) {
+  const hull = cached(`${plan.id}:hull:${windows?.version(plan.id) ?? 0}`, () => interiorHull(plan, windows?.of(plan.id))), floors = [];
   for (let l = Math.max(0, level - 1); l <= Math.min(plan.levels - 1, level + 1); l++) floors.push(...cached(`${plan.id}:${l}`, () => floorColliders(plan, l)));
   return hull.concat(floors);
 }
 
 /** Same query/near/along API as city.spatial, with the shell swapped for the interior. */
-export function interiorSpatial(spatial, context) {
-  const shell = `building:${context.id}`, extra = interiorColliders(context.plan, context.level);
+export function interiorSpatial(spatial, context, windows = null) {
+  const shell = `building:${context.id}`, extra = interiorColliders(context.plan, context.level, windows);
   return {
     context,
     query(minX, minZ, maxX, maxZ) {
