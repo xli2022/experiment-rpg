@@ -46,6 +46,7 @@ export class HUD {
     const showClimb = !!face && !driving && state.started && !state.paused;
     const showGlide = gliding && !driving && state.started && !state.paused;
     $('climb-panel').classList.toggle('hidden', !showClimb && !showGlide); $('climb-panel').classList.toggle('near-wall', !climbing && !gliding);
+    $('climb-panel').classList.toggle('gliding', showGlide);
     $('touch-climb').classList.toggle('hidden', !showClimb); $('touch-climb').textContent = climbing ? 'LET GO' : 'CLIMB';
     if (showGlide) {
       $('climb-title').textContent = player.parachute.openness < 1 ? 'PARACHUTE OPENING' : 'PARACHUTE';

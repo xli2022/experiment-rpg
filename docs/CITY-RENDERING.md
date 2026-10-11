@@ -208,7 +208,7 @@ Sources are layered: `core` ← `world` ← `traffic` ← `engine` ← `modes`. 
 import { createWorld } from './src/world/index.js';
 const world = createWorld({ scene, renderer, quality: 'high' });   // landmarks default to AFTERLIGHT_LANDMARKS
 world.update({ camera, focus: player, interior, now, dt });       // streaming, weather, interiors
-world.setCutaway(camera.position, playerAtEyeHeight, floorY);     // see through what hides the player
+world.setCutaway(camera.position, playerAtEyeHeight, floorY);     // fade what hides the player
 ```
 
 `createWorld` returns:
@@ -253,7 +253,7 @@ Saves carry **`worldRevision: 6`**. Coordinates from earlier city layouts, inclu
 
 `engine/camera-rig.js` keeps the camera the same distance behind the player everywhere, indoors and out, and never closes in on them. Yaw and pitch come straight from the player's input. The look height eases over steps and stairs and cuts on a long drop or a lift ride. Aiming, driving and gliding change the framing on critically damped springs, which start and stop without a jolt. The camera never sinks below the floor the player stands on or the ground beneath it.
 
-Whatever comes between the camera and the player is cut away instead. `world/view-cutaway.js` patches building facades and fittings, signs, broken windows and every interior material: fragments in a slot along the line from the camera to the player are discarded. The slot is widest at the camera and narrows to the player's shoulders. It reaches from a little above the line of sight down to the player's feet, and stops just short of them. The floor they stand on and everything beyond them always stay. Shots start level with the player, so the walls the view cuts away don't stop them. Rain is hidden while the player is indoors, wherever the camera is. Each frame the engine calls `world.setCutaway(eye, focus, floor)`.
+Whatever comes between the camera and the player fades out instead. `world/view-cutaway.js` patches building facades and fittings, signs, broken windows and every interior material. Surfaces in a slot along the line from the camera to the player become see-through. The slot is widest at the camera and narrows to the player's shoulders. It reaches from a little above the line of sight down to the player's feet, and stops just short of them, with soft edges. The floor they stand on and everything beyond them stay solid. The fade is dithered: an ordered screen-space pattern drops a share of each surface's pixels, so materials stay opaque, keep writing depth and need no sorting. Close to the camera the slot clears completely; nearer the player, walls stay as a faint ghost, so the room around them still reads. Shots start level with the player, so the walls the view fades don't stop them. Rain is hidden while the player is indoors, wherever the camera is. Each frame the engine calls `world.setCutaway(eye, focus, floor)`.
 
 ## Verification
 
@@ -290,7 +290,7 @@ Physics tests check:
 - a walk from the street up one storey at 20, 30, 60 and 120 FPS with no falls or wall overlaps
 - rays from inside, indoor save validation, and entrance step heights
 - sliding along walls at any angle and round crate corners, and stopping in gaps too narrow to pass
-- a follow camera that keeps its distance everywhere, climbs stairs smoothly and stays above the floor, and a cutaway that clears every wall between it and any part of the player in real rooms
+- a follow camera that keeps its distance everywhere, climbs stairs smoothly and stays above the floor, and a fade that turns every wall between it and any part of the player in real rooms into at most a faint ghost
 - shots that pass the walls the view cuts away but not walls ahead of the player
 
 The renderer audit checks all 63 remapped world objects with surrounding arrival positions against the generated solid geometry. The road audit samples both road edges and ramp routes against terrain and collision metadata. Current city changes should be checked with `npm test` and `npm run build -- --configLoader runner`, followed by desktop and mobile browser traversal. Development-only `window.__AFTERLIGHT__.snapshot()` reports renderer submissions, streaming residency, blueprint counts, actor activity and CPU update/submission costs. These counters and desktop browser frame rates are not physical-phone GPU measurements.

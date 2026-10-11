@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { CUTAWAY, cutsAway, patchViewCutaway, setViewCutaway, viewCutawayUniforms } from '../src/world/view-cutaway.js';
+import { CUTAWAY, cutawayOpacity, patchViewCutaway, setViewCutaway, viewCutawayUniforms } from '../src/world/view-cutaway.js';
 import { interiorClipUniforms, patchInteriorClip, createFacadeMaterial } from '../src/world/building-materials.js';
 import { createCameraRig } from '../src/engine/camera-rig.js';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
@@ -13,22 +13,27 @@ import { createWorld } from '../src/world/index.js';
 
 const eye = { x: 0, y: 2.7, z: 6 }, focus = { x: 0, y: 1.35, z: 0 };
 
-test('the cutaway opens a slot from the camera to the player, down to their feet, and keeps the rest', () => {
-  assert.ok(cutsAway({ x: 0, y: 1.5, z: 3 }, eye, focus, 0), 'a wall halfway');
-  assert.ok(cutsAway({ x: .9, y: .2, z: 1 }, eye, focus, 0), 'a wall right behind them, down to their feet');
-  assert.ok(cutsAway({ x: 0, y: 1.3, z: .5 }, eye, focus, 0), 'a wall at their back');
-  assert.ok(cutsAway({ x: 1.6, y: 2.4, z: 5.8 }, eye, focus, 0), 'clutter round the camera');
-  assert.ok(!cutsAway({ x: 0, y: .04, z: 2 }, eye, focus, 0), 'never the floor they stand on');
-  assert.ok(!cutsAway({ x: 0, y: 1.5, z: -.5 }, eye, focus, 0), 'nothing beyond them');
-  assert.ok(!cutsAway({ x: 2.5, y: 1.5, z: 2 }, eye, focus, 0), 'nothing well to the side');
-  assert.ok(!cutsAway({ x: 0, y: 3.5, z: 2 }, eye, focus, 0), 'nor the ceiling above the line of sight');
-  assert.ok(!cutsAway({ x: 0, y: 1.5, z: 7 }, eye, focus, 0), 'nor anything behind the camera');
+test('walls between the camera and the player fade to a ghost, clear near the camera, and the rest stays solid', () => {
+  const opacity = point => cutawayOpacity(point, eye, focus, 0), ghost = CUTAWAY.ghost + 1e-9;
+  assert.ok(opacity({ x: 0, y: 1.5, z: 3 }) <= ghost, 'a wall halfway');
+  assert.ok(opacity({ x: .9, y: .2, z: 1 }) <= ghost, 'a wall right behind them, down to their feet');
+  assert.ok(opacity({ x: 0, y: 1.3, z: .5 }) <= ghost, 'a wall at their back');
+  assert.ok(opacity({ x: .5, y: 1.3, z: .5 }) > .2, 'which still shows as a faint ghost');
+  assert.equal(opacity({ x: 1.6, y: 2.4, z: 5.8 }), 0, 'clutter round the camera clears completely');
+  assert.equal(opacity({ x: 0, y: .04, z: 2 }), 1, 'never the floor they stand on');
+  assert.equal(opacity({ x: 0, y: 1.5, z: -.5 }), 1, 'nothing beyond them');
+  assert.equal(opacity({ x: 2.5, y: 1.5, z: 2 }), 1, 'nothing well to the side');
+  assert.equal(opacity({ x: 0, y: 3.5, z: 2 }), 1, 'nor the ceiling above the line of sight');
+  assert.equal(opacity({ x: 0, y: 1.5, z: 8 }), 1, 'nor anything behind the camera');
+  // The edge is soft: across it the opacity rises steadily.
+  const across = [1.05, 1.15, 1.25, 1.35, 1.45, 1.55].map(x => opacity({ x, y: 1.5, z: 3 }));
+  for (let i = 1; i < across.length; i++) assert.ok(across[i] >= across[i - 1] && across[i] - across[i - 1] < .45, `soft at ${across.map(v => v.toFixed(2))}`);
   // Gliding high above the city, the buildings far beneath stay whole.
-  assert.ok(!cutsAway({ x: 0, y: 30, z: 4 }, { x: 0, y: 53, z: 9 }, { x: 0, y: 51, z: 0 }, 0));
+  assert.equal(cutawayOpacity({ x: 0, y: 30, z: 4 }, { x: 0, y: 53, z: 9 }, { x: 0, y: 51, z: 0 }, 0), 1);
   assert.ok(CUTAWAY.focusRadius >= 1 && CUTAWAY.below > 1.35 + .1, 'wide and deep enough for the whole body');
 });
 
-test('in real rooms, every wall between the camera and any part of the player is cut away', () => {
+test('in real rooms, every wall between the camera and any part of the player fades to at most a ghost', () => {
   const metropolis = new VerticalMetropolis(), seen = new Set(), rig = createCameraRig();
   let checked = 0, rooms = 0;
   for (const d of DISTRICTS.slice(0, 4)) for (const block of metropolis.area(d.x - 50, d.z - 50, d.x + 50, d.z + 50)) for (const p of block.buildings) {
@@ -51,7 +56,7 @@ test('in real rooms, every wall between the camera and any part of the player is
             const d = rayBoxDistance(from, dir, box, length);
             if (d >= length) continue;
             const hit = from.clone().addScaledVector(dir, d + .01);
-            assert.ok(cutsAway(hit, from, rig.focus, floor), `${plan.id} ${zone.kind} yaw ${yaw}: a wall hides the player at ${up} m`);
+            assert.ok(cutawayOpacity(hit, from, rig.focus, floor) <= CUTAWAY.ghost + 1e-9, `${plan.id} ${zone.kind} yaw ${yaw}: a wall hides the player at ${up} m`);
             checked++;
           }
         }
@@ -71,7 +76,7 @@ test('the cutaway patches any material, alongside the interior clip', () => {
     material.onBeforeCompile(shader);
     assert.equal(shader.uniforms.cutawayEye, uniforms.cutawayEye);
     assert.match(shader.vertexShader, /vCutaway = \(modelMatrix \* cutawayWorld\)\.xyz/);
-    assert.match(shader.fragmentShader, /cutawayEye\.w > \.5[\s\S]*discard/);
+    assert.match(shader.fragmentShader, /cutawayEye\.w > \.5[\s\S]*cutawayThreshold\(gl_FragCoord\.xy\)\) discard/);
     assert.match(material.customProgramCacheKey(), /view-cutaway/);
     if (shader.uniforms.interiorCavity) assert.match(shader.fragmentShader, /interiorCavity/, 'the interior clip still applies');
   }

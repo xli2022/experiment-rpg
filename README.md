@@ -106,7 +106,7 @@ Sources are layered, and each layer imports only those before it: `core` → `wo
   - `vertical-city.js` / `world-stream.js` — buildings, decks, collision and streamed instancing
   - `building-*.js` / `district-architecture.js` / `vegetation.js` / `wayfinding.js` — architecture, signs, planting and labels
   - `interior-plan.js` / `interior-physics.js` / `interiors.js` — enterable interiors
-  - `view-cutaway.js` — seeing through whatever stands between the camera and the player
+  - `view-cutaway.js` — fading whatever stands between the camera and the player
   - `atmosphere.js` — sky, lights, fog and rain
   - `landmarks.js` — the fixed sites every mode can use
 - `src/traffic/` — living streets behind `createTraffic()`:

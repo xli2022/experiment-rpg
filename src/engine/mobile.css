@@ -101,6 +101,12 @@ body.touch .interaction kbd{display:none}
 body.touch .interaction span{font-size:11px}
 body.touch .climb-panel,body.touch .climb-panel.near-wall{left:50%;right:auto;bottom:calc(var(--status-bottom) + 122px);transform:translateX(-50%);width:min(280px,calc(100% - 32px))}
 body.touch .climb-panel p{font-size:9px}
+/* Under a canopy the player and the landing fill the middle of the screen, so
+   the panel takes the weapon panel's place above the actions instead (the
+   weapon is put away while gliding): title, height and canopy bar only. */
+body.touch .climb-panel.gliding{left:auto;right:var(--touch-right);bottom:var(--status-bottom);transform:none;width:126px;padding:8px 10px}
+body.touch .climb-panel.gliding>div:first-child{flex-direction:column;align-items:flex-end;gap:2px;font-size:8px;letter-spacing:.6px}
+body.touch .climb-panel.gliding p{display:none}
 body.touch .build-label{display:none}
 body.touch .notification{top:calc(env(safe-area-inset-top, 0px) + 66px);font-size:11px;max-width:calc(100% - 32px)}
 body.touch.menu-open .notification{top:auto;bottom:calc(env(safe-area-inset-bottom, 0px) + 18px)}
