@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { signTexture } from './sign-texture.js';
 import { createTerrainMaterials } from './terrain-materials.js';
 import { buildingSign, createBuildingSignMaterial } from './building-signs.js';
-import { createInfrastructureIndex, geometryVolume, infrastructureIntersections, roadSolidRecipes, supportSolidRecipe } from './infrastructure-clearance.js';
+import { createInfrastructureIndex, geometryVolume, infrastructureIntersections, roadSlabDepth, roadSolidRecipes, supportSolidRecipe } from './infrastructure-clearance.js';
 import { buildingDesign, buildingVolumes, buildingVolumeColliders, buildingDetails, buildingEntrances } from './building-design.js';
 import { cachedInteriorPlan } from './interior-plan.js';
 import { entranceSteps, interiorContext, interiorSpatial } from './interior-physics.js';
@@ -16,7 +16,7 @@ import { seededRandom, orientedBox, boxCoordinates } from '../core/physics.js';
 import { SpatialGrid } from '../core/spatial-grid.js';
 import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { createMasterPlan, districtAt, terrainHeight, TERRAIN_GRID, WATER_LEVEL, isWater, SHOWCASE } from './master-plan.js';
-import { BUILDING_SCALE, CITY_SCALE, atEastpoint } from './world-scale.js';
+import { BUILDING_SCALE, CITY_SCALE, ROAD_SHOULDER, atEastpoint } from './world-scale.js';
 import { wayfindingSigns } from './wayfinding.js';
 import { pocketVegetation, treeParts, shrubParts, treeCollider, yardPlanting } from './vegetation.js';
 
@@ -130,9 +130,48 @@ function blocksPassage(box, plan, ignored) {
   });
 }
 
+// Headroom a road or footway needs to pass beneath a raised road.
+const UNDERPASS = 2.5;
+
+// A road raised off the ground but too low for piers stands on a stone
+// embankment down to the ground, so its slab never floats and its sides are
+// walls. It stays open where another road passes beneath with headroom, and
+// where one meets it at a junction; a closed street too low to pass beneath
+// ends at the embankment.
+function embankment(segment, f, plan) {
+  const width = segment.width + 2 * ROAD_SHOULDER - .1, depth = roadSlabDepth(segment), cross = segment.crossSlope ?? 0;
+  const surface = (t, o) => segment.a.y + (segment.b.y - segment.a.y) * t - cross * o;
+  let gap = 0, low = Infinity, top = Infinity;
+  const steps = Math.max(2, Math.ceil(f.flatLength / 2));
+  for (let k = 0; k <= steps; k++) for (const o of [-width / 2, 0, width / 2]) {
+    const t = k / steps, x = segment.a.x + (segment.b.x - segment.a.x) * t + f.nx * o, z = segment.a.z + (segment.b.z - segment.a.z) * t + f.nz * o;
+    const ground = terrainHeight(x, z), bottom = surface(t, o) - depth;
+    gap = Math.max(gap, bottom - ground); low = Math.min(low, ground); top = Math.min(top, bottom);
+  }
+  if (gap < .2) return null;
+  const local = { minX: -width / 2, maxX: width / 2, minZ: -f.flatLength / 2, maxZ: f.flatLength / 2 }, frame = { x: f.x, z: f.z, yaw: f.yaw };
+  const bounds = [f.x - f.flatLength / 2 - width, f.z - f.flatLength / 2 - width, f.x + f.flatLength / 2 + width, f.z + f.flatLength / 2 + width];
+  for (const other of plan.roadIndex.query(...bounds)) {
+    if (other.road === segment.road) continue;
+    if (!segmentHitsBox(boxCoordinates(other.a.x, other.a.z, frame), boxCoordinates(other.b.x, other.b.z, frame), local, other.width / 2 + ROAD_SHOULDER)) continue;
+    const dx = other.b.x - other.a.x, dz = other.b.z - other.a.z, t = Math.max(0, Math.min(1, ((f.x - other.a.x) * dx + (f.z - other.a.z) * dz) / (dx * dx + dz * dz || 1)));
+    const y = other.a.y + (other.b.y - other.a.y) * t;
+    if (y > f.y + .8) continue;
+    if (Math.abs(f.y - y) < .8 || f.y - depth - y >= UNDERPASS) return null;
+  }
+  if (plan.supportIndex.query(...bounds).length) return null;
+  const h = gap + .4, roll = -Math.atan(cross);
+  return { kind: 'embankment', ...orientedBox(f.x, f.z, width, f.flatLength, f.yaw, top, low - .4, { walkable: false }),
+    y: f.y - depth - h / 2, h, pitch: f.pitch, roll, length: f.length + .04 };
+}
+
 function segmentFeatures(segment, plan) {
   const f = roadFrame(segment), result = [], road = segment.road ?? segment;
-  if (!elevated(segment)) return result;
+  if (!elevated(segment)) {
+    const bank = embankment(segment, f, plan);
+    if (bank) result.push(bank);
+    return result;
+  }
   const crossing = plan.roadIndex.query(f.x - 18, f.z - 18, f.x + 18, f.z + 18).some(s => {
     if (s.road === segment.road || s.id === segment.id) return false;
     const other = center(s), frame = roadFrame(s);
@@ -156,7 +195,7 @@ function segmentFeatures(segment, plan) {
   if (order % 3 === 0 && !crossing) {
     const ground = terrainHeight(f.x, f.z), height = f.y - ground - 1.1;
     const pier = { kind: 'pier', ...orientedBox(f.x, f.z, 2.4, 2.1, f.yaw, ground + height, ground, { walkable: false }), y: ground + height / 2, h: height };
-    if (height > 3 && !blocksPassage(pier, plan, segment.road)) result.push(pier);
+    if (height > .5 && !blocksPassage(pier, plan, segment.road)) result.push(pier);
   }
   return result;
 }
@@ -378,24 +417,51 @@ export class VerticalMetropolis {
     // Street furniture uses the same sampled centerline as traffic and roads.
     const supported = this.supportParts.filter(p => inBounds(p, minX, minZ, maxX, maxZ));
     infrastructure.push(...supported); colliders.push(...supported);
+    // A roadside lamp stands at the kerb, out of junction mouths (where the
+    // footways turn to the crossings), every building and the walk in front of
+    // every street door; it slides a few metres along its road to find room.
+    const entrances = new Map();
+    // Near another street, or on its own road's carriageway where that bends back.
+    const onOtherStreet = (x, y, z, segment) => this.roadIndex.query(x - 18, z - 18, x + 18, z + 18).some(o => {
+      if (o === segment) return false;
+      const dx = o.b.x - o.a.x, dz = o.b.z - o.a.z, t = Math.max(0, Math.min(1, ((x - o.a.x) * dx + (z - o.a.z) * dz) / (dx * dx + dz * dz || 1)));
+      const reach = o.width / 2 + (o.road === segment.road ? .85 : 8);
+      return Math.hypot(x - o.a.x - dx * t, z - o.a.z - dz * t) < reach && Math.abs(o.a.y + (o.b.y - o.a.y) * t - y) < 3;
+    });
+    const lampBlocked = (x, z, high) => [...lots.query(x - 9, z - 9, x + 9, z + 9).map(lot => lot.candidate), ...this.anchors.filter(a => Math.hypot(a.x - x, a.z - z) < 60)].some(p => {
+      const c = Math.cos(p.yaw), sn = Math.sin(p.yaw), dx = x - p.x, dz = z - p.z, lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+      if (Math.abs(lx) < p.w / 2 + .5 && Math.abs(lz) < p.d / 2 + .5) return true;
+      if (high) return false;
+      if (!entrances.has(p)) entrances.set(p, buildingEntrances(p));
+      // The walk runs from the door (set back from the lot front on a curved
+      // or hexagonal wall) across the front yard to the kerb.
+      return entrances.get(p).some(e => {
+        const out = (lx - e.x) * e.nx + (lz - e.z) * e.nz, along = -(lx - e.x) * e.nz + (lz - e.z) * e.nx;
+        return out > -.5 && out < (p.setback ?? 4) + p.d / 2 - (e.x * e.nx + e.z * e.nz) + 1.5 && Math.abs(along) < e.width / 2 + 1;
+      });
+    });
     for (const s of this.roadIndex.query(minX - 32, minZ - 32, maxX + 32, maxZ + 32)) {
       const f = roadFrame(s);
       if (!inBounds(f, minX, minZ, maxX, maxZ)) continue;
       const parts = segmentFeatures(s, this.plan); infrastructure.push(...parts); colliders.push(...parts);
       const order = s.index ?? s.segmentIndex ?? s.road?.points?.indexOf(s.a) ?? 0;
       if (order % 3 === 1 && f.flatLength > 5) {
-        const high = elevated(s), side = order % 2 ? 1 : -1, offset = s.width / 2 + (high ? .65 : 2.6);
-        const x = f.x + side * f.nx * offset, z = f.z + side * f.nz * offset;
-        let y = terrainHeight(x, z);
-        if (high) {
-          // The bridge's stone shoulder extends only 1.7 m beyond the lane.
-          // Ground the upright pole on its actual pitched/banked top plane,
-          // leaving the outer railing at 1.2 m clear of the lamp.
-          const normal = new THREE.Vector3(0, 1, 0).applyEuler(new THREE.Euler(f.pitch, f.yaw, -Math.atan(s.crossSlope ?? 0), 'YXZ'));
-          y = f.y - .55 - .12 + (.55 - normal.x * (x - f.x) - normal.z * (z - f.z)) / normal.y;
+        const high = elevated(s), side = order % 2 ? 1 : -1, offset = s.width / 2 + (high ? .65 : .9);
+        // The stone shoulder extends 1.7 m beyond the lane: the pole stands on
+        // its actual pitched, banked top plane, or on the ground where that is
+        // higher. On a bridge the outer railing stays 1.2 m clear of the lamp.
+        const normal = new THREE.Vector3(0, 1, 0).applyEuler(new THREE.Euler(f.pitch, f.yaw, -Math.atan(s.crossSlope ?? 0), 'YXZ'));
+        for (const shift of [0, 2.5, -2.5, 5, -5]) {
+          if (Math.abs(shift) > f.flatLength / 2 - .5) continue;
+          const x = f.x + side * f.nx * offset + Math.sin(f.yaw) * shift, z = f.z + side * f.nz * offset + Math.cos(f.yaw) * shift;
+          const half = (roadSlabDepth(s) - .12) / 2, shoulder = f.y - .12 - half + (half - normal.x * (x - f.x) - normal.z * (z - f.z)) / normal.y;
+          const y = high ? shoulder : Math.max(terrainHeight(x, z), shoulder);
+          const lamp = { x, z, y, kind: 'lamp', yaw: f.yaw, tint: districtStyle(districtAt(x, z)).accent };
+          if (isWater(x, z) || lampBlocked(x, z, high) || !high && onOtherStreet(x, y, z, s) || !streetlightFits(lamp, this.infrastructureIndex)) continue;
+          // The post is solid; the arm overhead is out of reach.
+          props.push(lamp); colliders.push(orientedBox(x, z, .26, .26, 0, y + 8.6, y, { id: `lamp:${s.road?.id ?? ''}:${order}`, kind: 'lamp', walkable: false }));
+          break;
         }
-        const lamp = { x, z, y, kind: 'lamp', yaw: f.yaw, tint: districtStyle(districtAt(x, z)).accent };
-        if (!isWater(x, z) && streetlightFits(lamp, this.infrastructureIndex)) props.push(lamp);
       }
     }
     const planting = pocketVegetation({ minX, minZ, maxX, maxZ, plan: this.plan, lots, anchors: this.anchors,
@@ -609,7 +675,8 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
         }
       }
       for (const p of block.infrastructure) if (inCell(p, cell)) {
-        if (p.kind === 'pier') {
+        if (p.kind === 'embankment') add(mats.stone, p.x, p.y, p.z, p.w, p.h, p.length, p.yaw, 0x667b82, false, 'box', p.pitch, p.roll);
+        else if (p.kind === 'pier') {
           add(mats.stone, p.x, p.y, p.z, p.w, p.h, p.d, p.yaw, 0x627984, false);
           if (p.w > 1) add(mats.stone, p.x, p.maxY + .1, p.z, 9, .6, 2.4, p.yaw, 0x627984, false);
         } else if (p.kind === 'planter') {

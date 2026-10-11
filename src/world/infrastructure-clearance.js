@@ -58,6 +58,7 @@ export function createInfrastructureIndex(plan, parts = []) {
   }
   for (const p of parts) {
     if (p.kind === 'rail') add({ ...p, h: .95, d: p.length });
+    else if (p.kind === 'embankment') add({ ...p, d: p.length });
     else if (p.kind === 'pier') {
       add(p);
       if (p.w > 1) add({ ...p, kind: 'pier-cap', y: p.maxY + .1, w: 9, h: .6, d: 2.4 });

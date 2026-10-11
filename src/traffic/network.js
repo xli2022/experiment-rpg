@@ -612,8 +612,18 @@ function buildWalkGraph(plan, nodes, edges) {
     for (const n of list) { const gap = dist(n, p); if (gap < d && Math.abs(n.y - p.y) < height) { best = n; d = gap; } }
     return best;
   };
+  // Touching decks join through the middle of the edge they share, where
+  // their railings leave the opening.
+  const shared = (a, b) => {
+    const x0 = Math.max(a.minX, b.minX), x1 = Math.min(a.maxX, b.maxX), z0 = Math.max(a.minZ, b.minZ), z1 = Math.min(a.maxZ, b.maxZ);
+    return x1 - x0 > -.5 && z1 - z0 > -.5 ? { x: (x0 + x1) / 2, z: (z0 + z1) / 2 } : null;
+  };
   for (const deck of decks) for (const other of decks) if (deck.support.id < other.support.id) {
-    for (const c of deck.corners) { const n = nearestNode(c, other.corners, 14); if (n) addEdge(c, n, 'deck', { deck: deck.support.id }); }
+    const middle = shared(deck.support, other.support);
+    for (const c of deck.corners) {
+      const n = nearestNode(c, other.corners, 14);
+      if (n) addEdge(c, n, 'deck', { deck: deck.support.id }, middle ? [c, { x: middle.x, y: (c.y + n.y) / 2, z: middle.z }, n] : null);
+    }
   }
   const deckCorners = decks.flatMap(d => d.corners), streetNodes = walkNodes.filter(n => n.kind === 'sidewalk' || n.kind === 'corner');
   for (const s of plan.supports ?? []) if (s.pedestrian && s.a && s.b) {
