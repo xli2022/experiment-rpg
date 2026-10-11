@@ -165,7 +165,7 @@ Junctions are at-grade crossings within 0.7 m of height, and road ends that meet
 - **Phases.** Each road direction gets its own phase. A road's two approaches always share one, and roads meeting in a straight line join it, so streets that cross never share a green. Most junctions run two phases and a few three-road junctions run three. Green lasts 14–22 s, longer for wider roads, followed by 3 s of amber and 1.5 s all-red. Each junction's offset comes from a hash of its ID, so the city's lights are not synchronized.
 - **Pure function of the clock.** No per-frame work is needed for distant junctions.
 - **Walk signal.** People may start across a street while its own traffic is held and another phase has green. The lamp shows a flashing hand for the last 6 seconds.
-- **Rendering.** Six instanced meshes draw everything for junctions within 170 m: poles, mast arms, three-lamp heads, pedestrian lamps, zebra stripes and stop lines. They are rebuilt after every 40 m the player moves.
+- **Rendering.** Seven instanced meshes draw everything for junctions within 170 m: poles, mast arms, three-lamp heads, the red lamps' glow, pedestrian lamps, zebra stripes and stop lines. They are rebuilt after every 40 m the player moves. The filmic tone mapping bleaches and yellows bright saturated light, so a red lens as bright as the amber and green ones would show as salmon. The red lens stays below the bloom threshold, and a soft additive ring of red light stands in for its bloom. `tests/signal-lamps.test.js` runs the lamp colours through the same tone curve.
 
 ### Vehicles
 

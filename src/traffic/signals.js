@@ -62,8 +62,27 @@ export function walkState(node, approach, time) {
   return { walk: false, remaining: 0, controlled: true };
 }
 
-const LAMP_COLORS = { red: [3.2, .16, .12], amber: [3, 1.35, .08], green: [.2, 2.6, 1.2], walk: [2.2, 2.4, 2.3], stop: [2.6, .7, .1] };
-const DIM = .05, PROP_RANGE = 170, REBUILD = 40;
+// Lamp colours in the renderer's linear HDR range, before the filmic tone
+// mapping every frame goes through. That curve bleaches and yellows bright
+// saturated light, so a red as bright as the amber and green lenses (which
+// bloom) would reach the screen as salmon orange. The red lens stays dim
+// enough to read pure red, and a soft red glow round it stands in for bloom.
+export const LAMP_COLORS = Object.freeze({ red: [1.2, 0, 0], amber: [3, 1.35, .08], green: [.2, 2.6, 1.2], walk: [2.2, 2.4, 2.3], stop: [2.6, .7, .1] });
+export const RED_GLOW = Object.freeze([.5, 0, 0]);
+const DIM = .05, PROP_RANGE = 170, REBUILD = 40, GLOW = .75;
+
+// A ring of light round a lens: clear over the lens itself (radius .105 of
+// the glow's .375), brightest at its rim and fading out to the edge.
+function glowTexture(size = 64) {
+  const data = new Uint8Array(size * size * 4), smooth = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  for (let y = 0; y < size; y++) for (let x = 0; x < size; x++) {
+    const r = Math.hypot((x + .5) / size * 2 - 1, (y + .5) / size * 2 - 1), alpha = smooth(.25, .31, r) * (1 - smooth(.29, 1, r)) ** 1.6;
+    data.set([255, 255, 255, Math.round(255 * alpha)], (y * size + x) * 4);
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.name = 'signal-glow'; texture.magFilter = texture.minFilter = THREE.LinearFilter; texture.needsUpdate = true;
+  return texture;
+}
 
 // Poles, signal heads, zebra crossings and stop lines near the player, as a
 // handful of instanced meshes rebuilt when the player has moved far enough.
@@ -72,17 +91,19 @@ export function createSignalProps(scene, network, plan) {
   const metal = new THREE.MeshStandardMaterial({ color: 0x1d262d, roughness: .55, metalness: .6 });
   const paint = new THREE.MeshStandardMaterial({ color: 0xb7bcaf, roughness: 1, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
   const lamp = new THREE.MeshBasicMaterial({ color: 0xffffff, toneMapped: false });
+  const glow = new THREE.MeshBasicMaterial({ map: glowTexture(), transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false });
   const mesh = (geometry, material, count) => {
     const m = new THREE.InstancedMesh(geometry, material, count); m.count = 0; m.frustumCulled = false;
-    m.castShadow = false; m.receiveShadow = material !== lamp; root.add(m); return m;
+    m.castShadow = false; m.receiveShadow = !material.isMeshBasicMaterial; root.add(m); return m;
   };
   const poles = mesh(new THREE.CylinderGeometry(.08, .11, 1, 8).translate(0, .5, 0), metal, 480);
   const arms = mesh(new THREE.BoxGeometry(1, .09, .09).translate(.5, 0, 0), metal, 160);
   const heads = mesh(new THREE.BoxGeometry(.36, 1.02, .3), metal, 320);
   const lamps = mesh(new THREE.CircleGeometry(.105, 12), lamp, 960);
+  const glows = mesh(new THREE.PlaneGeometry(GLOW, GLOW), glow, 320);
   const walkers = mesh(new THREE.PlaneGeometry(.22, .22), lamp, 320);
   const stripes = mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), paint, 2400);
-  lamps.setColorAt(0, new THREE.Color()); walkers.setColorAt(0, new THREE.Color());
+  for (const target of [lamps, glows, walkers]) target.setColorAt(0, new THREE.Color());
   scene.add(root);
   const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(0, 0, 0, 'YXZ'), v = new THREE.Vector3(), s = new THREE.Vector3(), color = new THREE.Color();
   let center = null, faces = [], walks = [];
@@ -91,7 +112,7 @@ export function createSignalProps(scene, network, plan) {
   };
   function rebuild(focus) {
     center = { x: focus.x, z: focus.z }; faces = []; walks = [];
-    let pole = 0, arm = 0, head = 0, lampIndex = 0, walkIndex = 0, stripe = 0;
+    let pole = 0, arm = 0, head = 0, lampIndex = 0, glowIndex = 0, walkIndex = 0, stripe = 0;
     for (const node of network.nodesNear(focus.x, focus.z, PROP_RANGE)) {
       if (node.kind !== 'junction' || !node.ground || Math.abs(node.y - (focus.y ?? node.y)) > 30) continue;
       for (const a of node.approaches) {
@@ -121,7 +142,8 @@ export function createSignalProps(scene, network, plan) {
             put(lamps, lampIndex, x + a.dir.x * .155, y + (1 - k) * .31 * height, z + a.dir.z * .155, yaw, height, height, 1);
             lamps3.push([lampIndex++, name]);
           }
-          faces.push({ node, approach: a, lamps: lamps3 });
+          put(glows, glowIndex, x + a.dir.x * .165, y + .31 * height, z + a.dir.z * .165, yaw, height, height, 1);
+          faces.push({ node, approach: a, lamps: lamps3, glow: glowIndex++ });
         }
         // A pedestrian lamp facing each end of this approach's crossing.
         for (const side of [1, -1]) if (walkIndex < 320) {
@@ -133,8 +155,8 @@ export function createSignalProps(scene, network, plan) {
         }
       }
     }
-    poles.count = pole; arms.count = arm; heads.count = head; lamps.count = lampIndex; walkers.count = walkIndex; stripes.count = stripe;
-    for (const target of [poles, arms, heads, lamps, walkers, stripes]) target.instanceMatrix.needsUpdate = true;
+    poles.count = pole; arms.count = arm; heads.count = head; lamps.count = lampIndex; glows.count = glowIndex; walkers.count = walkIndex; stripes.count = stripe;
+    for (const target of [poles, arms, heads, lamps, glows, walkers, stripes]) target.instanceMatrix.needsUpdate = true;
   }
   return {
     root,
@@ -146,6 +168,7 @@ export function createSignalProps(scene, network, plan) {
           const on = name === state.color, [r, g, b] = LAMP_COLORS[name];
           lamps.setColorAt(index, color.setRGB(on ? r : r * DIM, on ? g : g * DIM, on ? b : b * DIM));
         }
+        glows.setColorAt(face.glow, state.color === 'red' ? color.setRGB(...RED_GLOW) : color.setRGB(0, 0, 0));
       }
       for (const w of walks) {
         // Walk is steady white; it turns to a flashing hand before the crossing traffic moves.
@@ -154,6 +177,7 @@ export function createSignalProps(scene, network, plan) {
         walkers.setColorAt(w.index, color.setRGB(r * flash, g * flash, b * flash));
       }
       if (lamps.instanceColor) lamps.instanceColor.needsUpdate = true;
+      if (glows.instanceColor) glows.instanceColor.needsUpdate = true;
       if (walkers.instanceColor) walkers.instanceColor.needsUpdate = true;
     },
     invalidate() { center = null; },
@@ -161,7 +185,8 @@ export function createSignalProps(scene, network, plan) {
     dispose() {
       scene.remove(root);
       for (const child of root.children) { child.geometry.dispose(); child.dispose(); }
-      for (const material of [metal, paint, lamp]) material.dispose();
+      glow.map.dispose();
+      for (const material of [metal, paint, lamp, glow]) material.dispose();
     },
   };
 }
