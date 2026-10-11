@@ -28,6 +28,10 @@ export function createWeapon({ camera, character, audio, effects, hud, input, tr
       if (weapon.ammo === 0) { weapon.reload(); return; }
       weapon.ammo--; weapon.cooldown = .2; weapon.recoil = 1; character.flash.visible = true; world.shot(); audio.shot();
       raycaster.setFromCamera(aim, camera); const ray = raycaster.ray;
+      // The camera sees through whatever stands between it and the player, so
+      // the aim starts level with the player rather than at the lens.
+      point.copy(character.root.position); point.y += 1.2;
+      ray.origin.addScaledVector(ray.direction, Math.max(0, point.sub(ray.origin).dot(ray.direction) - .6));
       const scenery = world.scenery(), owned = world.ownedCars(), targets = options.targets?.() ?? [];
       let distance = Math.min(150, rayObstructionDistance(ray.origin, ray.direction, 150, scenery, owned)), target = null, car = null;
       for (const candidate of traffic.cars) {

@@ -112,11 +112,11 @@ Every wing shares a full side with the landing, so each unit opens straight onto
 
 `interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, the engine switches to that building's interior context:
 
-- Movement, support, the camera, shots and drone line of sight swap the solid base collider for hull walls. Their outer faces lie exactly on the same perimeter, so the swap matters only at door gaps.
+- Movement, support, shots and drone line of sight swap the solid base collider for hull walls. Their outer faces lie exactly on the same perimeter, so the swap matters only at door gaps.
 - Floor slabs are convex polygons, never overhanging the outline. Stair flights are support ramps, 1.8 m rise over 3.6 m run, separated by a solid divider. Partitions, rails and furniture are ordinary solids. Windows are glazed and solid until they break (see [broken windows](#broken-windows)).
 - Entrance steps outside each door are permanent support pieces. Pedestrians and traffic keep using the exterior colliders.
 
-Indoors the player jogs rather than sprints, and the camera moves closer. The camera stays third person everywhere: where a wall or a tight room leaves too little room behind the player, it swings up over their head, as far as the ceiling allows, rather than closing in. Indoors it also keeps to the player's room (see [the follow camera](#the-follow-camera)). Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
+Indoors the player jogs rather than sprints. The camera keeps the same distance as outdoors and looks through the walls between it and the player (see [the follow camera](#the-follow-camera)). Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
 
 `interiors.js` builds merged geometry for each floor in building-local space:
 
@@ -208,6 +208,7 @@ Sources are layered: `core` ← `world` ← `traffic` ← `engine` ← `modes`. 
 import { createWorld } from './src/world/index.js';
 const world = createWorld({ scene, renderer, quality: 'high' });   // landmarks default to AFTERLIGHT_LANDMARKS
 world.update({ camera, focus: player, interior, now, dt });       // streaming, weather, interiors
+world.setCutaway(camera.position, playerAtEyeHeight, floorY);     // see through what hides the player
 ```
 
 `createWorld` returns:
@@ -217,7 +218,7 @@ world.update({ camera, focus: player, interior, now, dt });       // streaming, 
 - `spatial`, `spatialFor(interiorContext)`, `interiorContextAt(x, y, z)` and `buildingsNear(x, z, r)`
 - `landmarks`, `landmark(id)` and `spawn`
 - `mapView`, `atmosphere`, `interiors` and `stream`
-- `setQuality(level, { far })`, `snapshot()` and `dispose()`
+- `setCutaway(eye, focus, floor)`, `setQuality(level, { far })`, `snapshot()` and `dispose()`
 
 Landmarks are fixed, reserved sites such as stations, decks and caches. They keep the city identical in every mode; a mode attaches its own meaning to their IDs.
 
@@ -250,9 +251,9 @@ Saves carry **`worldRevision: 6`**. Coordinates from earlier city layouts, inclu
 
 ### The follow camera
 
-`engine/camera-rig.js` frames the player as a rig of smoothed quantities rather than a smoothed position. Yaw and pitch come straight from the player's input. The look height eases over steps and stairs and cuts on a long drop or a lift ride. The shoulder offset stops short of a wall beside the player. Indoor framing blends in over a moment instead of switching at the doorway. Where there is too little room behind the player, the boom lifts over their head and holds that lift until a lower one has stayed roomy for a second, so turning round on a landing doesn't bob it. Each of these moves on a critically damped spring, which starts and stops without a jolt.
+`engine/camera-rig.js` keeps the camera the same distance behind the player everywhere, indoors and out, and never closes in on them. Yaw and pitch come straight from the player's input. The look height eases over steps and stairs and cuts on a long drop or a lift ride. Aiming, driving and gliding change the framing on critically damped springs, which start and stop without a jolt. The camera never sinks below the floor the player stands on or the ground beneath it.
 
-Walls are anticipated rather than met. A fatter probe than the one that stops the camera runs along the boom from the player and from where they will be a moment from now, moving and turning as they are. The camera starts closing in as soon as either probe finds a wall. Indoors it also keeps to the player's room, so it has already come through a doorway before the player turns away from it. Only a wall that still arrives unannounced pulls the camera in at once, as far as that wall, so it never sees through walls. Trees, poles, railings and furniture never move the camera.
+Whatever comes between the camera and the player is cut away instead. `world/view-cutaway.js` patches building facades and fittings, signs, broken windows and every interior material: fragments in a slot along the line from the camera to the player are discarded. The slot is widest at the camera and narrows to the player's shoulders. It reaches from a little above the line of sight down to the player's feet, and stops just short of them. The floor they stand on and everything beyond them always stay. Shots start level with the player, so the walls the view cuts away don't stop them. Rain is hidden while the player is indoors, wherever the camera is. Each frame the engine calls `world.setCutaway(eye, focus, floor)`.
 
 ## Verification
 
@@ -289,7 +290,8 @@ Physics tests check:
 - a walk from the street up one storey at 20, 30, 60 and 120 FPS with no falls or wall overlaps
 - rays from inside, indoor save validation, and entrance step heights
 - sliding along walls at any angle and round crate corners, and stopping in gaps too narrow to pass
-- a follow camera that slender things never move, that eases through doorways and up stairs without jumping or seeing through walls, and that holds its lift while turning on a cramped landing
+- a follow camera that keeps its distance everywhere, climbs stairs smoothly and stays above the floor, and a cutaway that clears every wall between it and any part of the player in real rooms
+- shots that pass the walls the view cuts away but not walls ahead of the player
 
 The renderer audit checks all 63 remapped world objects with surrounding arrival positions against the generated solid geometry. The road audit samples both road edges and ramp routes against terrain and collision metadata. Current city changes should be checked with `npm test` and `npm run build -- --configLoader runner`, followed by desktop and mobile browser traversal. Development-only `window.__AFTERLIGHT__.snapshot()` reports renderer submissions, streaming residency, blueprint counts, actor activity and CPU update/submission costs. These counters and desktop browser frame rates are not physical-phone GPU measurements.
 

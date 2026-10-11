@@ -6,7 +6,7 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createWorld } from '../world/index.js';
 import { terrainHeight } from '../world/master-plan.js';
 import { levelY, roomAt } from '../world/interior-plan.js';
-import { toLocal, roomEnclosure } from '../world/interior-physics.js';
+import { toLocal } from '../world/interior-physics.js';
 import { ResolutionGovernor } from '../world/world-stream.js';
 import { createTraffic } from '../traffic/index.js';
 import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from '../core/physics.js';
@@ -483,13 +483,14 @@ export async function createGame({ canvas, modes }) {
     contactShadows.update(items);
   }
   function updateCamera(dt, snap = false) {
-    const glide = player.parachute?.openness ?? 0, indoors = !driving && !!player.interior?.inside;
+    const glide = player.parachute?.openness ?? 0;
     const aiming = weapon?.enabled && !driving && !player.climb && !player.parachute && input?.aiming;
-    const recoil = weapon?.recoil ?? 0;
+    const recoil = weapon?.recoil ?? 0, floor = driving ? player.y : Math.min(player.y, player.groundY ?? player.y);
     // Leave room for the full canopy even in a narrow portrait viewport.
     const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect)) || 9.4;
-    cameraRig.update({ dt, snap, focus: player, yaw: cameraYaw, pitch: cameraPitch, indoors, inside: indoors ? roomEnclosure(player.interior) : null, aiming, driving: !!driving, glide, glideDistance,
-      boxes: scenery().near(player.x, player.z, 12 + glide * 4), ground: terrainHeight });
+    cameraRig.update({ dt, snap, player, yaw: cameraYaw, pitch: cameraPitch, aiming, driving: !!driving, glide, glideDistance, floor, ground: terrainHeight });
+    // The camera keeps its distance; whatever stands between it and the player is cut away.
+    world.setCutaway(cameraRig.position, cameraRig.focus, floor);
     camera.position.copy(cameraRig.position);
     camera.lookAt(cameraRig.look.x, cameraRig.look.y + recoil * .045, cameraRig.look.z);
     camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();

@@ -8,6 +8,7 @@ import { cachedInteriorPlan } from './interior-plan.js';
 import { entranceSteps, interiorContext, interiorSpatial } from './interior-physics.js';
 import { createFacadeMaterial, facadeUV, interiorClipUniforms, patchInteriorClip } from './building-materials.js';
 import { createWindowBreakage } from './broken-windows.js';
+import { viewCutawayUniforms, patchViewCutaway } from './view-cutaway.js';
 import { DISTRICT_ARCHITECTURE, sampleArchitecture, buildingUseAtHeight } from './district-architecture.js';
 import { footprintShape } from './building-footprints.js';
 import { segmentHitsBox } from '../core/geometry.js';
@@ -462,8 +463,10 @@ function palette() {
 
 export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   const masterPlan = createMasterPlan(), metropolis = new VerticalMetropolis(masterPlan, reservedWorldObjects), mats = palette(), terrain = createTerrainMaterials({ vertexColors: true });
-  const buildingSigns = createBuildingSignMaterial(), interiorClip = interiorClipUniforms();
+  const buildingSigns = createBuildingSignMaterial(), interiorClip = interiorClipUniforms(), viewCutaway = viewCutawayUniforms();
   for (const material of [mats.facade, mats.industrial, mats.stone, mats.glass]) patchInteriorClip(material, interiorClip);
+  // Buildings, their fittings and signs open up between the camera and the player.
+  for (const material of [mats.facade, mats.industrial, mats.stone, mats.glass, mats.glow, buildingSigns]) patchViewCutaway(material, viewCutaway);
   terrain.grass.vertexColors = false;
   // Pedestrian structures reuse the existing paving map on their actual slab,
   // keeping texture scale stable without adding a second coplanar top surface.
@@ -611,6 +614,7 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
   const plan = { ...masterPlan, buildings: [], trees: [], features: [], props: [] };
   // Windows broken this session: drawn on the facades, open in the hulls.
   const windows = createWindowBreakage(scene, metropolis);
+  patchViewCutaway(windows.mesh.material, viewCutaway);
   // Interiors: a building's context swaps its solid shell for walkable rooms.
   const interiorContextAt = (x, y, z) => {
     for (const p of metropolis.buildingsNear(x, z, 1)) {
@@ -632,6 +636,6 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
     }
   }
   return { ground, water, signs, dispose, wayfinding: labels, colliders: [], buildings: [], mapInfo: [], mapRoads: masterPlan.roads, roadIndex: masterPlan.roadIndex, spatial, metropolis, plan, masterPlan,
-    interiorContextAt, planNear, interiorClip, windows, spatialFor: context => context ? interiorSpatial(spatial, context, windows) : spatial,
+    interiorContextAt, planNear, interiorClip, viewCutaway, windows, spatialFor: context => context ? interiorSpatial(spatial, context, windows) : spatial,
     mapView: { x: SHOWCASE.x, z: SHOWCASE.z, span: 1200 * CITY_SCALE }, terrainHeight, surfaceHeight: (...args) => masterPlan.surfaceHeight(...args), reflection() {} };
 }

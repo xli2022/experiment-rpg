@@ -5,6 +5,7 @@ import { createAtmosphere } from './atmosphere.js';
 import { AFTERLIGHT_LANDMARKS } from './landmarks.js';
 import { MASTER_DISTRICTS, districtAt, terrainHeight, isWater, SHOWCASE } from './master-plan.js';
 import { WORLD_LIMIT, CHUNK_SIZE } from './world-config.js';
+import { setViewCutaway } from './view-cutaway.js';
 
 export { AFTERLIGHT_LANDMARKS, landmarkById, roadside } from './landmarks.js';
 export { WORLD_LIMIT, CHUNK_SIZE } from './world-config.js';
@@ -41,6 +42,12 @@ export function createWorld({ scene, renderer = null, quality = 'high', landmark
       else atmosphere.sky.position.copy(camera.position);
       stream.update(camera, focus, now, force);
     },
+    /**
+     * See through whatever stands between the camera at `eye` and the player
+     * at `focus` (at the camera's look height), keeping the floor at `floor`
+     * and everything below it. Pass no `eye` to turn it off.
+     */
+    setCutaway(eye, focus, floor) { setViewCutaway(city.viewCutaway, eye, focus, floor); },
     setQuality(value, { far } = {}) { stream.setQuality(value); atmosphere.setQuality(value, far); },
     snapshot: () => ({ streaming: { ...stream.stats }, blueprints: city.metropolis.blocks.size, interiors: interiors.snapshot() }),
     dispose() { interiors.dispose(); atmosphere.dispose(); stream.dispose(); city.dispose(); },

@@ -3,6 +3,7 @@ import { INTERIOR, cachedInteriorPlan, floorPlan, levelY } from './interior-plan
 import { buildingEntrances } from './building-design.js';
 import { polygonCentroid } from './building-footprints.js';
 import { toWorld } from './interior-physics.js';
+import { patchViewCutaway } from './view-cutaway.js';
 
 // Interior meshes are built on demand per floor, in building-local space. All
 // lighting is baked into vertex colors on unlit materials: no scene lights are
@@ -262,7 +263,10 @@ export function createInteriors(scene, city) {
     glassLeaf: new THREE.MeshBasicMaterial({ color: 0x9fc4d6, transparent: true, opacity: .32, depthWrite: false }),
     shard: new THREE.MeshBasicMaterial({ color: 0xc6dde6, transparent: true, opacity: .5, depthWrite: false, side: THREE.DoubleSide }),
   };
-  for (const [name, m] of Object.entries(materials)) m.name = `interior-${name}`;
+  for (const [name, m] of Object.entries(materials)) {
+    m.name = `interior-${name}`;
+    if (city.viewCutaway) patchViewCutaway(m, city.viewCutaway);
+  }
   // One hidden triangle per material lets the initial renderer.compile cover them.
   const warm = new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute([0, -900, 0, .01, -900, 0, 0, -900, .01], 3));
   warm.setAttribute('color', new THREE.Float32BufferAttribute(new Array(9).fill(0), 3));

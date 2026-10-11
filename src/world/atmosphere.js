@@ -51,7 +51,8 @@ export function createAtmosphere(scene, { renderer = null, quality = 'high' } = 
       sky.scale.setScalar(far / 700);
       rain.geometry.setDrawRange(0, RENDER_PROFILES[value].rain * 2);
     },
-    // Rain and motes follow the focus; both stay outside the occupied building.
+    // Rain and motes follow the focus; both stay outside the occupied building,
+    // whether the player or the camera is the one inside it.
     update({ camera, focus, interior = null, dt = 0 }) {
       sky.position.copy(camera.position);
       const positions = rain.geometry.attributes.position;
@@ -61,7 +62,7 @@ export function createAtmosphere(scene, { renderer = null, quality = 'high' } = 
       }
       positions.needsUpdate = true; rain.position.set(focus.x, focus.y, focus.z); motes.position.set(focus.x, focus.y, focus.z); motes.rotation.y += dt * .012;
       const plan = interior?.plan, local = plan && toLocal(plan, camera.position.x, camera.position.z);
-      rain.visible = motes.visible = !(plan && camera.position.y < plan.top && pointInConvex(plan.outline, local.x, local.z));
+      rain.visible = motes.visible = !(interior?.inside || plan && camera.position.y < plan.top && pointInConvex(plan.outline, local.x, local.z));
     },
     dispose() {
       for (const object of [sky, rain, motes, hemisphere, moon, rim]) { scene.remove(object); object.geometry?.dispose(); object.material?.dispose(); }
