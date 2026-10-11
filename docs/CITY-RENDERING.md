@@ -139,6 +139,8 @@ Any facade pane breaks when shot, or with **E** (USE on touch) within arm's reac
 - loses its glass in the room, leaving shards round the frame
 - on the base volume, which holds the rooms, opens through the interior hull, so the player can climb in or out; the parachute opens for long falls. Upper tiers have no rooms behind them
 
+Jumping at a window from inside, within 1.4 m, vaults out through it: the player climbs onto the sill, ducks through the middle of the opening and drops away from the wall. A jump that is already carrying the player toward a window vaults too once it comes within 0.9 m. Whole glass is smashed first. A plain jump can't clear many panes: sills reach 1 m above the floor and some openings are shorter than the 1.8 m body. The vault takes any sill up to 1.6 m above the floor with at least 0.7 m of opening above it. `engine/player/window-vault.js` plans and steps it, and [`tests/window-vault.test.js`](../tests/window-vault.test.js) jumps out of upper-floor windows across the city standing, at an angle, on the run, into whole glass and at 30 FPS.
+
 Breaking a window shatters glass outward from the side it was hit from. The session remembers up to 600 broken panes, after which the oldest are glazed again. A building's floors and hull colliders rebuild when one of its panes breaks.
 
 ## Traffic

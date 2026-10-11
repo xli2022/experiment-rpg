@@ -30,6 +30,7 @@ import { beginJump, stepJump, resetFall } from './player/jump.js';
 import { createParachute, updateParachute } from './player/parachute.js';
 import { MOVEMENT, footVelocity } from './player/locomotion.js';
 import { findClimbFace, startClimb, dropClimb, stepClimb } from './player/climbing.js';
+import { VAULT, windowAhead as vaultWindowAhead, planVault, startVault, stepVault } from './player/window-vault.js';
 
 const $ = id => document.getElementById(id);
 
@@ -42,7 +43,7 @@ const $ = id => document.getElementById(id);
 export async function createGame({ canvas, modes }) {
   const storage = createStorage();
   const state = { started: false, paused: false, mapOpen: false, modal: null, time: 0 };
-  const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null, interior: null };
+  const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, vault: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
   const vector = new THREE.Vector3(), cameraRig = createCameraRig();
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
@@ -317,7 +318,7 @@ export async function createGame({ canvas, modes }) {
   }
   const reachOrigin = new THREE.Vector3(), reachDirection = new THREE.Vector3();
   function windowAhead() {
-    if (driving || player.climb || player.parachute || !state.started) return null;
+    if (driving || player.climb || player.vault || player.parachute || !state.started) return null;
     reachDirection.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
     // Low sills, tall plinths: try the hands at a few heights.
     for (const height of [1.3, 1, 1.6]) {
@@ -334,7 +335,7 @@ export async function createGame({ canvas, modes }) {
   // --- Player actions ----------------------------------------------------------
   function interact() {
     if (!state.started || state.paused) return;
-    if (player.climb || player.parachute) return;
+    if (player.climb || player.vault || player.parachute) return;
     if (driving) {
       if (Math.abs(driving.speed) > 7) { hud.notify('Slow down before exiting the vehicle.', 2); return; }
       const exit = findExitPosition(driving, nearbyColliders(driving.x, driving.z, 8, driving), .48, world.limit);
@@ -374,9 +375,24 @@ export async function createGame({ canvas, modes }) {
     return best;
   }
   function jump() {
-    if (driving || !state.started || state.paused) return;
+    if (driving || !state.started || state.paused || player.vault) return;
     if (player.climb) { dropClimb(player, true); return; }
+    if (tryVault(VAULT.reach, [player.yaw, cameraYaw])) return;
     if (!grabWall(true)) beginJump(player);
+  }
+  // Out through a window ahead: over the sill and through the opening,
+  // smashing the glass first if it is whole.
+  function tryVault(reach, yaws) {
+    if (driving || player.climb || player.vault || player.parachute || !player.interior?.inside) return false;
+    for (const yaw of yaws) {
+      const ahead = vaultWindowAhead(player, world.windows.find, player.interior.id, yaw, reach), vault = ahead && planVault(player, ahead.hit);
+      if (!vault) continue;
+      if (!world.windows.has(ahead.hit.p.id, ahead.hit.pane.key)) breakWindow(new THREE.Vector3(ahead.point.x, ahead.point.y, ahead.point.z), new THREE.Vector3(-Math.sin(yaw), 0, -Math.cos(yaw)));
+      startVault(player, vault);
+      input.firing = input.aiming = false; weapon.cancel();
+      return true;
+    }
+    return false;
   }
   function grabWall(requireFacing = false) {
     const boxes = climbColliders();
@@ -386,12 +402,12 @@ export async function createGame({ canvas, modes }) {
     return true;
   }
   function toggleClimb() {
-    if (driving || !state.started || state.paused) return;
+    if (driving || !state.started || state.paused || player.vault) return;
     if (player.climb) dropClimb(player);
     else if (!grabWall()) hud.notify('Move within arm’s reach of a building wall to climb.', 2);
   }
   function resetTraversal() {
-    player.climb = player.climbCandidate = player.interior = null; player.groundY = player.pushTime = 0;
+    player.climb = player.climbCandidate = player.vault = player.interior = null; player.groundY = player.pushTime = 0;
     resetFall(player);
     if (parachute) updateParachute(parachute, player, 0);
   }
@@ -431,7 +447,8 @@ export async function createGame({ canvas, modes }) {
       // Indoors stays at a jog so stairs keep their footing at low frame rates.
       const sprint = !indoors && (input.keys.has('ShiftLeft') || input.keys.has('ShiftRight') || (input.touch && amount > .9));
       const colliders = nearbyColliders(player.x, player.z, 3);
-      if (player.climb) {
+      if (player.vault) stepVault(player, dt);
+      else if (player.climb) {
         const result = stepClimb(player, axes, dt, colliders, sprint);
         if (result === 'roof') { hud.notify('ROOFTOP // Keep exploring. Space to jump; C to grab another wall.', 3); save(); }
       } else {
@@ -447,6 +464,8 @@ export async function createGame({ canvas, modes }) {
         const groundY = groundAt(player.x, player.z, player.y + .35);
         const wasGliding = !!player.parachute;
         stepJump(player, dt, groundY);
+        // A running jump that meets a window carries on out through it.
+        if (player.jumpPhase && player.jumpPhase !== 'land' && amount > .2) tryVault(VAULT.airReach, [Math.atan2(-delta.x, -delta.z)]);
         if (player.parachute && !wasGliding) {
           input.firing = input.aiming = false; weapon.cancel();
           hud.notify(input.touch ? 'PARACHUTE OPEN // Use the stick to steer toward a roof or the street.' : 'PARACHUTE OPEN // WASD to steer toward a roof or the street.', 4);
@@ -463,7 +482,7 @@ export async function createGame({ canvas, modes }) {
   function updateCharacter(dt) {
     character.root.position.set(player.x, player.y + .05, player.z); character.root.rotation.y = player.yaw;
     const height = Math.max(0, player.y - player.groundY);
-    animateCharacter(character, weapon?.enabled && (input?.aiming || input?.firing), dt, { speed: player.speed, climb: player.climb, parachute: player.parachute, jumpPhase: player.jumpPhase, jumpTime: player.jumpTime, height, groundHeight: player.groundY, verticalSpeed: player.velocityY, pitch: cameraPitch, reloading: weapon?.reloading ?? 0 });
+    animateCharacter(character, weapon?.enabled && (input?.aiming || input?.firing), dt, { speed: player.speed, climb: player.climb ?? player.vault, parachute: player.parachute, jumpPhase: player.jumpPhase, jumpTime: player.jumpTime, height, groundHeight: player.groundY, verticalSpeed: player.velocityY, pitch: cameraPitch, reloading: weapon?.reloading ?? 0 });
     updateParachute(parachute, player, dt);
   }
   function updateContactShadows() {
@@ -484,7 +503,7 @@ export async function createGame({ canvas, modes }) {
   }
   function updateCamera(dt, snap = false) {
     const glide = player.parachute?.openness ?? 0;
-    const aiming = weapon?.enabled && !driving && !player.climb && !player.parachute && input?.aiming;
+    const aiming = weapon?.enabled && !driving && !player.climb && !player.vault && !player.parachute && input?.aiming;
     const recoil = weapon?.recoil ?? 0, floor = driving ? player.y : Math.min(player.y, player.groundY ?? player.y);
     // Leave room for the full canopy even in a narrow portrait viewport.
     const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect)) || 9.4;
@@ -602,7 +621,7 @@ export async function createGame({ canvas, modes }) {
     ui = createUI({ state, input, audio, onMenu: id => { mode?.onMenu?.(id); if (id && state.started) save(); } });
     owned = traffic.owned;
     weapon = createWeapon({ camera, character, audio, effects, hud, input, traffic }, {
-      canAct: () => state.started && !state.paused && !driving && !player.climb && !player.parachute,
+      canAct: () => state.started && !state.paused && !driving && !player.climb && !player.vault && !player.parachute,
       scenery, ownedCars: () => owned, allCars, shot: () => characterShot(character), breakWindow,
     });
     attachMapControls({ view: world.mapView, canvas: $('full-map'), position: () => player, onPick: (x, y) => mode?.mapPick?.(x, y) });
