@@ -215,12 +215,14 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
   function steer(person, dt, time, cars, player) {
     const edge = person.edge, L = edge.path.length;
     if (person.mode === 'pause') {
-      person.timer -= dt; person.speed = Math.max(0, person.speed - 3 * dt);
+      person.timer -= dt; person.speed = Math.max(0, person.speed - 3 * dt); person.holding = false;
       if (person.timer <= 0) { person.mode = 'walk'; person.gesture = null; person.pauseIn = 15 + random() * 45; }
       return 0;
     }
     if (!person.next && L - person.s < 4) person.next = chooseNext(person);
     const gated = person.next?.edge.kind === 'crossing' && person.next.edge !== edge && !mayCross(person, person.next.edge, time, cars);
+    // Held back for traffic: they stop at the kerb, so drivers treat them as waiting there.
+    person.holding = gated;
     // About to step off the kerb, or already crossing: drivers should see the crossing as taken.
     person.claim = edge.kind === 'crossing' || !gated && person.next?.edge.kind === 'crossing' && L - person.s < 3;
     if (person.mode === 'wait' && !gated) person.mode = 'walk';

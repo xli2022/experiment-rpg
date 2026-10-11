@@ -9,7 +9,7 @@ export const WAYFINDING_SIGNS = [
 
 // Keep the full, readable board near its authored location. Check both printed
 // faces and a safety gap against the actual bridge solids, including shoulders.
-// A vertical-only adjustment cannot fit NEON SPINE between its two stacked decks.
+// Sliding along the board, rather than lifting it, keeps it below stacked decks.
 export function placeWayfindingSign(sign, infrastructure) {
   const y = sign.y ?? terrainHeight(sign.x, sign.z) + 5.8;
   const offsets = [0];

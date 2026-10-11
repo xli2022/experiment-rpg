@@ -16,7 +16,7 @@ test('the compact map preserves every authored road, ordered sample and grade', 
   assert.equal(WORLD_LIMIT, 2750);
   assert.equal(runtime.MASTER_WORLD_LIMIT, WORLD_LIMIT);
   assert.equal(source.roads.length, 661, 'retain the complete authored infill graph');
-  assert.equal(plan.roadIndex.size, 23021, 'retain all sampled street segments');
+  assert.equal(plan.roadIndex.size, 22988, 'retain all sampled street segments');
   assert.deepEqual(plan.roads.map(r => r.id), source.roads.map(r => r.id));
   for (const [i, road] of plan.roads.entries()) {
     const original = source.roads[i];

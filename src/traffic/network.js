@@ -1,5 +1,7 @@
 import { SpatialGrid } from '../core/spatial-grid.js';
 import { clamp } from '../core/physics.js';
+import { ROAD_SHOULDER } from '../world/world-scale.js';
+import { roadSlabDepth, SUPPORT_SLAB_DEPTH } from '../world/infrastructure-clearance.js';
 
 // The road network as traffic sees it, derived once from the world's road plan:
 // junction nodes, edges between them, right-hand lanes, turn connectors,
@@ -9,6 +11,11 @@ import { clamp } from '../core/physics.js';
 
 export const LANE_SPEED = { local: 9, secondary: 11, primary: 12.5, expressway: 17, ramp: 11 };
 const NODE_MERGE = 6, GRADE = .7, CROSSWALK = 2.4, ELEVATED = 1.5, SIDEWALK = 2;
+// Clear height a street needs beneath any slab over it, for the tallest car and
+// person. A slab more than a kerb above a street and lower than this blocks it,
+// and the street's traffic turns back CLOSURE_MARGIN short of the slab.
+export const HEADROOM = 2.5;
+const KERB = .3, CLOSURE_MARGIN = 5, CLOSURE_JOIN = 30, JUNCTION_REACH = 25;
 
 const dist = (a, b) => Math.hypot(b.x - a.x, b.z - a.z);
 const lerp = (a, b, t) => a + (b - a) * t;
@@ -152,6 +159,82 @@ export function laneLayout(width) {
   return [lane / 2, lane * 1.5];
 }
 
+// The top of a road or deck slab at (x, z), or null outside it. A road's slab
+// reaches beyond its asphalt to its shoulders.
+function slabTop(slab, x, z) {
+  if (!slab.a) return x < slab.minX || x > slab.maxX || z < slab.minZ || z > slab.maxZ ? null : slab.maxY;
+  const dx = slab.b.x - slab.a.x, dz = slab.b.z - slab.a.z, length = Math.hypot(dx, dz) || 1e-9;
+  const along = ((x - slab.a.x) * dx + (z - slab.a.z) * dz) / length, across = (-(x - slab.a.x) * dz + (z - slab.a.z) * dx) / length;
+  const overlap = slab.supportOverlap ?? .12, half = slab.width / 2 + (slab.road ? ROAD_SHOULDER : 0);
+  if (along < -overlap || along > length + overlap || Math.abs(across) > half) return null;
+  return slab.a.y + (slab.b.y - slab.a.y) * along / length + (slab.crossSlope ?? 0) * across;
+}
+
+// Only a slab raised off the ground can pass over a street. Lists, by the start
+// point of each road segment, the raised road and deck slabs within reach of it,
+// and the segment itself.
+function raisedSlabs(plan) {
+  const ground = plan.terrainHeight, segments = new Set([...plan.roadIndex.cells.values()].flat()), over = new Map(), own = new Map();
+  const pad = ROAD_SHOULDER + SIDEWALK + .5;
+  for (const segment of segments) own.set(segment.a, segment);
+  for (const slab of [...segments, ...plan.supports ?? []]) {
+    const ends = slab.a ? [slab.a, slab.b] : [{ x: slab.x, y: slab.maxY, z: slab.z }];
+    if (!ends.some(p => p.y - ground(p.x, p.z) > KERB)) continue;
+    for (const below of plan.roadIndex.query(slab.minX - pad, slab.minZ - pad, slab.maxX + pad, slab.maxZ + pad)) {
+      if (below.road === slab.road) continue;
+      if (!over.has(below.a)) over.set(below.a, []);
+      over.get(below.a).push(slab);
+    }
+  }
+  return { over, own };
+}
+
+// Stretches of a road, as [from, to] stations, beneath another road's or a
+// deck's slab with less than HEADROOM to spare, across its carriageway and, on a
+// street, its sidewalks. Cars and people there would pass through the slab, so
+// these stretches are closed, with room before them to turn back. Roads meeting
+// at a junction share its surface there, so they never close each other.
+function lowClearance(plan, road, { points, cum, closed }, junctions, slabs) {
+  const ground = plan.terrainHeight, stations = [], spans = [], total = cum.at(-1), depths = new Map();
+  const depth = slab => {
+    if (!depths.has(slab)) depths.set(slab, slab.road ? roadSlabDepth(slab, ground) : SUPPORT_SLAB_DEPTH);
+    return depths.get(slab);
+  };
+  const near = (station, j) => { const d = Math.abs(j.station - station); return Math.min(d, closed ? total - d : d) < JUNCTION_REACH; };
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1], b = points[i], length = cum[i] - cum[i - 1], candidates = slabs.over.get(road.points[i - 1]);
+    if (length < 1e-6 || !candidates) continue;
+    const street = road.kind === 'road' && road.class !== 'expressway' && [a, b].every(p => p.y - ground(p.x, p.z) <= ELEVATED);
+    const half = road.width / 2, reach = half + (street ? SIDEWALK + .5 : .5);
+    const floor = Math.min(a.y, b.y, ground(a.x, a.z), ground(b.x, b.z)) + KERB, ceiling = Math.max(a.y, b.y) + HEADROOM;
+    // Junctions within reach of this segment, and the roads meeting at those
+    // within reach of all of it.
+    const local = junctions.filter(j => near(cum[i - 1], j) || near(cum[i], j) || j.station > cum[i - 1] && j.station < cum[i]);
+    const joined = new Set(local.filter(j => near(cum[i - 1], j) && near(cum[i], j)).flatMap(j => j.roads));
+    const over = candidates.filter(s => !joined.has(s.road) && s.maxY + .2 > floor && s.minY - .6 < ceiling);
+    if (!over.length) continue;
+    const cross = slabs.own.get(road.points[i - 1])?.crossSlope ?? 0;
+    const dx = (b.x - a.x) / length, dz = (b.z - a.z) / length, steps = Math.ceil(length);
+    for (let k = 0; k <= steps; k++) {
+      const t = k / steps, y = lerp(a.y, b.y, t), station = cum[i - 1] + t * length, met = new Set(local.filter(j => near(station, j)).flatMap(j => j.roads));
+      if ([-reach, -half, 0, half, reach].some(o => {
+        const x = lerp(a.x, b.x, t) - dz * o, z = lerp(a.z, b.z, t) + dx * o, base = Math.abs(o) > half ? ground(x, z) : y + cross * o;
+        return over.some(slab => {
+          const top = met.has(slab.road) ? null : slabTop(slab, x, z);
+          return top !== null && top - base > KERB && top - depth(slab) - base < HEADROOM;
+        });
+      })) stations.push(station);
+    }
+  }
+  // Stretches with too little street between them to be of use join up.
+  for (const s of stations.sort((p, q) => p - q)) {
+    const last = spans.at(-1);
+    if (last && s - last[1] < CLOSURE_MARGIN + CLOSURE_JOIN) last[1] = s + CLOSURE_MARGIN;
+    else spans.push([s - CLOSURE_MARGIN, s + CLOSURE_MARGIN]);
+  }
+  return spans;
+}
+
 export function buildNetwork(plan) {
   const roads = plan.roads.filter(r => r.points.length >= 2 && r.width >= 6 && (r.kind === 'road' || r.kind === 'ramp'));
   const order = new Map(roads.map((r, i) => [r, i]));
@@ -210,20 +293,36 @@ export function buildNetwork(plan) {
     for (const [road, station] of hit.members) if (!node.members.some(m => m.road === road && Math.abs(m.station - station) < 2 * NODE_MERGE)) node.members.push({ road, station });
   }
 
-  // 3. Split roads at their nodes into edges. Open ends become dead-end nodes.
+  // Close the stretches of road beneath slabs too low to pass under.
+  const junctionsOf = new Map(roads.map(r => [r, []]));
+  for (const node of nodes) for (const m of node.members) junctionsOf.get(m.road).push({ station: m.station, roads: node.members.map(o => o.road).filter(r => r !== m.road) });
+  const slabs = raisedSlabs(plan), closures = new Map(roads.map(road => [road, lowClearance(plan, road, info.get(road), junctionsOf.get(road), slabs)]));
+  // Whether a station lies inside one of a road's closed stretches; a loop's
+  // stretches may run past either end of its stations.
+  const shut = (road, station) => {
+    const { cum, closed } = info.get(road), length = cum.at(-1);
+    return closures.get(road).some(([from, to]) => (closed ? [station - length, station, station + length] : [station]).some(s => s > from + 1e-6 && s < to - 1e-6));
+  };
+
+  // 3. Split roads at their nodes into edges. Open ends become dead-end nodes,
+  // and so do both ends of a closed stretch, whose junctions the road leaves.
   const edges = [], stationsOf = new Map(roads.map(r => [r, []]));
-  for (const node of nodes) for (const m of node.members) stationsOf.get(m.road).push({ station: m.station, node });
+  for (const node of nodes) for (const m of node.members) if (!shut(m.road, m.station)) stationsOf.get(m.road).push({ station: m.station, node });
   for (const road of roads) {
     const { points, cum, closed } = info.get(road), length = cum.at(-1), list = stationsOf.get(road);
+    for (const bound of closures.get(road).flat()) {
+      const station = closed ? (bound % length + length) % length : bound;
+      if (closed || station > 0 && station < length) list.push({ station, node: newNode(pointAt(points, cum, station), [{ road, station }]) });
+    }
     if (!closed) for (const [p, station] of [[points[0], 0], [points.at(-1), length]]) {
-      if (!list.some(s => Math.abs(s.station - station) < 1.5)) list.push({ station, node: newNode(p, [{ road, station }]) });
+      if (!shut(road, station) && !list.some(s => Math.abs(s.station - station) < 1.5)) list.push({ station, node: newNode(p, [{ road, station }]) });
     }
     if (closed && !list.length) list.push({ station: 0, node: newNode(points[0], [{ road, station: 0 }]) });
     list.sort((a, b) => a.station - b.station);
     const pairs = list.slice(1).map((b, i) => [list[i], b]);
     if (closed) pairs.push([list.at(-1), { ...list[0], station: list[0].station + length }]);
     for (const [a, b] of pairs) {
-      if (b.station - a.station < .5 || a.node === b.node && b.station - a.station < 20) continue;
+      if (b.station - a.station < .5 || a.node === b.node && b.station - a.station < 20 || shut(road, (a.station + b.station) / 2)) continue;
       const line = b.station <= length + 1e-6 ? slice(points, cum, a.station, b.station)
         : [...slice(points, cum, a.station, length), ...slice(points, cum, 0, b.station - length).slice(1)];
       edges.push({ id: `e${edges.length}`, road, from: a.node, to: b.node, line, length: b.station - a.station, width: road.width,
@@ -425,6 +524,7 @@ export function buildNetwork(plan) {
   const nodesGrid = new SpatialGrid(nodes.map(n => ({ minX: n.x, maxX: n.x, minZ: n.z, maxZ: n.z, node: n })), 64);
   return {
     nodes, edges, lanes, walk, connectorsAt,
+    closures: [...closures].flatMap(([road, spans]) => spans.map(([from, to]) => ({ road, from, to }))),
     edgesNear(x, z, radius) { return edgeGrid.query(x - radius, z - radius, x + radius, z + radius).map(e => e.edge); },
     nodesNear(x, z, radius) { return nodesGrid.query(x - radius, z - radius, x + radius, z + radius).map(e => e.node).filter(n => Math.hypot(n.x - x, n.z - z) <= radius); },
   };

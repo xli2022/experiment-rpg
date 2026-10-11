@@ -11,7 +11,7 @@ test('Eastpoint wayfinding signs stay clear of both decks, ramp shoulders and ra
   const metro = new VerticalMetropolis(createMasterPlan(), LANDMARKS), index = metro.infrastructureIndex;
   const original = WAYFINDING_SIGNS.map(p => ({ ...p, y: terrainHeight(p.x, p.z) + 5.8, d: .06 }));
   const neon = original.find(p => p.id === 'neon-spine');
-  assert.ok(infrastructureIntersections(neon, index).some(p => p.id.startsWith('eastpoint-ramp:')), 'reproduce the sign cutting through the ramp');
+  assert.deepEqual(infrastructureIntersections(neon, index), [], 'the Eastpoint ramp rises beside Meridian, clear of the Neon Spine sign');
   assert.ok(infrastructureIntersections(original.find(p => p.id === 'eastpoint'), index).some(p => p.kind === 'rail'), 'the Eastpoint board also crosses a concourse railing');
   const labels = wayfindingSigns(index);
   assert.equal(labels.length, original.length, 'both complete signs remain available');

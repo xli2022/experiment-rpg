@@ -1,6 +1,6 @@
 import { SpatialGrid } from '../core/spatial-grid.js';
 import * as authored from './authored-plan.js';
-import { CITY_SCALE, authoredToWorld } from './world-scale.js';
+import { CITY_SCALE, authoredToWorld, runtimeRoadWidth } from './world-scale.js';
 
 export { nearestOnSegment } from './authored-plan.js';
 const { nearestOnSegment } = authored;
@@ -59,7 +59,7 @@ export function createMasterPlan() {
   // smaller boundary: road IDs, sample vertices, joins and districts survive.
   const source = authored.createMasterPlan();
   const roads = source.roads.map(road => ({ ...road,
-    width: Math.max(6, road.width * CITY_SCALE),
+    width: runtimeRoadWidth(road.width),
     level: typeof road.level === 'number' ? road.level * CITY_SCALE : road.level,
     points: road.points.map(surfacePoint),
   }));

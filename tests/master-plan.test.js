@@ -7,6 +7,7 @@ import {
 import { circleHitsBox, overlapsHeight, supportHeight, surfaceHeightAt } from '../src/core/physics.js';
 import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { CITY_SCALE } from '../src/world/world-scale.js';
+import { roadSlabDepth } from '../src/world/infrastructure-clearance.js';
 
 const plan = createMasterPlan();
 
@@ -58,6 +59,44 @@ test('every vehicle access ramp joins real road surfaces at both ends with drive
       const a = ramp.points[i - 1], b = ramp.points[i];
       assert.ok(Math.abs(b.y - a.y) / Math.hypot(b.x - a.x, b.z - a.z) < .12, `${ramp.name} has an abrupt grade`);
     }
+  }
+});
+
+test('access ramps meet their street and trunk at grade and pass everything else with headroom', () => {
+  // A ramp's slab may only share a road's level where it joins that road. Over
+  // any other road, sidewalks included, or beneath one, cars and people need
+  // 2.5 m between the lower surface and the upper slab.
+  const segments = [...new Set([...plan.roadIndex.cells.values()].flat())];
+  for (const ramp of plan.roads.filter(road => road.kind === 'ramp')) {
+    const joined = new Set(segments.filter(s => s.road !== ramp && [ramp.points[0], ramp.points.at(-1)]
+      .some(p => { const hit = nearestOnSegment(p.x, p.z, s.a, s.b); return hit.distance < .05 && Math.abs(hit.y - p.y) < .05; })).map(s => s.road));
+    assert.ok(joined.size >= 2, `${ramp.id} joins a street and a trunk`);
+    for (const own of segments.filter(s => s.road === ramp)) {
+      const length = Math.hypot(own.b.x - own.a.x, own.b.z - own.a.z), dx = (own.b.x - own.a.x) / length, dz = (own.b.z - own.a.z) / length;
+      for (let along = 0; along <= length; along += 1) for (const across of [-1, -.5, 0, .5, 1].map(f => f * (own.width / 2 + 1.7))) {
+        const x = own.a.x + dx * along - dz * across, z = own.a.z + dz * along + dx * across, y = own.a.y + (own.b.y - own.a.y) * along / length;
+        for (const other of plan.roadIndex.near(x, z, 12)) {
+          if (other.road === ramp) continue;
+          const hit = nearestOnSegment(x, z, other.a, other.b), street = other.road.kind === 'road' && hit.y - terrainHeight(hit.x, hit.z) < .3;
+          if (hit.distance > other.width / 2 + (street ? 2.5 : 1.7)) continue;
+          const gap = y - hit.y;
+          if (Math.abs(gap) <= .3) assert.ok(joined.has(other.road), `${ramp.id} meets ${other.road.id} at grade without joining it at ${x.toFixed(1)},${z.toFixed(1)}`);
+          else assert.ok(Math.abs(gap) - roadSlabDepth(gap > 0 ? own : other) >= 2.5, `${ramp.id} passes ${gap > 0 ? 'low over' : 'beneath'} ${other.road.id} at ${x.toFixed(1)},${z.toFixed(1)}`);
+        }
+      }
+    }
+  }
+});
+
+test('the Eastpoint ramp rises beside Meridian, leaving the opening junction open to the sky', () => {
+  const ramp = plan.roads.find(r => r.id === 'eastpoint-ramp'), road = id => plan.roads.find(r => r.id === id);
+  const foot = ramp.points[0], top = ramp.points.at(-1), on = (p, r) => r.points.slice(1).some((b, i) => nearestOnSegment(p.x, p.z, r.points[i], b).distance < .05);
+  assert.ok(on(foot, road('eastpoint-south-link')) && on(top, road('meridian')), 'the ramp climbs from the South Link to Meridian');
+  // Market Street meets the frontage with nothing above the junction or its crossings.
+  const corner = { x: road('eastpoint-frontage').points[0].x, z: road('eastpoint-quay').points[0].z };
+  for (let dx = -14; dx <= 14; dx += 2) for (let dz = -14; dz <= 14; dz += 2) {
+    const x = corner.x + dx, z = corner.z + dz;
+    assert.ok(plan.surfaceHeight(x, z) < terrainHeight(x, z) + .2, `a slab covers the opening junction at ${x}, ${z}`);
   }
 });
 

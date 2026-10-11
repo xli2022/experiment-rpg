@@ -1,6 +1,7 @@
 import { SpatialGrid } from '../core/spatial-grid.js';
 import { addNeighborhoodStreets } from './neighborhood-plan.js';
 import { DISTRICT_ARCHITECTURE } from './district-architecture.js';
+import { CITY_SCALE, ROAD_SHOULDER, runtimeRoadWidth } from './world-scale.js';
 
 // Generate the complete street graph in the original 11 km authoring frame.
 // master-plan.js transforms the completed graph into compact runtime units.
@@ -138,23 +139,94 @@ function closestRoadPoint(x, z, roads, predicate = () => true) {
   return best;
 }
 
-function mergeLanding(ramp, trunk) {
-  // A ramp must reach the trunk's elevation at its outside edge, not only at
-  // the centerline. This short landing prevents cars meeting a vertical slab
-  // lip or snapping upward as soon as their support query touches the bridge.
-  const distances = [0];
-  for (let i = 1; i < ramp.points.length; i++) distances.push(distances.at(-1) + Math.hypot(ramp.points[i].x - ramp.points[i - 1].x, ramp.points[i].z - ramp.points[i - 1].z));
-  let entry = ramp.points.length - 1;
-  while (entry > 1) {
-    const p = ramp.points[entry], hit = closestRoadPoint(p.x, p.z, [trunk]);
-    if (hit.distance > trunk.width / 2 + 2) break;
-    entry--;
+// Authored half-width of a road at runtime, the shoulder its slab extends
+// beyond that, and the reach of a street's sidewalk and the people on it.
+const halfWidth = road => runtimeRoadWidth(road.width) / 2 / CITY_SCALE;
+const SHOULDER = ROAD_SHOULDER / CITY_SCALE, SIDEWALK_REACH = 2.5 / CITY_SCALE, RAMP_GRADE = .06;
+
+function rampProfile(ramp, feeder, trunk) {
+  // A ramp keeps the street's level until its slab, shoulders included, is
+  // clear of that street's lanes and sidewalks; otherwise its rising edge cuts
+  // across traffic passing the junction. It reaches the trunk's level before its
+  // slab meets the trunk's shoulder, so cars never pass under the trunk or meet
+  // a vertical slab lip. In between it climbs at an even grade of at least 6%,
+  // then runs level: a long ramp crosses streets as a bridge, not just above them.
+  const distances = [0], points = ramp.points, half = halfWidth(ramp) + SHOULDER;
+  for (let i = 1; i < points.length; i++) distances.push(distances.at(-1) + Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z));
+  const gap = (p, road) => closestRoadPoint(p.x, p.z, [road]).distance;
+  let start = 0, entry = points.length - 1;
+  while (start < entry && gap(points[start], feeder) < halfWidth(feeder) + SIDEWALK_REACH + half) start++;
+  while (entry > start + 1 && gap(points[entry], trunk) < halfWidth(trunk) + SHOULDER + half) entry--;
+  for (let i = 0; i <= start; i++) points[i].y = closestRoadPoint(points[i].x, points[i].z, [feeder]).y;
+  for (let i = entry; i < points.length; i++) points[i].y = closestRoadPoint(points[i].x, points[i].z, [trunk]).y;
+  const from = points[start].y, to = points[entry].y;
+  const climb = Math.min(distances[entry] - distances[start], Math.abs(to - from) / RAMP_GRADE);
+  for (let i = start + 1; i < entry; i++) points[i].y = mix(from, to, Math.min(1, (distances[i] - distances[start]) / climb));
+}
+
+// Traffic joins roads crossing within 0.7 m of each other's level at runtime.
+// Where a raised road crosses a street that closely, but more than a kerb's
+// height above it, it comes down onto the ground across the junction, as the
+// street is, and eases back to its own profile beyond, so the two share one
+// surface instead of leaving a step.
+const KERB_STEP = .3 / CITY_SCALE, JUNCTION_GRADE = .7 / CITY_SCALE, LEVEL_HOLD = 40, LEVEL_EASE = 100, LEVEL_GRADE = .06;
+
+function crossingAt(a, b, c, d) {
+  const rx = b.x - a.x, rz = b.z - a.z, sx = d.x - c.x, sz = d.z - c.z, det = rx * sz - rz * sx;
+  if (Math.abs(det) < 1e-9) return null;
+  const t = ((c.x - a.x) * sz - (c.z - a.z) * sx) / det, u = ((c.x - a.x) * rz - (c.z - a.z) * rx) / det;
+  return t >= 0 && t <= 1 && u >= 0 && u <= 1 ? { t, u } : null;
+}
+
+function steepest(points) {
+  let grade = 0;
+  for (let i = 1; i < points.length; i++) grade = Math.max(grade, Math.abs(points[i].y - points[i - 1].y) / Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z));
+  return grade;
+}
+
+function levelCrossings(roads) {
+  const streets = new SpatialGrid([], 96);
+  for (const road of roads) if (road.kind === 'road' && road.level === 0) for (let i = 1; i < road.points.length; i++) {
+    const a = road.points[i - 1], b = road.points[i];
+    streets.add({ a, b, minX: Math.min(a.x, b.x), maxX: Math.max(a.x, b.x), minZ: Math.min(a.z, b.z), maxZ: Math.max(a.z, b.z) });
   }
-  const landing = ramp.points[entry], landingY = closestRoadPoint(landing.x, landing.z, [trunk]).y, startY = ramp.points[0].y;
-  for (let i = 0; i <= entry; i++) ramp.points[i].y = mix(startY, landingY, distances[i] / distances[entry]);
-  for (let i = entry + 1; i < ramp.points.length; i++) {
-    const p = ramp.points[i];
-    p.y = closestRoadPoint(p.x, p.z, [trunk]).y;
+  for (const road of roads) {
+    if (road.kind !== 'road' || road.level === 0) continue;
+    const points = road.points, distances = [0];
+    for (let i = 1; i < points.length; i++) distances.push(distances[i - 1] + Math.hypot(points[i].x - points[i - 1].x, points[i].z - points[i - 1].z));
+    const total = distances.at(-1);
+    // Where along the road it crosses each street, and how far above that street.
+    const crossings = () => {
+      const found = [];
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1], b = points[i];
+        for (const street of streets.query(Math.min(a.x, b.x), Math.min(a.z, b.z), Math.max(a.x, b.x), Math.max(a.z, b.z))) {
+          const hit = crossingAt(a, b, street.a, street.b), at = hit && mix(distances[i - 1], distances[i], hit.t);
+          if (hit && !found.some(c => Math.abs(c.at - at) < 1)) found.push({ at, step: Math.abs(mix(street.a.y, street.b.y, hit.u) - mix(a.y, b.y, hit.t)) });
+        }
+      }
+      return found;
+    };
+    // Levelling one junction must not leave a new step at another: a crossing
+    // that was a bridge and is brought within a junction's reach is levelled too.
+    const before = crossings(), bridge = c => before.find(o => Math.abs(o.at - c.at) < 1)?.step > JUNCTION_GRADE;
+    for (let pass = 0; pass < 6; pass++) {
+      const steps = crossings().filter(c => c.step <= JUNCTION_GRADE && (c.step > KERB_STEP || c.step > .02 && bridge(c)));
+      if (!steps.length) break;
+      // Ease back over a longer stretch where the road would otherwise climb
+      // away from the junction more steeply than 6%, or than it already does.
+      for (const { at } of steps) {
+        const original = points.map(p => p.y), limit = Math.max(LEVEL_GRADE, steepest(points));
+        for (let ease = LEVEL_EASE; ; ease *= 1.5) {
+          for (const [i, p] of points.entries()) {
+            const along = Math.abs(distances[i] - at), d = road.closed ? Math.min(along, total - along) : along;
+            const weight = d <= LEVEL_HOLD ? 1 : d >= LEVEL_HOLD + ease ? 0 : (1 + Math.cos(Math.PI * (d - LEVEL_HOLD) / ease)) / 2;
+            p.y = mix(original[i], terrainHeight(p.x, p.z) + .07, weight);
+          }
+          if (steepest(points) <= limit + 1e-9 || ease > 8 * LEVEL_EASE) break;
+        }
+      }
+    }
   }
 }
 
@@ -239,6 +311,7 @@ export function createMasterPlan() {
   showcaseStreet('eastpoint-north-link', 'Eastpoint North Link', [[2420, 150], [2950, 150], [3600, 150]]);
   showcaseStreet('eastpoint-south-link', 'Eastpoint South Link', [[2420, 1050], [2950, 1050], [3600, 1050]]);
   addNeighborhoodStreets({ districts: MASTER_DISTRICTS, roads, addRoad, coastX, terrainHeight, nearestOnSegment, showcase: SHOWCASE });
+  levelCrossings(roads);
 
   const junctionSpecs = [
     ['ridge-junction', 'Ridge Junction', 306, 410, ring, 'ember-boulevard'],
@@ -252,23 +325,43 @@ export function createMasterPlan() {
     ['cut-junction', 'Cut Junction', 218, 1042, south, 'western-arterial'],
     ['delta-interchange', 'Delta Interchange', 762, 1044, meridian, 'south-bypass'],
   ];
+  // Routed ramps, from a foot on a street to their merge with the trunk. The
+  // generic route would leave these streets at a shallow angle, climb across a
+  // junction or cross street, or run beneath the trunk's own deck. Eastpoint's
+  // ramp rises from the South Link beside Meridian and merges after crossing
+  // above Market Street, leaving the opening junction open to the sky.
+  const rampRoutes = {
+    'ridge-junction': [[-2466, -2000], [-2516, -2060], [-2536, -2190], [-2584, -2292]],
+    'north-gate': [[-5060, -4650], [-5056, -4580], [-4980, -4524], [-4930, -4472]],
+    'stacks-interchange': [[940, -3642], [932, -3590], [820, -3560], [700, -3590]],
+    eastpoint: [[2465, 1050], [2479, 935], [2497, 776], [2541, 720]].map(([x, z]) => { const p = atEastpoint(x, z); return [p.x, p.z]; }),
+    'horizon-hub': [[1544, 178], [1536, 250], [1400, 300], [1280, 320]],
+  };
   const interchanges = [];
   for (const [id, name, px, py, raised, feederId] of junctionSpecs) {
     const p = fromReference(px, py), upper = closestRoadPoint(p.x, p.z, [raised]);
-    const feeder = roads.find(r => r.id === feederId);
     if (upper.y - terrainHeight(upper.x, upper.z) < .3) {
       interchanges.push({ id, name, number: interchanges.length + 1, x: upper.x, z: upper.z, y: upper.y, road: raised.id, ramp: null });
       continue;
     }
-    let lower = closestRoadPoint(upper.x - 190, upper.z + 220, [feeder]);
-    if (Math.hypot(lower.x - upper.x, lower.z - upper.z) < 180) {
-      const approach = feeder.points.filter(p => Math.hypot(p.x - upper.x, p.z - upper.z) > 250).sort((a, b) => Math.hypot(a.x - upper.x, a.z - upper.z) - Math.hypot(b.x - upper.x, b.z - upper.z))[0];
-      if (approach) lower = { ...approach, road: feeder };
+    let controls, feeder;
+    if (rampRoutes[id]) {
+      const route = rampRoutes[id].map(([x, z]) => ({ x, z })), foot = route[0], end = route.at(-1);
+      const lower = closestRoadPoint(foot.x, foot.z, roads, road => road.kind === 'road' && road !== raised);
+      const merge = closestRoadPoint(end.x, end.z, [raised]);
+      feeder = lower.road;
+      controls = [lower, ...route.slice(1, -1).map(p => ({ ...p, y: (lower.y + merge.y) / 2 })), merge];
+    } else {
+      feeder = roads.find(r => r.id === feederId);
+      let lower = closestRoadPoint(upper.x - 190, upper.z + 220, [feeder]);
+      if (Math.hypot(lower.x - upper.x, lower.z - upper.z) < 180) {
+        const approach = feeder.points.filter(p => Math.hypot(p.x - upper.x, p.z - upper.z) > 250).sort((a, b) => Math.hypot(a.x - upper.x, a.z - upper.z) - Math.hypot(b.x - upper.x, b.z - upper.z))[0];
+        if (approach) lower = { ...approach, road: feeder };
+      }
+      controls = [lower, { x: (lower.x + upper.x) / 2 - 85, z: (lower.z + upper.z) / 2 + 75, y: (lower.y + upper.y) / 2 }, upper];
     }
-    const bend = id === 'eastpoint' ? { ...atEastpoint(2448, 728), y: (lower.y + upper.y) / 2 }
-      : { x: (lower.x + upper.x) / 2 - 85, z: (lower.z + upper.z) / 2 + 75, y: (lower.y + upper.y) / 2 };
-    const ramp = addRoad(`${id}-ramp`, `${name} Access`, [lower, bend, upper], 10, 'ramp', { curved: true, kind: 'ramp', level: 'mixed', spacing: 18 });
-    mergeLanding(ramp, raised);
+    const ramp = addRoad(`${id}-ramp`, `${name} Access`, controls, 10, 'ramp', { curved: true, kind: 'ramp', level: 'mixed', spacing: 18 });
+    rampProfile(ramp, feeder, raised);
     interchanges.push({ id, name, number: interchanges.length + 1, x: upper.x, z: upper.z, y: upper.y, road: raised.id, ramp: ramp.id });
   }
   // Connect the two elevated trunk routes with a genuine grade-changing slipway.

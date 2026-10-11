@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { OBB } from 'three/addons/math/OBB.js';
 import { terrainHeight } from './master-plan.js';
+import { ROAD_SHOULDER } from './world-scale.js';
 import { SpatialGrid } from '../core/spatial-grid.js';
 
 // Use the same YXZ rotation order as WorldStream's rendered box instances.
@@ -21,20 +22,29 @@ function frame(s) {
     yaw: Math.atan2(dx, dz), pitch: -Math.atan2(dy, flat), flat, length: Math.hypot(flat, dy) };
 }
 
+// How far a road segment's slab reaches below its surface: a thin pad on the
+// ground, a deep deck where it bridges open space. Supports are uniform slabs.
+export const SUPPORT_SLAB_DEPTH = .65;
+export function roadSlabDepth(s, ground = terrainHeight) {
+  const x = (s.a.x + s.b.x) / 2, y = (s.a.y + s.b.y) / 2, z = (s.a.z + s.b.z) / 2;
+  return (y - ground(x, z) > 3.5 ? 1.1 : .32) + .12;
+}
+
 export function roadSolidRecipes(s) {
   const f = frame(s); if (f.flat < .01) return [];
-  const h = f.y - terrainHeight(f.x, f.z) > 3.5 ? 1.1 : .32;
+  const h = roadSlabDepth(s) - .12;
   const d = f.length + 2 * (s.supportOverlap ?? .12) * f.length / f.flat, roll = -Math.atan(s.crossSlope ?? 0);
   return [
-    { ...f, id: s.id, kind: 'road-deck', y: f.y - h / 2 - .12, w: s.width + 3.4, h, d: d + .04, roll },
+    { ...f, id: s.id, kind: 'road-deck', y: f.y - h / 2 - .12, w: s.width + 2 * ROAD_SHOULDER, h, d: d + .04, roll },
     { ...f, id: s.id, kind: 'road-surface', y: f.y - .055, w: s.width, h: .11, d, roll },
   ];
 }
 
 export function supportSolidRecipe(s) {
-  if (!s.a) return { ...s, kind: s.kind ?? 'deck', y: s.y - .325, w: s.width, h: .65, d: s.depth };
+  const h = SUPPORT_SLAB_DEPTH;
+  if (!s.a) return { ...s, kind: s.kind ?? 'deck', y: s.y - h / 2, w: s.width, h, d: s.depth };
   const f = frame(s);
-  return { ...f, id: s.id, kind: s.kind ?? 'support', y: f.y - .325, w: s.width, h: .65, d: f.length + .14 };
+  return { ...f, id: s.id, kind: s.kind ?? 'support', y: f.y - h / 2, w: s.width, h, d: f.length + .14 };
 }
 
 /** Exact solid recipes for the rendered road/support slabs and supplied furniture. */

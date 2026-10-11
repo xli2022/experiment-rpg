@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildNetwork, samplePath, laneLayout } from '../src/traffic/network.js';
+import { buildNetwork, samplePath, laneLayout, HEADROOM } from '../src/traffic/network.js';
 import { signalPlan, signalState, walkState, SIGNAL_TIMING } from '../src/traffic/signals.js';
-import { createMasterPlan } from '../src/world/master-plan.js';
+import { createMasterPlan, nearestOnSegment } from '../src/world/master-plan.js';
+import { roadSlabDepth, SUPPORT_SLAB_DEPTH } from '../src/world/infrastructure-clearance.js';
+import { ROAD_SHOULDER } from '../src/world/world-scale.js';
+import { SpatialGrid } from '../src/core/spatial-grid.js';
 import { gridPlan, streetPlan } from './helpers/street-grid.js';
 
 const plan = createMasterPlan(), network = buildNetwork(plan);
@@ -26,14 +29,82 @@ test('the city road network builds junctions, lanes and walkways quickly and det
 });
 
 test('junctions only join roads at the same grade', () => {
-  for (const node of network.nodes) for (const a of node.approaches) {
-    assert.ok(Math.abs(a.edge.line[a.end === 'from' ? 0 : a.edge.line.length - 1].y - node.y) < 1, `${node.id} joins ${a.edge.road.id} across levels`);
+  for (const node of network.nodes) {
+    const ends = node.approaches.map(a => a.edge.line[a.end === 'from' ? 0 : a.edge.line.length - 1].y);
+    for (const [i, a] of node.approaches.entries()) assert.ok(Math.abs(ends[i] - node.y) < 1, `${node.id} joins ${a.edge.road.id} across levels`);
+    // A raised road coming down to a street meets it without a step higher than a kerb.
+    if (ends.length) assert.ok(Math.max(...ends) - Math.min(...ends) <= .3, `${node.id} has a ${(Math.max(...ends) - Math.min(...ends)).toFixed(2)} m step`);
   }
   const overpass = streetPlan([
     { id: 'street', width: 10, points: [{ x: -150, z: 0 }, { x: 150, z: 0 }] },
     { id: 'bridge', width: 10, class: 'expressway', points: [{ x: 0, y: 18, z: -150 }, { x: 0, y: 18, z: 150 }] },
   ]);
   assert.ok(buildNetwork(overpass).nodes.every(n => n.kind === 'end'), 'a bridge over a street is not a junction');
+});
+
+// A slab's top and underside at (x, z), shoulders included, or null outside it.
+function slabOver(slab, x, z) {
+  if (!slab.a) return x < slab.minX || x > slab.maxX || z < slab.minZ || z > slab.maxZ ? null : { top: slab.maxY, under: slab.maxY - SUPPORT_SLAB_DEPTH };
+  const hit = nearestOnSegment(x, z, slab.a, slab.b), length = Math.hypot(slab.b.x - slab.a.x, slab.b.z - slab.a.z);
+  const along = hit.t * length + (hit.t === 0 || hit.t === 1 ? Math.hypot(x - hit.x, z - hit.z) - hit.distance : 0);
+  if (hit.distance > slab.width / 2 + (slab.road ? ROAD_SHOULDER : 0) || along < -.2 || along > length + .2) return null;
+  return { top: hit.y, under: hit.y - (slab.road ? roadSlabDepth(slab, plan.terrainHeight) : SUPPORT_SLAB_DEPTH) };
+}
+
+test('streets pass beneath a slab only with headroom, and are closed short of a lower one', () => {
+  // A walkway deck 1.8 m over one street, a road bridge 18 m over another, and
+  // a cross street a little higher than the street it meets at a junction.
+  const deck = { id: 'low-deck', kind: 'deck', x: 0, z: 0, y: 1.87, width: 60, depth: 8, minX: -30, maxX: 30, minZ: -4, maxZ: 4, minY: 1.22, maxY: 1.87 };
+  const plan = streetPlan([
+    { id: 'under-deck', width: 10, points: [{ x: 0, z: -150 }, { x: 0, z: 150 }] },
+    { id: 'under-bridge', width: 10, points: [{ x: 100, z: -150 }, { x: 100, z: 150 }] },
+    { id: 'bridge', width: 10, class: 'expressway', points: [{ x: 60, y: 18, z: 0 }, { x: 140, y: 18, z: 0 }] },
+    { id: 'raised-cross', width: 10, points: [{ x: -50, y: .5, z: 100 }, { x: 50, y: .5, z: 100 }] },
+  ], { supports: [deck] });
+  const city = buildNetwork(plan);
+  assert.deepEqual(city.closures.map(c => c.road.id), ['under-deck'], 'only the street under the deck closes; junctions never close their own streets');
+  assert.equal(city.edges.filter(e => e.road.id === 'under-bridge').length, 1, 'the street under the bridge stays open end to end');
+  const beneath = p => Math.abs(p.x) < 30 && Math.abs(p.z) < 4 + 2.5;
+  assert.ok(city.lanes.every(lane => !lane.path.points.some(beneath)), 'no lane passes beneath the deck');
+  assert.ok(city.nodes.filter(n => n.kind === 'end' && Math.abs(n.x) < 1 && Math.abs(n.z) < 20).length === 2, 'the street ends on both sides of the deck');
+  for (const node of city.nodes.filter(n => n.kind === 'end' && Math.abs(n.x) < 1 && Math.abs(n.z) < 20)) {
+    assert.ok(city.connectorsAt(node).length && city.connectorsAt(node).every(c => c.turn === 'uturn' && !c.path.points.some(beneath)), 'cars turn round short of the deck');
+  }
+  assert.ok(city.walk.edges.filter(e => e.terrain).every(e => !e.path.points.some(beneath)), 'people walk round the end of the street, not beneath the deck');
+});
+
+test('no lane, turn or walkway in the city passes beneath a slab without headroom', () => {
+  // Only slabs raised off the ground can be over anything. Every path near one is
+  // measured across a car's width against the rendered slab. Roads meeting at a
+  // junction share its surface, so they are not over each other there.
+  const raised = [...new Set([...plan.roadIndex.cells.values()].flat()), ...plan.supports]
+    .filter(s => (s.a ? [s.a, s.b] : [{ x: s.x, y: s.maxY, z: s.z }]).some(p => p.y - plan.terrainHeight(p.x, p.z) > .3));
+  const grid = new SpatialGrid(raised.map(slab => ({ minX: slab.minX - 3, maxX: slab.maxX + 3, minZ: slab.minZ - 3, maxZ: slab.maxZ + 3, slab })), 48);
+  const problems = new Map();
+  let measured = 0;
+  const check = (label, path, roads, width) => {
+    if (!grid.query(path.minX, path.minZ, path.maxX, path.maxZ).length) return;
+    measured++;
+    for (let s = 0; s <= path.length; s += .5) {
+      const p = samplePath(path, s), meeting = new Set([...roads, ...network.nodesNear(p.x, p.z, 25).flatMap(n => n.approaches.map(a => a.edge.road))]);
+      for (const offset of width ? [-width, 0, width] : [0]) {
+        const x = p.x - p.dz * offset, z = p.z + p.dx * offset;
+        for (const { slab } of grid.query(x, z, x, z)) {
+          const over = !meeting.has(slab.road) && slabOver(slab, x, z);
+          const key = `${label} under ${slab.road?.id ?? slab.id}`;
+          if (over && over.top - p.y > .3 && over.under - p.y < HEADROOM - 1e-6 && !problems.has(key)) problems.set(key, `${key} at ${x.toFixed(1)},${z.toFixed(1)}`);
+        }
+      }
+    }
+  };
+  for (const lane of network.lanes) check(lane.id, lane.path, [lane.edge.road], 1.1);
+  for (const node of network.nodes) {
+    if (!grid.query(node.x - 30, node.z - 30, node.x + 30, node.z + 30).length) continue;
+    for (const c of network.connectorsAt(node)) check(c.id, c.path, [c.from.edge.road, c.to.edge.road], 1.1);
+  }
+  for (const edge of network.walk.edges) check(`${edge.kind} ${edge.id}`, edge.path, [], 0);
+  assert.ok(measured > 500, 'paths beside and beneath raised slabs are measured');
+  assert.deepEqual([...problems.values()], []);
 });
 
 test('turn connectors join the end of one lane to the start of the right lane in every junction', () => {

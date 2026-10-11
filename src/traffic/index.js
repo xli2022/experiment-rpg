@@ -69,9 +69,11 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
   }
   function people(player, vehicle) {
     // Someone stepping onto or crossing a crosswalk claims more of the street ahead of cars.
-    // People waiting at the kerb (and a companion waiting with them) hold back for cars.
+    // People waiting at the kerb, or held back and walking up to it (and a
+    // companion with them), hold back for cars.
+    const holds = p => p.mode === 'wait' || p.mode === 'walk' && p.holding;
     const list = pedestrians.walkers.map(p => ({ x: p.x, y: p.y, z: p.z, r: p.claim ? 1 : .35, size: .35, kind: 'walker',
-      waiting: p.mode === 'wait' || p.mode === 'follow' && p.leader?.mode === 'wait' }));
+      waiting: holds(p) || p.mode === 'follow' && !!p.leader && holds(p.leader) }));
     if (!vehicle) list.push({ x: player.x, y: player.y, z: player.z, r: .45, size: .45, kind: 'player' });
     return list;
   }

@@ -166,6 +166,7 @@ The automated suite covers traversal, city generation, campaign state and charac
 - a five-minute drive with no collisions or red-light entries
 - crosswalk yielding
 - pedestrians keeping to sidewalks and walk signals
+- headroom: no car or person passing beneath a bridge, ramp or deck too low to clear
 - car takeovers
 
 Arrival checks include cars blocking tram and refuge destinations. Input and physics regressions cover popup focus restoration, held menu keys, cancelled touch gestures, vehicle exits at every heading, and cars blocking weapon fire. Campaign tests walk all six combinations of evidence and ending choices, reload between chapters, complete every side story, verify delivery replay and rewards, validate saves and handle storage failures, and check equipment, consumables and waypoint elevation. Character tests load the exported citizen rig and verify immutable source geometry, distinct faces, finite shapes, accessory attachment, separate animation skeletons, stable individual poses and optional personal-story branches. Speech tests cover chunked delivery, interruption, replay, late voice discovery, mute/volume persistence, blocked playback and stalled engines.
