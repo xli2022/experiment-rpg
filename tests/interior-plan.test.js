@@ -30,7 +30,12 @@ test('every district, footprint and use produces an enterable interior', () => {
   assert.equal(plans.length, blueprints.filter(p => buildingVolumes(p)[0].h >= INTERIOR.minHeight).length);
   const kinds = new Set(plans.map(({ plan }) => `${plan.footprint}/${plan.layout}`));
   for (const footprint of ['rectangle', 'circle', 'hexagon']) assert.ok([...kinds].some(k => k.startsWith(footprint)), footprint);
-  for (const layout of ['pinwheel', 'side-core', 'hall']) assert.ok([...kinds].some(k => k.endsWith(layout)), layout);
+  for (const layout of ['pinwheel', 'hall']) assert.ok([...kinds].some(k => k.endsWith(layout)), layout);
+  // Every street building is now wide enough for a central core. A narrower
+  // footprint still gets its core against the back wall.
+  const narrow = plans.filter(({ p }) => p.footprint === 'rectangle' && !['factory', 'warehouse'].includes(p.type)).slice(0, 10)
+    .map(({ p }) => interiorPlan({ ...p, id: `${p.id}:narrow`, w: 14, d: 13 }));
+  assert.ok(narrow.some(plan => plan?.layout === 'side-core'), 'side-core');
 });
 
 test('plans are deterministic and floors follow the facade storey grid', () => {

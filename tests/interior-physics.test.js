@@ -25,7 +25,7 @@ const samples = [...byLayout.values()];
 const blocked = (spatial, x, y, z, radius = .43) => spatial.near(x, z, 2).some(b => !b.supportOnly && overlapsHeight(b, y) && circleHitsBox(x, z, radius, b));
 
 test('outside the door, the hull collides and blocks rays exactly like the shell', () => {
-  assert.ok(samples.length >= 6);
+  assert.ok(samples.length >= 5);
   for (const { p, plan } of samples) {
     const hull = interiorHull(plan).filter(b => !b.supportOnly), shell = p.box, faces = polygonFaces(plan.outline);
     faces.forEach((face, i) => {

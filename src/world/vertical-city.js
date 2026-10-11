@@ -16,9 +16,9 @@ import { seededRandom, orientedBox, boxCoordinates } from '../core/physics.js';
 import { SpatialGrid } from '../core/spatial-grid.js';
 import { CHUNK_SIZE, WORLD_LIMIT } from './world-config.js';
 import { createMasterPlan, districtAt, terrainHeight, TERRAIN_GRID, WATER_LEVEL, isWater, SHOWCASE } from './master-plan.js';
-import { CITY_SCALE, atEastpoint } from './world-scale.js';
+import { BUILDING_SCALE, CITY_SCALE, atEastpoint } from './world-scale.js';
 import { wayfindingSigns } from './wayfinding.js';
-import { pocketVegetation, treeParts, shrubParts, treeCollider } from './vegetation.js';
+import { pocketVegetation, treeParts, shrubParts, treeCollider, yardPlanting } from './vegetation.js';
 
 const BLOCK_SIZE = 192, CACHE_LIMIT = 160;
 const center = segment => ({ x: (segment.a.x + segment.b.x) / 2, y: (segment.a.y + segment.b.y) / 2, z: (segment.a.z + segment.b.z) / 2 });
@@ -26,6 +26,10 @@ const inBounds = (p, minX, minZ, maxX, maxZ) => p.x >= minX && p.x < maxX && p.z
 const inCell = (p, cell) => inBounds(p, cell.x, cell.z, cell.x + CHUNK_SIZE, cell.z + CHUNK_SIZE);
 const boundsOverlap = (a, b) => a.minX < b.maxX && a.maxX > b.minX && a.minZ < b.maxZ && a.maxZ > b.minZ;
 const hash = text => { let value = 2166136261; for (const c of text) value = Math.imul(value ^ c.charCodeAt(0), 16777619); return value >>> 0; };
+// Side passages between neighbouring lots, in metres: room to walk through,
+// and close enough to jump between the roofs.
+const LOT_GAP = [4, 8];
+const between = (random, a, b) => a + random() * (b - a);
 const colors = { concrete: 0x657780, dark: 0x263745, rail: 0x77939c, cyan: 0x74d8d5, amber: 0xe4b276, pink: 0xcd8fb1 };
 
 function districtStyle(district) {
@@ -93,7 +97,7 @@ function showcaseBuildings(plan, reserved) {
   ];
   return anchors.flatMap(([authoredX, authoredZ, w, d, h, type], i) => {
     const { x, z } = atEastpoint(authoredX, authoredZ);
-    w *= CITY_SCALE; d *= CITY_SCALE;
+    w *= BUILDING_SCALE; d *= BUILDING_SCALE;
     const district = districtAt(x, z), id = `eastpoint-anchor:${i}`;
     const { footprint } = sampleArchitecture(district.id, seededRandom(hash(`${id}:architecture`)));
     if (footprint !== 'rectangle') w = d = Math.min(w, d);
@@ -240,39 +244,62 @@ export class VerticalMetropolis {
         distances.push(distances[i - 1] + Math.hypot(road.points[i].x - road.points[i - 1].x, road.points[i].z - road.points[i - 1].z));
         stations.set(road.points[i], distances[i]);
       }
-      // Compress the original frontage rhythm with the map, including widths
-      // and setbacks. Heights and human-scale architectural details stay tall.
-      this.frontages.set(road, { distances, stations, length: distances.at(-1), spacing: (48 + hash(road.id) % 13) * CITY_SCALE });
+      this.frontages.set(road, { distances, stations, length: distances.at(-1), lots: null });
     }
+  }
+  /**
+   * The lots along one side of a road, in order: each `{ slot, from, w }`
+   * spans `from` to `from + w` metres along it. Buildings keep their authored
+   * widths and follow one another with a narrow side passage between, close
+   * enough to jump roof to roof.
+   */
+  frontageLots(road, side) {
+    const route = this.frontages.get(road);
+    route.lots ??= new Map();
+    if (route.lots.has(side)) return route.lots.get(side);
+    const lots = [];
+    let from = between(seededRandom(hash(`frontage:${road.id}:${side}:start`)), 4, 12);
+    for (let slot = 0; from < route.length; slot++) {
+      const random = seededRandom(hash(`frontage:${road.id}:${side}:${slot}:width`));
+      const at = this.pointAlong(road, Math.min(route.length, from + 13)), freight = districtStyle(districtAt(at.x, at.z)).freight;
+      const w = between(random, freight ? 31 : 26, freight ? 45 : 49) * BUILDING_SCALE;
+      if (from + w > route.length - 4) break;
+      lots.push({ slot, from, w });
+      from += w + between(random, ...LOT_GAP);
+    }
+    route.lots.set(side, lots);
+    return lots;
+  }
+  /** The point `distance` metres along a road's centreline. */
+  pointAlong(road, distance) {
+    const route = this.frontages.get(road);
+    let lo = 1, hi = route.distances.length - 1;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (route.distances[mid] < distance) lo = mid + 1; else hi = mid; }
+    const a = road.points[lo - 1], b = road.points[lo], length = route.distances[lo] - route.distances[lo - 1];
+    const t = length < .01 ? 0 : (distance - route.distances[lo - 1]) / length;
+    return { a, b, length, x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: a.y + (b.y - a.y) * t };
   }
   frontageCandidates(minX, minZ, maxX, maxZ) {
     const candidates = new Map();
     for (const segment of this.roadIndex.query(minX - 70, minZ - 70, maxX + 70, maxZ + 70)) {
       const road = segment.road, route = this.frontages.get(road);
       if (!route) continue;
-      const first = Math.max(0, Math.floor((route.stations.get(segment.a) - 35 * CITY_SCALE) / route.spacing));
-      const last = Math.ceil((route.stations.get(segment.b) - 20 * CITY_SCALE) / route.spacing);
-      for (let slot = first; slot <= last; slot++) for (const side of [-1, 1]) {
-        const id = `frontage:${road.id}:${side}:${slot}`;
+      const from = route.stations.get(segment.a) - 60, to = route.stations.get(segment.b) + 60;
+      for (const side of [-1, 1]) for (const span of this.frontageLots(road, side)) {
+        if (span.from + span.w < from || span.from > to) continue;
+        const id = `frontage:${road.id}:${side}:${span.slot}`;
         if (candidates.has(id)) continue;
         // Null also marks rejected stations, so neighboring road segments do
         // not repeatedly evaluate the same deterministic lot.
         candidates.set(id, null);
         const random = seededRandom(hash(id)), range = (a, b) => a + random() * (b - a);
-        const distance = (27 + range(-4, 4)) * CITY_SCALE + slot * route.spacing;
-        if (distance > route.length - 24 * CITY_SCALE) continue;
-        let lo = 1, hi = route.distances.length - 1;
-        while (lo < hi) { const mid = (lo + hi) >> 1; if (route.distances[mid] < distance) lo = mid + 1; else hi = mid; }
-        const a = road.points[lo - 1], b = road.points[lo], length = route.distances[lo] - route.distances[lo - 1];
+        const { a, b, length, ...street } = this.pointAlong(road, span.from + span.w / 2);
         if (length < .01) continue;
-        const t = (distance - route.distances[lo - 1]) / length;
-        const street = { x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t, y: a.y + (b.y - a.y) * t };
         if (Math.abs(street.y - terrainHeight(street.x, street.z)) > 1.1) continue;
         const style = districtStyle(districtAt(street.x, street.z)), variation = random();
         if (variation > style.density) continue;
-        const useChoice = random();
-        const w = range(style.freight ? 31 : 26, Math.min(style.freight ? 45 : 49, route.spacing / CITY_SCALE - 8)) * CITY_SCALE;
-        let d = range(style.freight ? 31 : 24, style.freight ? 44 : 39) * CITY_SCALE;
+        const useChoice = random(), w = span.w;
+        let d = range(style.freight ? 31 : 24, style.freight ? 44 : 39) * BUILDING_SCALE;
         const streetArchitecture = sampleArchitecture(districtAt(street.x, street.z).id, seededRandom(hash(`${id}:architecture`)));
         // Reserve enough depth for the full frontage diameter. Inscribing a
         // circle in the old shallow rectangle needlessly widens rooftop gaps.
@@ -298,7 +325,7 @@ export class VerticalMetropolis {
         const yard = localPoint(p, 0, -1.5), lot = orientedBox(yard.x, yard.z, w + 4, d + 8, yaw);
         if (Math.max(Math.abs(lot.minX), Math.abs(lot.maxX), Math.abs(lot.minZ), Math.abs(lot.maxZ)) >= WORLD_LIMIT - 28) continue;
         const grades = groundTop(p);
-        if (grades.max - grades.min > 2.4 * CITY_SCALE || grades.min <= WATER_LEVEL + CITY_SCALE) continue;
+        if (grades.max - grades.min > 1.2 * BUILDING_SCALE * 2 || grades.min <= WATER_LEVEL + CITY_SCALE) continue;
         const corners = [[-.5, -.5], [.5, -.5], [-.5, .5], [.5, .5]].map(([sx, sz]) => localPoint(lot, sx * lot.w, sz * lot.d));
         if (corners.some(point => isWater(point.x, point.z))) continue;
         if (frontageBlocked(footprint, this.plan, 2) || this.anchors.some(anchor => lotsOverlap(lot, orientedBox(anchor.x, anchor.z, anchor.w + 4, anchor.d + 4, anchor.yaw)))) continue;
@@ -331,16 +358,20 @@ export class VerticalMetropolis {
       const physical = buildingBoxes(p);
       p.box = physical[0]; p.sign = buildingSign(p, this.plan); buildings.push(p); colliders.push(...physical);
       p.steps = entranceSteps(p, buildingEntrances(p), terrainHeight); colliders.push(...p.steps);
-      const yard = localPoint(p, 0, -p.d / 2 - 2.5), freight = districtStyle(districtAt(p.x, p.z)).freight;
-      const yardBox = orientedBox(yard.x, yard.z, 7, 3.6, p.yaw);
-      if (p.variation > .35 && !frontageBlocked(yardBox, this.plan, 3) && !isWater(yard.x, yard.z)) {
+      // The rear yard is planted (or stacked with cargo) along the building's
+      // whole width: one spot per 12 m of frontage.
+      const freight = districtStyle(districtAt(p.x, p.z)).freight, spots = Math.max(1, Math.floor(p.w / 12));
+      for (let k = 0; k < spots; k++) {
+        const yard = localPoint(p, (k - (spots - 1) / 2) * p.w / spots, -p.d / 2 - 2.5), variation = (p.variation + k * .37) % 1;
+        const yardBox = orientedBox(yard.x, yard.z, 7, 3.6, p.yaw);
+        if (p.variation <= .35 || frontageBlocked(yardBox, this.plan, 3) || isWater(yard.x, yard.z)) continue;
         const y = terrainHeight(yard.x, yard.z);
         if (freight) {
-          props.push({ ...yard, y, kind: 'cargo', yaw: p.yaw, tint: p.variation > .5 ? 0x879388 : 0x926f61 });
+          props.push({ ...yard, y, kind: 'cargo', yaw: p.yaw, tint: variation > .5 ? 0x879388 : 0x926f61 });
           colliders.push(orientedBox(yard.x, yard.z, 6.2, 2.5, p.yaw, y + 2.5, y));
         } else {
-          const tree = { ...yard, id: `yard:${p.id}`, y, size: .8 + p.variation * .4, type: p.variation < .52 ? 'cypress' : 'broadleaf', source: 'yard' };
-          trees.push(tree); colliders.push(treeCollider(tree));
+          const planting = yardPlanting(yard, p.yaw, spots > 1 ? `yard:${p.id}:${k}` : `yard:${p.id}`, variation);
+          trees.push(planting.tree); colliders.push(treeCollider(planting.tree)); shrubs.push(...planting.shrubs);
         }
       }
     }

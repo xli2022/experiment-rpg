@@ -64,12 +64,13 @@ export function walkState(node, approach, time) {
 
 // Lamp colours in the renderer's linear HDR range, before the filmic tone
 // mapping every frame goes through. That curve bleaches and yellows bright
-// saturated light, so a red as bright as the amber and green lenses (which
-// bloom) would reach the screen as salmon orange. The red lens stays dim
-// enough to read pure red, and a soft red glow round it stands in for bloom.
-export const LAMP_COLORS = Object.freeze({ red: [1.2, 0, 0], amber: [3, 1.35, .08], green: [.2, 2.6, 1.2], walk: [2.2, 2.4, 2.3], stop: [2.6, .7, .1] });
-export const RED_GLOW = Object.freeze([.5, 0, 0]);
-const DIM = .05, PROP_RANGE = 170, REBUILD = 40, GLOW = .75;
+// saturated light: a lens bright enough to bloom reaches the screen as a pale
+// disc (a red one as salmon). So the signal lenses stay under the bloom
+// threshold, where the curve keeps their colour, and each lit lens wears a
+// soft ring of its own light instead of bloom.
+export const LAMP_COLORS = Object.freeze({ red: [1.2, 0, 0], amber: [1.1, .3, 0], green: [0, .5, .22], walk: [2.2, 2.4, 2.3], stop: [2.6, .7, .1] });
+export const LAMP_GLOWS = Object.freeze({ red: [.42, 0, 0], amber: [.42, .13, 0], green: [0, .26, .11] });
+const DIM = .1, PROP_RANGE = 170, REBUILD = 40, GLOW = .75;
 
 // A ring of light round a lens: clear over the lens itself (radius .105 of
 // the glow's .375), brightest at its rim and fading out to the edge.
@@ -100,7 +101,7 @@ export function createSignalProps(scene, network, plan) {
   const arms = mesh(new THREE.BoxGeometry(1, .09, .09).translate(.5, 0, 0), metal, 160);
   const heads = mesh(new THREE.BoxGeometry(.36, 1.02, .3), metal, 320);
   const lamps = mesh(new THREE.CircleGeometry(.105, 12), lamp, 960);
-  const glows = mesh(new THREE.PlaneGeometry(GLOW, GLOW), glow, 320);
+  const glows = mesh(new THREE.PlaneGeometry(GLOW, GLOW), glow, 960);
   const walkers = mesh(new THREE.PlaneGeometry(.22, .22), lamp, 320);
   const stripes = mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), paint, 2400);
   for (const target of [lamps, glows, walkers]) target.setColorAt(0, new THREE.Color());
@@ -140,10 +141,10 @@ export function createSignalProps(scene, network, plan) {
           const lamps3 = [];
           for (const [k, name] of ['red', 'amber', 'green'].entries()) {
             put(lamps, lampIndex, x + a.dir.x * .155, y + (1 - k) * .31 * height, z + a.dir.z * .155, yaw, height, height, 1);
-            lamps3.push([lampIndex++, name]);
+            put(glows, glowIndex, x + a.dir.x * .165, y + (1 - k) * .31 * height, z + a.dir.z * .165, yaw, height, height, 1);
+            lamps3.push([lampIndex++, name, glowIndex++]);
           }
-          put(glows, glowIndex, x + a.dir.x * .165, y + .31 * height, z + a.dir.z * .165, yaw, height, height, 1);
-          faces.push({ node, approach: a, lamps: lamps3, glow: glowIndex++ });
+          faces.push({ node, approach: a, lamps: lamps3 });
         }
         // A pedestrian lamp facing each end of this approach's crossing.
         for (const side of [1, -1]) if (walkIndex < 320) {
@@ -164,11 +165,11 @@ export function createSignalProps(scene, network, plan) {
       if (!center || Math.hypot(focus.x - center.x, focus.z - center.z) > REBUILD) rebuild(focus);
       for (const face of faces) {
         const state = signalState(face.node, face.approach, time);
-        for (const [index, name] of face.lamps) {
+        for (const [index, name, glowIndex] of face.lamps) {
           const on = name === state.color, [r, g, b] = LAMP_COLORS[name];
           lamps.setColorAt(index, color.setRGB(on ? r : r * DIM, on ? g : g * DIM, on ? b : b * DIM));
+          glows.setColorAt(glowIndex, on ? color.setRGB(...LAMP_GLOWS[name]) : color.setRGB(0, 0, 0));
         }
-        glows.setColorAt(face.glow, state.color === 'red' ? color.setRGB(...RED_GLOW) : color.setRGB(0, 0, 0));
       }
       for (const w of walks) {
         // Walk is steady white; it turns to a flashing hand before the crossing traffic moves.

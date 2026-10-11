@@ -232,7 +232,7 @@ function createStory(host, fresh) {
     },
     welcome() {
       if (fresh) return 'A NEW SIGNAL // Mara is waiting on the Upper Market. Your story starts here.';
-      if (saved.loaded && saved.worldRevision !== WORLD_REVISION) return 'AFTERLIGHT COMPACTED // Your story is preserved. You have returned to your refuge in the smaller city.';
+      if (saved.loaded && saved.worldRevision !== WORLD_REVISION) return 'AFTERLIGHT REBUILT // Your story is preserved. The city has changed, so you have returned to your refuge.';
       return saved.warning ?? (saved.loaded ? 'WELCOME BACK // Your story continues. J for your field journal.' : 'MARA: Vex. Upper Market, one level up. We need to talk. // E to interact · J for your journal');
     },
     update(dt, { camera }) {

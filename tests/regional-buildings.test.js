@@ -17,7 +17,7 @@ const worldPoint = (p, x, z, y = 0) => new THREE.Vector3(p.x + x * Math.cos(p.ya
 test('all districts enforce their footprint, height range and average, including boundary lots and landmarks', () => {
   const metro = new VerticalMetropolis(createMasterPlan(), LANDMARKS);
   const buildings = metro.area(-WORLD_LIMIT, -WORLD_LIMIT, WORLD_LIMIT, WORLD_LIMIT).flatMap(b => b.buildings);
-  assert.ok(buildings.length > 12000);
+  assert.ok(buildings.length > 4500, 'every district street is built up, with buildings at their authored size');
   for (const district of MASTER_DISTRICTS) {
     const profile = DISTRICT_ARCHITECTURE[district.id], samples = buildings.filter(p => p.district === district.id);
     assert.ok(samples.length > 100, district.id);

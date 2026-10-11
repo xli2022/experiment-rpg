@@ -63,6 +63,16 @@ export function treeCollider(p) {
     { id: p.id, kind: 'tree', walkable: false });
 }
 
+/** A rear-yard planting spot: a tree, with a shrub either side of it along the wall. */
+export function yardPlanting({ x, z }, yaw, id, variation) {
+  const tree = { x, z, id, y: terrainHeight(x, z), size: .8 + variation * .4, type: variation < .52 ? 'cypress' : 'broadleaf', source: 'yard' };
+  const shrubs = [-1, 1].map((side, i) => {
+    const sx = x + Math.cos(yaw) * side * 2.4, sz = z - Math.sin(yaw) * side * 2.4;
+    return { id: `${id}:shrub:${i}`, x: sx, z: sz, y: terrainHeight(sx, sz), size: .6 + variation * .3, tint: greens[(hash(id) + i) % greens.length], flowering: variation > .8 };
+  });
+  return { tree, shrubs };
+}
+
 function groundcover(x, z, radius, id, tint) {
   const y = terrainHeight(x, z), dx = terrainHeight(x + .4, z) - terrainHeight(x - .4, z), dz = terrainHeight(x, z + .4) - terrainHeight(x, z - .4);
   const slopeX = dx / .8, slopeZ = dz / .8, pitch = -Math.atan(slopeZ), roll = Math.atan(slopeX * Math.cos(pitch));

@@ -7,11 +7,13 @@ import { facadeWalls, wallPanes, wallPoint } from './facade-windows.js';
 // (front is +Z), derived deterministically from a city blueprint. Physics,
 // rendering and future residents share the same rooms and unit identities.
 export const INTERIOR = Object.freeze({
-  revision: 1, storey: 3.6, slab: .3, hull: .3, partition: .14, floorOffset: .12, minHeight: 2.6,
+  revision: 2, storey: 3.6, slab: .3, hull: .3, partition: .14, floorOffset: .12, minHeight: 2.6,
   // Wide enough to walk through at an angle: a 0.86 m body keeps 12 cm either side.
   door: Object.freeze({ width: 1.1, height: 2.15, clearance: 1 }),
-  stair: Object.freeze({ lane: 1.2, divider: .2, run: 3.6, rise: 1.8, landing: 1.2 }),
-  lift: 1.8, liftAbove: 3, ring: 1.2, minDepth: 3.2,
+  // A generous core: two-metre-plus flights and landings, and a landing ring
+  // round the core as wide, at the same comfortable pitch as before.
+  stair: Object.freeze({ lane: 2.4, divider: .2, run: 3.6, rise: 1.8, landing: 2.4 }),
+  lift: 2.4, liftAbove: 3, ring: 2.4, minDepth: 3.2,
 });
 const OPEN_KINDS = new Set(['landing', 'lobby', 'office', 'shop', 'hall']);
 const PUBLIC = { market: 'shop', terrace: 'shop', apartment: 'lobby', office: 'lobby', civic: 'lobby' };
@@ -409,16 +411,20 @@ function wallFaces(zone, walls) {
 // Inside a zone, `clearance` metres clear of its edges' wall faces.
 const inZone = (faces, x, z, clearance = 0) => faces.every(f => (x - f.x) * f.nx + (z - f.z) * f.nz <= -(clearance + f.inset) + 1e-9);
 // Connected free cells from `starts` within `free` (1 = free), marked 2.
+// Cells are column-major: `i * nz + j`. One shared stack serves every call.
+let floodStack = new Int32Array(4096);
 function flood(free, nx, nz, starts) {
-  const queue = starts.filter(k => free[k] === 1);
-  for (const k of queue) free[k] = 2;
-  let reached = queue.length;
-  while (queue.length) {
-    const k = queue.pop(), i = Math.floor(k / nz), j = k % nz;
-    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
-      const n = a * nz + b;
-      if (a >= 0 && b >= 0 && a < nx && b < nz && free[n] === 1) { free[n] = 2; reached++; queue.push(n); }
-    }
+  if (floodStack.length < free.length) floodStack = new Int32Array(free.length);
+  const stack = floodStack, count = free.length;
+  let top = 0, reached = 0;
+  const visit = n => { if (free[n] === 1) { free[n] = 2; stack[top++] = n; reached++; } };
+  for (const k of starts) if (k >= 0 && k < count) visit(k);
+  while (top) {
+    const k = stack[--top], j = k % nz;
+    if (k >= nz) visit(k - nz);
+    if (k + nz < count) visit(k + nz);
+    if (j > 0) visit(k - 1);
+    if (j < nz - 1) visit(k + 1);
   }
   return reached;
 }

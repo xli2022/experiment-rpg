@@ -3,6 +3,10 @@
 export const CITY_SCALE = .5;
 export const AUTHORED_WORLD_LIMIT = 5500;
 export const authoredToWorld = (x, z) => ({ x: x * CITY_SCALE, z: z * CITY_SCALE });
+// Buildings keep their authored size: on the compact map they are drawn at
+// twice the street plan's scale, so lobbies, rooms and stairs have room for a
+// person. Their lots follow one another along each street instead.
+export const BUILDING_SCALE = 2 * CITY_SCALE;
 // Runtime road dimensions: narrow streets keep room for human-scale vehicles,
 // and every road slab extends this far beyond its asphalt on both sides.
 const MIN_ROAD_WIDTH = 6;

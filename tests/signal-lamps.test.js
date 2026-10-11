@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { LAMP_COLORS, RED_GLOW, createSignalProps, signalState } from '../src/traffic/signals.js';
+import { LAMP_COLORS, LAMP_GLOWS, createSignalProps, signalState } from '../src/traffic/signals.js';
 import { buildNetwork } from '../src/traffic/network.js';
 import { createMasterPlan } from '../src/world/master-plan.js';
 
@@ -19,37 +19,41 @@ function onScreen([r, g, b]) {
 const luminance = ([r, g, b]) => .299 * r + .587 * g + .114 * b;
 const hue = ([r, g, b]) => { const max = Math.max(r, g, b), d = max - Math.min(r, g, b); const h = max === r ? (g - b) / d % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4; return (h * 60 + 360) % 360; };
 
-test('a lit red lamp reaches the screen red, not orange', () => {
-  for (const [name, color] of [['lens', LAMP_COLORS.red], ['glow', RED_GLOW]]) {
-    const [r, g, b] = onScreen(color), h = hue([r, g, b]);
-    assert.ok(r > 150 && g < 80 && b < 60, `${name}: ${[r, g, b].map(Math.round)}`);
-    assert.ok(h < 12 || h > 345, `${name}: hue ${h.toFixed(0)}°`);
-    // Bloom would add a bright, tone-mapped (so orange) core round it.
-    assert.ok(luminance(color) < BLOOM, `${name} stays under the bloom threshold`);
+test('lit signal lamps reach the screen in their own colours, alike', () => {
+  const hues = { red: h => h < 12 || h > 345, amber: h => h > 30 && h < 50, green: h => h > 140 && h < 175 };
+  for (const name of ['red', 'amber', 'green']) for (const [part, color] of [['lens', LAMP_COLORS[name]], ['glow', LAMP_GLOWS[name]]]) {
+    const rgb = onScreen(color), max = Math.max(...rgb), saturation = (max - Math.min(...rgb)) / max, h = hue(rgb);
+    assert.ok(hues[name](h), `${name} ${part}: hue ${h.toFixed(0)}° (${rgb.map(Math.round)})`);
+    assert.ok(saturation > .5 && max > 150, `${name} ${part}: saturated and bright (${rgb.map(Math.round)})`);
+    // Bloom would add a bright, tone-mapped (so bleached) core round it.
+    assert.ok(luminance(color) < BLOOM, `${name} ${part} stays under the bloom threshold`);
   }
-  // The old colour, for the record: bright enough to bloom, and salmon on screen.
+  // The old red, for the record: bright enough to bloom, and salmon on screen.
   assert.ok(hue(onScreen([3.2, .16, .12])) > 15);
 });
 
-test('each signal head glows red only while it shows red', () => {
+test('each lamp glows only while it is lit', () => {
   const plan = createMasterPlan(), network = buildNetwork(plan), node = network.nodes.find(n => n.signalized && n.ground);
   const props = createSignalProps(new THREE.Scene(), network, plan);
   const glows = props.root.children.find(m => m.material.map?.name === 'signal-glow');
   const heads = props.root.children.find(m => m.geometry.parameters?.height === 1.02);
-  let red = 0, other = 0;
-  for (const time of [0, 7, 19, 31, 44]) {
+  const lit = { red: 0, amber: 0, green: 0 };
+  let dark = 0;
+  for (const time of [0, 7, 15, 19, 31, 44, 52]) {
     props.update(time, { x: node.x, y: node.y, z: node.z });
-    assert.equal(glows.count, heads.count, 'one glow per head');
-    // Heads come in pairs per approach (overhead and on the pole), in order.
+    assert.equal(glows.count, heads.count * 3, 'one glow per lamp');
+    // Heads come in pairs per approach (overhead and on the pole), in order;
+    // each has red, amber and green.
     const approaches = network.nodesNear(node.x, node.z, 170).filter(n => n.kind === 'junction' && n.ground && n.signalized && Math.abs(n.y - node.y) <= 30)
       .flatMap(n => n.approaches.filter(a => a.arriving.length).map(a => ({ n, a })));
-    for (let i = 0; i < Math.min(glows.count, approaches.length * 2); i++) {
-      const { n, a } = approaches[Math.floor(i / 2)], c = new THREE.Color();
+    for (let i = 0; i < Math.min(glows.count, approaches.length * 6); i++) {
+      const { n, a } = approaches[Math.floor(i / 6)], name = ['red', 'amber', 'green'][i % 3], c = new THREE.Color();
       glows.getColorAt(i, c);
-      if (signalState(n, a, time).color === 'red') { assert.deepEqual(c.toArray(), [...RED_GLOW]); red++; }
-      else { assert.deepEqual(c.toArray(), [0, 0, 0]); other++; }
+      const near = expected => c.toArray().every((v, k) => Math.abs(v - expected[k]) < 1e-6);
+      if (signalState(n, a, time).color === name) { assert.ok(near(LAMP_GLOWS[name]), `${name} glows`); lit[name]++; }
+      else { assert.ok(near([0, 0, 0]), `${name} is dark`); dark++; }
     }
   }
-  assert.ok(red > 10 && other > 10, `${red} red and ${other} other heads checked`);
+  assert.ok(lit.red > 10 && lit.green > 10 && lit.amber > 0 && dark > 30, `lit ${JSON.stringify(lit)}, ${dark} dark`);
   props.dispose();
 });

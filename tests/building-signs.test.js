@@ -44,7 +44,7 @@ test('every generated building and landmark has a type-appropriate sign on its s
       assert.ok(sign.uv.every(Number.isFinite) && sign.uv[0] >= 0 && sign.uv[1] >= 0 && sign.uv[0] + sign.uv[2] <= 1 && sign.uv[1] + sign.uv[3] <= 1);
     }
   }
-  assert.ok(buildings > 12000 && landmarks > 0, 'the audit covers the entire map, including roads between named districts');
+  assert.ok(buildings > 4500 && landmarks > 0, 'the audit covers the entire map, including roads between named districts');
   assert.equal(new Set(world.buildings.map(building => building.id)).size, buildings, 'every deterministic building is audited once');
   assert.deepEqual(types, new Set(Object.keys(BUILDING_SIGN_CATALOG)));
   assert.equal(designs.size, 28, 'districts use the full shared tenant catalog');

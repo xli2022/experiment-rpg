@@ -113,7 +113,8 @@ test('facade variants batch by footprint with one shared material and release th
   const buildings = city.metropolis.area(SHOWCASE.x - 180, SHOWCASE.z - 180, SHOWCASE.x + 180, SHOWCASE.z + 180).flatMap(b => b.buildings);
   const materials = new Set(), tiles = new Set();
   try {
-    for (const p of buildings.slice(0, 40)) {
+    // Freight sheds use the industrial walls instead of a facade.
+    for (const p of buildings.filter(p => !['factory', 'warehouse'].includes(p.type)).slice(0, 40)) {
       const cell = stream.cell(Math.floor(p.x / 96), Math.floor(p.z / 96));
       if (cell.groups[0]) continue;
       stream.build(cell, 0);
