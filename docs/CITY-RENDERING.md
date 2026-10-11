@@ -108,7 +108,7 @@ Polygon collision uses the rendered wall planes rather than the enclosing rectan
 - **Side-core** layouts place it against the back wall when the footprint is under about 15 m across.
 - **Single** layouts are one-storey rooms without a core.
 
-Every wing shares a full side with the landing, so each unit opens straight onto it. Units divide into living rooms, bedrooms and bathrooms. Office floors stay open-plan apart from a meeting room. Ground floors become lobbies or shops wherever a street door opens. Street doors come from `buildingEntrances()`, which matches the glazed and roll-up entrances drawn on the facade. Rooms and units have stable IDs such as `<building>/12B:kitchen`, for attaching residents and evidence later. Plans are cached, average under 1 ms each, and are identical across streaming and reloads.
+Every wing shares a full side with the landing, so each unit opens straight onto it. Units divide into living rooms, bedrooms and bathrooms. Office floors stay open-plan apart from a meeting room. Ground floors become lobbies or shops wherever a street door opens. Street doors come from `buildingEntrances()`, which matches the glazed and roll-up entrances drawn on the facade. Rooms and units have stable IDs such as `<building>/12B:kitchen`, for attaching residents and evidence later. Furniture goes only where the floor round it stays in one piece for a body a little wider than the player, measured from each wall's real face: no nook behind a bed that the player can see but only reach through a gap too narrow to pass. Plans are cached, take about 2 ms each (under 5 ms for the largest), and are identical across streaming and reloads.
 
 `interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, the engine switches to that building's interior context:
 
@@ -116,7 +116,7 @@ Every wing shares a full side with the landing, so each unit opens straight onto
 - Floor slabs are convex polygons, never overhanging the outline. Stair flights are support ramps, 1.8 m rise over 3.6 m run, separated by a solid divider. Partitions, rails and furniture are ordinary solids. Windows are glazed and solid until they break (see [broken windows](#broken-windows)).
 - Entrance steps outside each door are permanent support pieces. Pedestrians and traffic keep using the exterior colliders.
 
-Indoors the player jogs rather than sprints, and the camera moves closer. The camera stays third person everywhere: where a wall or a tight room leaves too little room behind the player, it swings up over their head, as far as the ceiling allows, rather than closing in. Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
+Indoors the player jogs rather than sprints, and the camera moves closer. The camera stays third person everywhere: where a wall or a tight room leaves too little room behind the player, it swings up over their head, as far as the ceiling allows, rather than closing in. Indoors it also keeps to the player's room (see [the follow camera](#the-follow-camera)). Climbing still uses the exterior walls whenever the player stands outside the outline. Rain is hidden while the camera is inside. The lift's floor picker keeps the player's position in the shared shaft and checks that the arrival point is clear. Saves made indoors are validated against the interior and resume in place.
 
 `interiors.js` builds merged geometry for each floor in building-local space:
 
@@ -240,13 +240,19 @@ traffic.update(dt, { player, vehicle: drivenCar, camera, range: 65 });
 
 ## Traversal, quests and saves
 
-Solid walls, piers, railings and furniture use height-aware collision. Sloped road and ramp slabs are support surfaces: they provide walking/vehicle height and ray cover without becoming invisible vertical barriers. The player can walk under a bridge, climb above it, or drive onto it through its ramp. Rooftop equipment and stepped terraces collide at their real elevations. Climbing, jumping, the following camera, car exits and contact shadows use these support heights.
+Solid walls, piers, railings and furniture use height-aware collision. Movement pushes the body out of whatever a short sub-step runs into, along that surface's own normal, so the player slides along rotated walls and round the corners of furniture and crates rather than stopping where neither world axis is free. A body that starts inside something, such as a stopped car on arrival, is never pushed through it. Sloped road and ramp slabs are support surfaces: they provide walking/vehicle height and ray cover without becoming invisible vertical barriers. The player can walk under a bridge, climb above it, or drive onto it through its ramp. Rooftop equipment and stepped terraces collide at their real elevations. Climbing, jumping, the following camera, car exits and contact shadows use these support heights.
 
 Long falls automatically deploy a reusable parachute after a 12 m descent from the airborne peak. `jump.js` preserves the short-jump arc and integrates deployment within the physics step, easing down to a 5 m/s descent over 0.55 seconds. Normal movement steers the player; solid walls and the landing surface still use existing collision. A procedural canopy, suspension lines and a hanging pose accompany a wider follow camera and a height readout. Landing, climbing and relocation clear the canopy; pause and menus preserve it. No fall damage is introduced.
 
 Story contacts, terminals, caches, rest points and station destinations were moved to the new city. Early objectives introduce the Upper Market and skybridge; later objectives take the player to the Citadel, Stacks, Void Port, Foundry and North Ridge. Quest and object IDs remain stable, preserving chapter completion, inventory, dialogue choices and rewards.
 
 Saves carry **`worldRevision: 6`**. Coordinates from earlier city layouts, including the 11 km city, are not reused after compaction: an older save resumes at its remapped rest location while retaining campaign progress. Current-world saves keep their location and elevation when it is still a valid destination. Startup, refuge returns and tram arrivals use collision-checked positions that include acquired cars, leave room to walk, and search nearby on the same floor when occupied. Patrol and district-survey waypoints use the actual terrain or deck elevation.
+
+### The follow camera
+
+`engine/camera-rig.js` frames the player as a rig of smoothed quantities rather than a smoothed position. Yaw and pitch come straight from the player's input. The look height eases over steps and stairs and cuts on a long drop or a lift ride. The shoulder offset stops short of a wall beside the player. Indoor framing blends in over a moment instead of switching at the doorway. Where there is too little room behind the player, the boom lifts over their head and holds that lift until a lower one has stayed roomy for a second, so turning round on a landing doesn't bob it. Each of these moves on a critically damped spring, which starts and stops without a jolt.
+
+Walls are anticipated rather than met. A fatter probe than the one that stops the camera runs along the boom from the player and from where they will be a moment from now, moving and turning as they are. The camera starts closing in as soon as either probe finds a wall. Indoors it also keeps to the player's room, so it has already come through a doorway before the player turns away from it. Only a wall that still arrives unannounced pulls the camera in at once, as far as that wall, so it never sees through walls. Trees, poles, railings and furniture never move the camera.
 
 ## Verification
 
@@ -276,11 +282,14 @@ Interior suites generate plans for buildings across every district. They check:
 - reachability of every room from a street door or stair landing
 - stairs and lifts where required, and doors matching the drawn entrances
 - unique unit IDs, floors above the terrain, and furniture clear of doorways
+- furniture that leaves each floor walkable in one piece, and walks round it that never stick
 
 Physics tests check:
 - that the hull matches the shell for collision and rays outside door gaps
 - a walk from the street up one storey at 20, 30, 60 and 120 FPS with no falls or wall overlaps
 - rays from inside, indoor save validation, and entrance step heights
+- sliding along walls at any angle and round crate corners, and stopping in gaps too narrow to pass
+- a follow camera that slender things never move, that eases through doorways and up stairs without jumping or seeing through walls, and that holds its lift while turning on a cramped landing
 
 The renderer audit checks all 63 remapped world objects with surrounding arrival positions against the generated solid geometry. The road audit samples both road edges and ramp routes against terrain and collision metadata. Current city changes should be checked with `npm test` and `npm run build -- --configLoader runner`, followed by desktop and mobile browser traversal. Development-only `window.__AFTERLIGHT__.snapshot()` reports renderer submissions, streaming residency, blueprint counts, actor activity and CPU update/submission costs. These counters and desktop browser frame rates are not physical-phone GPU measurements.
 

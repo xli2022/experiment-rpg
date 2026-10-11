@@ -84,6 +84,41 @@ export function circleHitsBox(x, z, radius, box) {
   return dx * dx + dz * dz < radius * radius;
 }
 
+// The shortest move, in world space, that takes a circle out of a collider, or
+// null when they don't touch: away from the nearest point of its outline, or
+// out through its nearest face when the centre is inside it.
+export function circlePush(x, z, radius, box) {
+  const p = boxCoordinates(x, z, box), c = Math.cos(box.yaw ?? 0), s = Math.sin(box.yaw ?? 0), skin = 1e-4;
+  let lx, lz;
+  if (box.faces) {
+    let inside = true, best = Infinity, near = null, shallow = -Infinity, face = null;
+    for (const f of box.faces) {
+      const dx = p.x - f.x, dz = p.z - f.z, outward = dx * f.nx + dz * f.nz;
+      if (outward > radius) return null;
+      inside &&= outward <= 0;
+      if (outward > shallow) { shallow = outward; face = f; }
+      const along = clamp(dx * f.nz - dz * f.nx, -f.width / 2, f.width / 2), qx = f.x + f.nz * along, qz = f.z - f.nx * along;
+      const d2 = (p.x - qx) ** 2 + (p.z - qz) ** 2;
+      if (d2 < best) { best = d2; near = { x: qx, z: qz }; }
+    }
+    if (inside) { lx = face.nx * (radius - shallow + skin); lz = face.nz * (radius - shallow + skin); }
+    else {
+      const d = Math.sqrt(best);
+      if (d >= radius) return null;
+      lx = (p.x - near.x) / d * (radius - d + skin); lz = (p.z - near.z) / d * (radius - d + skin);
+    }
+  } else {
+    const qx = clamp(p.x, -p.w / 2, p.w / 2), qz = clamp(p.z, -p.d / 2, p.d / 2), dx = p.x - qx, dz = p.z - qz, d = Math.hypot(dx, dz);
+    if (d >= radius) return null;
+    if (d > 1e-9) { lx = dx / d * (radius - d + skin); lz = dz / d * (radius - d + skin); }
+    else {
+      const ex = p.w / 2 - Math.abs(p.x), ez = p.d / 2 - Math.abs(p.z);
+      if (ex < ez) { lx = Math.sign(p.x || 1) * (ex + radius + skin); lz = 0; } else { lx = 0; lz = Math.sign(p.z || 1) * (ez + radius + skin); }
+    }
+  }
+  return { x: lx * c + lz * s, z: -lx * s + lz * c };
+}
+
 // Resolve movement in small steps so sprinting and fast cars cannot tunnel through walls.
 // `limit` is the world's half-size; positions are clamped inside it.
 export function moveWithCollisions(position, dx, dz, radius, colliders, limit = Infinity) {
@@ -91,20 +126,36 @@ export function moveWithCollisions(position, dx, dz, radius, colliders, limit = 
   // Height is resolved against the actual terrain/road support by the caller.
   // Ramp slabs therefore never act as the tall walls of their bounding boxes.
   colliders = colliders.filter(box => !box.supportOnly && overlapsHeight(box, position.y ?? 0, position.bodyHeight ?? 1.8));
+  // A sub-step never exceeds the radius, so a push always returns the body to
+  // the side of a wall it came from.
   const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / Math.max(radius * 0.65, 0.2)));
   const sx = dx / steps, sz = dz / steps, hits = (x, z) => colliders.some(b => circleHitsBox(x, z, radius, b));
   let collided = false;
-  for (let i = 0; i < steps; i++) {
-    const nx = clamp(position.x + sx, -limit + radius, limit - radius), nz = clamp(position.z + sz, -limit + radius, limit - radius);
-    // The whole sub-step first, so a diagonal walk through a narrow gap (a door
-    // in a rotated building) doesn't drift into a jamb; otherwise slide along
-    // whichever axis is free.
-    if (!hits(nx, nz)) { position.x = nx; position.z = nz; }
-    else {
-      collided = true;
-      if (!hits(nx, position.z)) position.x = nx;
-      if (!hits(position.x, nz)) position.z = nz;
+  // Already inside something (an arrival in a stopped car): never eject the
+  // body through it; only a move that comes clear of everything is allowed.
+  if (hits(position.x, position.z)) {
+    for (let i = 0; i < steps; i++) {
+      const nx = clamp(position.x + sx, -limit + radius, limit - radius), nz = clamp(position.z + sz, -limit + radius, limit - radius);
+      if (!hits(nx, nz)) { position.x = nx; position.z = nz; } else collided = true;
     }
+    return collided;
+  }
+  for (let i = 0; i < steps; i++) {
+    const fromX = position.x, fromZ = position.z;
+    position.x = clamp(position.x + sx, -limit + radius, limit - radius); position.z = clamp(position.z + sz, -limit + radius, limit - radius);
+    // Push out of whatever the step ran into. Each push follows that surface's
+    // own normal, so the body slides along walls, furniture and corners at any
+    // angle rather than stopping where neither world axis is free.
+    for (let pass = 0; pass < 4; pass++) {
+      let pushed = false;
+      for (const box of colliders) {
+        const push = circlePush(position.x, position.z, radius, box);
+        if (push) { position.x += push.x; position.z += push.z; pushed = collided = true; }
+      }
+      if (!pushed) break;
+    }
+    // Wedged between pieces that push it back and forth: stay where it was.
+    if (hits(position.x, position.z)) { position.x = fromX; position.z = fromZ; collided = true; }
     if (Math.abs(position.x) >= limit - radius || Math.abs(position.z) >= limit - radius) collided = true;
   }
   return collided;

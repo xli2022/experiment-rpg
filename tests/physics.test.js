@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { circleHitsBox, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, angleDelta } from '../src/core/physics.js';
+import { circleHitsBox, moveWithCollisions, orientedBox, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, angleDelta } from '../src/core/physics.js';
 import { WORLD_LIMIT } from '../src/world/world-config.js';
 
 const wall = { minX: 2, maxX: 6, minZ: -10, maxZ: 10, maxY: 12 };
@@ -15,6 +15,37 @@ test('diagonal movement slides along walls instead of sticking', () => {
   const p = { x: 1.4, z: 0 };
   moveWithCollisions(p, 1.5, 3, .5, [wall]);
   assert.ok(p.x <= 1.5); assert.ok(Math.abs(p.z - 3) < 1e-7);
+});
+
+test('the body slides along a wall at any angle instead of sticking where neither axis is free', () => {
+  for (const yaw of [.3, .7, -1.1]) {
+    // A long wall through the origin, and a walk pressing into it at 30 degrees.
+    const slab = orientedBox(0, 0, 20, .3, yaw), along = { x: Math.cos(yaw), z: -Math.sin(yaw) }, normal = { x: Math.sin(yaw), z: Math.cos(yaw) };
+    const p = { x: normal.x * .7, z: normal.z * .7 }, push = { x: along.x * .866 - normal.x * .5, z: along.z * .866 - normal.z * .5 };
+    for (let frame = 0; frame < 60; frame++) {
+      moveWithCollisions(p, push.x * .05, push.z * .05, .43, [slab]);
+      assert.ok(!circleHitsBox(p.x, p.z, .43, slab), `yaw ${yaw}: never inside the wall`);
+    }
+    assert.ok(p.x * along.x + p.z * along.z > 60 * .05 * .866 * .95, `yaw ${yaw}: slid along the wall`);
+  }
+});
+
+test('a body steered at the corner of a crate rounds it', () => {
+  for (const yaw of [0, .4]) {
+    const crate = orientedBox(2, 0, 1.2, 1.2, yaw), p = { x: 0, z: .85 };
+    for (let frame = 0; frame < 90; frame++) moveWithCollisions(p, .05, 0, .43, [crate]);
+    assert.ok(p.x > 3.2, `yaw ${yaw}: got past the crate (x ${p.x.toFixed(2)})`);
+    assert.ok(!circleHitsBox(p.x, p.z, .43, crate));
+  }
+});
+
+test('a body squeezed between two pieces stops rather than passing through either', () => {
+  const left = orientedBox(-.7, 2, 1, 1, .3), right = orientedBox(.7, 2, 1, 1, -.3), p = { x: 0, z: 0 };
+  for (let frame = 0; frame < 120; frame++) {
+    moveWithCollisions(p, 0, .05, .43, [left, right]);
+    assert.ok(![left, right].some(b => circleHitsBox(p.x, p.z, .43, b)));
+  }
+  assert.ok(p.z < 2, 'the gap is too narrow to pass');
 });
 
 test('movement respects the city boundary', () => {

@@ -7,6 +7,8 @@ import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } f
 import { interiorPlan, floorPlan, buildingUnits, levelY, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
 import { polygonArea, pointInConvex, polygonFaces, clipConvex, insetConvex } from '../src/world/building-footprints.js';
 import { buildFloor, leafPose } from '../src/world/interiors.js';
+import { interiorColliders, toWorld, toLocal } from '../src/world/interior-physics.js';
+import { circleHitsBox, moveWithCollisions, overlapsHeight, seededRandom } from '../src/core/physics.js';
 
 const metropolis = new VerticalMetropolis();
 const blueprints = [...new Map(DISTRICTS.flatMap(d => metropolis.area(d.x - 70, d.z - 70, d.x + 70, d.z + 70))
@@ -157,4 +159,66 @@ test('furniture stays inside its room and clear of doorways', () => {
       }
     }
   }
+});
+
+test('furniture leaves each floor walkable in one piece, and walks across it never stick', () => {
+  // Every spot a body can stand on is reachable from the rest of the floor, and
+  // a player steering along a path round the furniture keeps moving.
+  const radius = .43, step = .1, random = seededRandom(3);
+  let floors = 0, walks = 0;
+  for (const { plan } of plans.filter((e, i) => i % 3 === 0).slice(0, 60)) for (const level of new Set([0, Math.min(1, plan.levels - 1)])) {
+    const t = plan.templates[Math.min(level, plan.templates.length - 1)], y = levelY(plan, level);
+    const boxes = interiorColliders(plan, level).filter(b => !b.supportOnly && overlapsHeight(b, y, 1.8));
+    const minX = Math.min(...plan.inner.map(q => q.x)), minZ = Math.min(...plan.inner.map(q => q.z));
+    const nx = Math.ceil((Math.max(...plan.inner.map(q => q.x)) - minX) / step), nz = Math.ceil((Math.max(...plan.inner.map(q => q.z)) - minZ) / step);
+    const centre = k => toWorld(plan, minX + (Math.floor(k / nz) + .5) * step, minZ + (k % nz + .5) * step), grid = new Int32Array(nx * nz).fill(-1);
+    const open = t.zones.filter(zn => !['void', 'shaft', 'lift', 'stair'].includes(zn.kind)).map(zn => polygonFaces(zn.polygon));
+    for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) {
+      const x = minX + (i + .5) * step, z = minZ + (j + .5) * step;
+      if (open.some(faces => faces.every(f => (x - f.x) * f.nx + (z - f.z) * f.nz <= 0))) grid[i * nz + j] = 0;
+    }
+    // Each collider blocks the cells it touches, tested only within its bounds.
+    for (const b of boxes) {
+      const corners = [[b.minX, b.minZ], [b.maxX, b.minZ], [b.minX, b.maxZ], [b.maxX, b.maxZ]].map(([x, z]) => toLocal(plan, x, z));
+      const i0 = Math.max(0, Math.floor((Math.min(...corners.map(q => q.x)) - radius - minX) / step)), i1 = Math.min(nx - 1, Math.floor((Math.max(...corners.map(q => q.x)) + radius - minX) / step));
+      const j0 = Math.max(0, Math.floor((Math.min(...corners.map(q => q.z)) - radius - minZ) / step)), j1 = Math.min(nz - 1, Math.floor((Math.max(...corners.map(q => q.z)) + radius - minZ) / step));
+      for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
+        const k = i * nz + j;
+        if (grid[k] !== 0) continue;
+        const w = centre(k);
+        if (circleHitsBox(w.x, w.z, radius, b)) grid[k] = -1;
+      }
+    }
+    const near = k => [k + nz, k - nz, k % nz < nz - 1 ? k + 1 : -1, k % nz > 0 ? k - 1 : -1].filter(n => n >= 0 && n < grid.length);
+    const sizes = [0];
+    for (let k = 0; k < grid.length; k++) if (grid[k] === 0) {
+      const id = sizes.length, queue = [k]; grid[k] = id; sizes.push(0);
+      while (queue.length) { const c = queue.pop(); sizes[id]++; for (const n of near(c)) if (grid[n] === 0) { grid[n] = id; queue.push(n); } }
+    }
+    const main = sizes.indexOf(Math.max(...sizes)), cut = sizes.reduce((sum, n, id) => sum + (id && id !== main ? n : 0), 0);
+    assert.ok(cut * step * step < .5, `${plan.id} level ${level}: ${(cut * step * step).toFixed(2)} m² of floor is walled in by furniture`);
+    floors++;
+    const cells = []; for (let k = 0; k < grid.length; k++) if (grid[k] === main) cells.push(k);
+    for (let n = 0; n < 4; n++) {
+      const from = cells[Math.floor(random() * cells.length)], to = cells[Math.floor(random() * cells.length)], previous = new Int32Array(grid.length).fill(-1), queue = [from];
+      previous[from] = from;
+      for (let head = 0; head < queue.length && previous[to] < 0; head++) for (const m of near(queue[head])) if (grid[m] === main && previous[m] < 0) { previous[m] = queue[head]; queue.push(m); }
+      const path = []; for (let c = to; c !== from; c = previous[c]) path.unshift(centre(c));
+      if (path.length < 10) continue;
+      const body = { ...centre(from), y };
+      let index = 0, still = 0;
+      for (let frame = 0; frame < 60 * 30 && index < path.length; frame++) {
+        // Aim a little ahead along the path, as a player rounding furniture does.
+        while (index < path.length - 1 && Math.hypot(path[index].x - body.x, path[index].z - body.z) < .45) index++;
+        const aim = path[Math.min(path.length - 1, index + 1)], dx = aim.x - body.x, dz = aim.z - body.z, d = Math.hypot(dx, dz);
+        if (index === path.length - 1 && d < .3) break;
+        const x = body.x, z = body.z, v = Math.min(d, 3.2 / 60);
+        moveWithCollisions(body, dx / d * v, dz / d * v, radius, boxes);
+        still = Math.hypot(body.x - x, body.z - z) < v * .1 ? still + 1 : 0;
+        assert.ok(still < 30, `${plan.id} level ${level}: stuck at ${body.x.toFixed(2)}, ${body.z.toFixed(2)}`);
+      }
+      walks++;
+    }
+  }
+  assert.ok(floors > 60 && walks > 150, `${floors} floors, ${walks} walks`);
 });

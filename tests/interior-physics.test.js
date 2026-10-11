@@ -6,7 +6,7 @@ import { WorldStream } from '../src/world/world-stream.js';
 import { AFTERLIGHT_LANDMARKS as LANDMARKS } from '../src/world/landmarks.js';
 import { MASTER_DISTRICTS as DISTRICTS } from '../src/world/master-plan.js';
 import { cachedInteriorPlan, levelY, floorPlan, INTERIOR } from '../src/world/interior-plan.js';
-import { interiorHull, interiorContext, interiorSpatial, toWorld, toLocal } from '../src/world/interior-physics.js';
+import { interiorHull, interiorContext, interiorSpatial, roomEnclosure, toWorld, toLocal } from '../src/world/interior-physics.js';
 import { circleHitsBox, overlapsHeight, rayBoxDistance, rayObstructionDistance, supportHeight, moveWithCollisions } from '../src/core/physics.js';
 import { footVelocity } from '../src/engine/player/locomotion.js';
 import { stepJump } from '../src/engine/player/jump.js';
@@ -85,6 +85,28 @@ function leavesThroughDoor(plan, origin, direction) {
   const p = { x: o.x + d.x * exit, z: o.z + d.z * exit };
   return plan.entrances.some(e => Math.hypot(p.x - e.x, p.z - e.z) < e.width / 2 + .05 && origin.y < plan.floor0 + e.height);
 }
+
+test('the camera\'s enclosure is the room the player stands in, and nothing outside', () => {
+  let rooms = 0;
+  for (const { plan } of samples) {
+    const t = floorPlan(plan, 0).template, y = plan.floor0;
+    for (const zone of t.zones.filter(z => !['void', 'shaft'].includes(z.kind))) {
+      const c = zone.polygon.reduce((a, q) => ({ x: a.x + q.x / zone.polygon.length, z: a.z + q.z / zone.polygon.length }), { x: 0, z: 0 }), here = toWorld(plan, c.x, c.z);
+      const inside = roomEnclosure(interiorContext(plan, here.x, y, here.z));
+      assert.ok(inside(here.x, here.z), `${plan.id} ${zone.kind}`);
+      for (const other of t.zones.filter(z => z.room !== zone.room)) {
+        const o = other.polygon.reduce((a, q) => ({ x: a.x + q.x / other.polygon.length, z: a.z + q.z / other.polygon.length }), { x: 0, z: 0 }), there = toWorld(plan, o.x, o.z);
+        assert.ok(!inside(there.x, there.z), `${plan.id}: ${other.kind} is not part of the ${zone.kind}`);
+      }
+      const e = plan.entrances[0], street = toWorld(plan, e.x + e.nx * 2, e.z + e.nz * 2);
+      assert.ok(!inside(street.x, street.z), 'the street is outside');
+      rooms++;
+    }
+  }
+  assert.ok(rooms > 40);
+  const e = samples[0].plan.entrances[0], street = toWorld(samples[0].plan, e.x + e.nx * 2, e.z + e.nz * 2);
+  assert.equal(roomEnclosure(interiorContext(samples[0].plan, street.x, samples[0].plan.floor0, street.z)), null, 'outdoors there is none');
+});
 
 test('rays from inside a room stop at its walls, floor and ceiling', () => {
   for (const { plan } of samples) {

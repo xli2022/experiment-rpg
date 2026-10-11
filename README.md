@@ -119,6 +119,7 @@ Sources are layered, and each layer imports only those before it: `core` → `wo
 - `src/engine/` — the runtime every mode shares:
   - `game.js` — loop, mode host and picker flow
   - `player/` — characters, locomotion, jumping, climbing and parachute
+  - `camera-rig.js` — the third-person follow camera
   - `hud.js` / `ui.js` / `mode-picker.js` / `map-controls.js` — HUD, map, menus and mode cards
   - `weapon.js` / `effects.js` — the optional weapon, tracers and sparks
   - `input.js`, `audio.js`, `shadows.js`, `contact-shadows.js`, `save.js` and `fullscreen.js`

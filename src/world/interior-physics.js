@@ -1,6 +1,6 @@
 import { orientedBox, boxCoordinates } from '../core/physics.js';
 import { polygonFaces, pointInConvex } from './building-footprints.js';
-import { INTERIOR, levelY, levelAt } from './interior-plan.js';
+import { INTERIOR, levelY, levelAt, floorPlan } from './interior-plan.js';
 
 // Interior collision lives only in an "interior context": while the player is
 // inside (or within reach of) a building, its solid shell collider is swapped
@@ -159,6 +159,27 @@ export function interiorContext(plan, x, y, z) {
   const local = toLocal(plan, x, z);
   if (!pointInConvex(plan.outline, local.x, local.z, -.75)) return null;
   return { id: plan.id, plan, level: levelAt(plan, y), local, inside: pointInConvex(plan.outline, local.x, local.z, 0) };
+}
+
+const enclosures = new Map();
+/**
+ * Whether a world point lies in the room a context is in (every zone of it),
+ * or in the building when the context is in none: the follow camera stays
+ * there. Null outside.
+ */
+export function roomEnclosure(context) {
+  if (!context?.inside) return null;
+  const { plan, level, local } = context, zones = floorPlan(plan, level).template.zones;
+  const here = zones.find(z => pointInConvex(z.polygon, local.x, local.z, -.05)), key = `${plan.id}:${level}:${here?.room ?? ''}`;
+  if (!enclosures.has(key)) {
+    const parts = (here ? zones.filter(z => z.room === here.room).map(z => z.polygon) : [plan.outline]).map(polygonFaces);
+    enclosures.set(key, (x, z) => {
+      const q = toLocal(plan, x, z);
+      return parts.some(faces => faces.every(f => (q.x - f.x) * f.nx + (q.z - f.z) * f.nz <= 1e-9));
+    });
+    while (enclosures.size > 32) enclosures.delete(enclosures.keys().next().value);
+  }
+  return enclosures.get(key);
 }
 
 const colliderCache = new Map();

@@ -6,10 +6,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createWorld } from '../world/index.js';
 import { terrainHeight } from '../world/master-plan.js';
 import { levelY, roomAt } from '../world/interior-plan.js';
-import { toLocal } from '../world/interior-physics.js';
+import { toLocal, roomEnclosure } from '../world/interior-physics.js';
 import { ResolutionGovernor } from '../world/world-stream.js';
 import { createTraffic } from '../traffic/index.js';
-import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayBoxDistance, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from '../core/physics.js';
+import { clamp, damp, angleDelta, moveWithCollisions, carCollider, findExitPosition, stepVehicle, rayObstructionDistance, circleHitsBox, overlapsHeight, supportHeight } from '../core/physics.js';
 import { findSpawnPosition } from '../core/spawn.js';
 import { RENDER_PROFILES } from '../core/quality.js';
 import { Input } from './input.js';
@@ -20,6 +20,7 @@ import { attachMapControls } from './map-controls.js';
 import { modeCards } from './mode-picker.js';
 import { createEffects } from './effects.js';
 import { createWeapon } from './weapon.js';
+import { createCameraRig } from './camera-rig.js';
 import { createShadows } from './shadows.js';
 import { createContactShadows } from './contact-shadows.js';
 import { setupFullscreen } from './fullscreen.js';
@@ -43,7 +44,7 @@ export async function createGame({ canvas, modes }) {
   const state = { started: false, paused: false, mapOpen: false, modal: null, time: 0 };
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
-  const vector = new THREE.Vector3(), direction = new THREE.Vector3(), cameraTarget = new THREE.Vector3(), desiredCamera = new THREE.Vector3();
+  const vector = new THREE.Vector3(), cameraRig = createCameraRig();
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
   let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
@@ -486,38 +487,11 @@ export async function createGame({ canvas, modes }) {
     const aiming = weapon?.enabled && !driving && !player.climb && !player.parachute && input?.aiming;
     const recoil = weapon?.recoil ?? 0;
     // Leave room for the full canopy even in a narrow portrait viewport.
-    const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect));
-    const distance = driving ? 10.4 : aiming ? (indoors ? 2.2 : 3.3) : indoors ? 2.6 : 5.9 + glide * (glideDistance - 5.9);
-    const targetHeight = driving ? 1.45 : 1.35 + glide * 1.25;
-    cameraTarget.set(player.x, player.y + targetHeight, player.z);
-    const shoulder = driving ? .35 : aiming ? (indoors ? .55 : .8) : indoors ? .4 : .68 * (1 - glide * .7);
-    cameraTarget.x += Math.cos(cameraYaw) * shoulder; cameraTarget.z -= Math.sin(cameraYaw) * shoulder;
-    // Prevent the follow camera from clipping through nearby buildings. Where a
-    // wall or a tight room leaves too little room behind the player, the boom
-    // swings up over their head instead of closing in, so the view stays third
-    // person: behind and above the player, never inside them.
-    const pad = indoors ? .12 : .25, margin = indoors ? .2 : .35, closest = indoors ? .35 : .6, room = aiming ? 1.1 : indoors ? 1.5 : 2;
-    const reach = pitch => {
-      direction.set(Math.sin(cameraYaw) * Math.cos(pitch) * distance, Math.sin(pitch) * distance + .5, Math.cos(cameraYaw) * Math.cos(pitch) * distance);
-      const length = direction.length(); direction.normalize();
-      let obstruction = length;
-      for (const box of scenery().along(cameraTarget, direction, length)) {
-        if (box.faces) { obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, box, length)); continue; }
-        obstruction = Math.min(obstruction, rayBoxDistance(cameraTarget, direction, { ...box, w: box.w === undefined ? undefined : box.w + pad * 2, d: box.d === undefined ? undefined : box.d + pad * 2, minX: box.minX - pad, maxX: box.maxX + pad, minZ: box.minZ - pad, maxZ: box.maxZ + pad }, length));
-      }
-      return obstruction < length ? Math.max(closest, obstruction - margin) : length;
-    };
-    let pitch = cameraPitch, clear = reach(pitch), best = { pitch, clear };
-    for (let lift = .25; clear < room && pitch < 1.3; lift += .25) {
-      pitch = Math.min(1.3, cameraPitch + lift); clear = reach(pitch);
-      if (clear > best.clear) best = { pitch, clear };
-    }
-    if (best.pitch !== pitch) clear = reach(best.pitch);
-    desiredCamera.copy(cameraTarget).addScaledVector(direction, clear);
-    if (snap) camera.position.copy(desiredCamera); else camera.position.lerp(desiredCamera, 1 - Math.exp(-12 * dt));
-    const groundCorrection = Math.max(0, terrainHeight(camera.position.x, camera.position.z) + .55 - camera.position.y);
-    camera.position.y += groundCorrection;
-    camera.lookAt(cameraTarget.x, cameraTarget.y + groundCorrection + recoil * .045, cameraTarget.z);
+    const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect)) || 9.4;
+    cameraRig.update({ dt, snap, focus: player, yaw: cameraYaw, pitch: cameraPitch, indoors, inside: indoors ? roomEnclosure(player.interior) : null, aiming, driving: !!driving, glide, glideDistance,
+      boxes: scenery().near(player.x, player.z, 12 + glide * 4), ground: terrainHeight });
+    camera.position.copy(cameraRig.position);
+    camera.lookAt(cameraRig.look.x, cameraRig.look.y + recoil * .045, cameraRig.look.z);
     camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();
     camera.updateMatrixWorld();
     character.root.visible = !driving;

@@ -396,7 +396,82 @@ function rectsOverlap(a, b, gap) {
   return true;
 }
 
-// Block furniture against real walls, keeping every doorway and its approach clear.
+// The floor left free round a zone's furniture, for a body just wider than
+// the player, stays in one piece: no nook behind a bed that the player can
+// see but only reach through a gap too narrow to pass. Clearance is measured
+// from each edge's real wall face: the hull's lies on the zone's edge, a
+// partition's or core wall's half its thickness inside it.
+const WALK_RADIUS = .45;
+function wallFaces(zone, walls) {
+  return polygonFaces(zone.polygon).map(f => ({ ...f, inset: walls.filter(w => w.zones.includes(zone.id) &&
+    [w.a, w.b].every(p => Math.abs((p.x - f.x) * f.nx + (p.z - f.z) * f.nz) < 1e-3)).reduce((n, w) => Math.max(n, (w.kind === 'core' ? .2 : INTERIOR.partition) / 2), 0) }));
+}
+// Inside a zone, `clearance` metres clear of its edges' wall faces.
+const inZone = (faces, x, z, clearance = 0) => faces.every(f => (x - f.x) * f.nx + (z - f.z) * f.nz <= -(clearance + f.inset) + 1e-9);
+// Connected free cells from `starts` within `free` (1 = free), marked 2.
+function flood(free, nx, nz, starts) {
+  const queue = starts.filter(k => free[k] === 1);
+  for (const k of queue) free[k] = 2;
+  let reached = queue.length;
+  while (queue.length) {
+    const k = queue.pop(), i = Math.floor(k / nz), j = k % nz;
+    for (const [a, b] of [[i + 1, j], [i - 1, j], [i, j + 1], [i, j - 1]]) {
+      const n = a * nz + b;
+      if (a >= 0 && b >= 0 && a < nx && b < nz && free[n] === 1) { free[n] = 2; reached++; queue.push(n); }
+    }
+  }
+  return reached;
+}
+// The zone's walkable cells, and those of them standing just inside its
+// doorways. Only floor the doorways reach in the empty room counts.
+function floorGrid(zone, faces, doorways) {
+  const b = bounds(zone.polygon), cell = .2;
+  const nx = Math.ceil((b.maxX - b.minX) / cell), nz = Math.ceil((b.maxZ - b.minZ) / cell), inside = new Uint8Array(nx * nz);
+  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) inside[i * nz + j] = +inZone(faces, b.minX + (i + .5) * cell, b.minZ + (j + .5) * cell, WALK_RADIUS);
+  const cellAt = p => {
+    const i = Math.floor((p.x - b.minX) / cell), j = Math.floor((p.z - b.minZ) / cell);
+    let best = -1, distance = Infinity;
+    for (let a = i - 1; a <= i + 1; a++) for (let c = j - 1; c <= j + 1; c++) {
+      if (a < 0 || c < 0 || a >= nx || c >= nz || !inside[a * nz + c]) continue;
+      const d = Math.hypot(b.minX + (a + .5) * cell - p.x, b.minZ + (c + .5) * cell - p.z);
+      if (d < distance) { distance = d; best = a * nz + c; }
+    }
+    return best;
+  };
+  const seeds = doorways.map(cellAt).filter(k => k >= 0);
+  const base = inside.slice();
+  flood(base, nx, nz, seeds.length ? seeds : [inside.indexOf(1)].filter(k => k >= 0));
+  for (let k = 0; k < base.length; k++) base[k] = base[k] === 2 ? 1 : 0;
+  return { minX: b.minX, minZ: b.minZ, cell, nx, nz, inside: base, seeds };
+}
+function walkable(faces, grid, placed, f) {
+  // A piece a body's width clear of every other piece, and of the walls beside
+  // and in front of it, can't cut anything off. Only closer ones are checked.
+  // (A wall piece's back corners lie beyond its own wall.)
+  const reach = 2 * WALK_RADIUS;
+  const nearWall = rectCorners({ ...f, w: f.w + 2 * reach, d: f.d + 2 * reach }).some((p, k) => !(f.mode === 'wall' && k < 2) && !inZone(faces, p.x, p.z, -1e-9));
+  if (!nearWall && !placed.some(o => rectsOverlap(f, o, 2 * reach))) return true;
+  const { minX, minZ, cell, nx, nz, inside, seeds } = grid(), free = inside.slice();
+  // Stamp each piece, grown by the body's radius, over the cells it covers.
+  for (const o of [...placed, f]) {
+    const r = Math.hypot(o.w, o.d) / 2 + WALK_RADIUS;
+    for (let i = Math.max(0, Math.floor((o.x - r - minX) / cell)); i < Math.min(nx, Math.ceil((o.x + r - minX) / cell)); i++) {
+      for (let j = Math.max(0, Math.floor((o.z - r - minZ) / cell)); j < Math.min(nz, Math.ceil((o.z + r - minZ) / cell)); j++) {
+        if (free[i * nz + j] && rectDistance(o, minX + (i + .5) * cell, minZ + (j + .5) * cell) < WALK_RADIUS) free[i * nz + j] = 0;
+      }
+    }
+  }
+  // Every doorway stays open, and one of them reaches all the floor that is
+  // left, the other doorways included.
+  if (seeds.some(k => !free[k])) return false;
+  let count = 0;
+  for (let k = 0; k < free.length; k++) count += free[k];
+  if (count < 2) return true;
+  return flood(free, nx, nz, [seeds.length ? seeds[0] : free.indexOf(1)]) === count;
+}
+
+// Block furniture against real walls, keeping every doorway and its approach
+// clear and the floor round it walkable.
 function furnish(plan, template, random) {
   const furniture = [], doorPoints = template.doors.map(d => ({ x: d.x, z: d.z }));
   for (const seg of template.perimeter) for (const o of seg.openings) if (o.entrance) {
@@ -415,12 +490,19 @@ function furnish(plan, template, random) {
     for (const w of template.walls) if (w.zones.includes(zone.id)) {
       const mid = { x: (w.a.x + w.b.x) / 2, z: (w.a.z + w.b.z) / 2 }, length = Math.hypot(w.b.x - w.a.x, w.b.z - w.a.z);
       const nx = -(w.b.z - w.a.z) / length, nz = (w.b.x - w.a.x) / length, probe = pointInConvex(zone.polygon, mid.x + nx * .05, mid.z + nz * .05);
-      segments.push(probe ? { a: w.a, b: w.b, offset: INTERIOR.partition / 2 + .04 } : { a: w.b, b: w.a, offset: INTERIOR.partition / 2 + .04 });
+      const offset = (w.kind === 'core' ? .2 : INTERIOR.partition) / 2 + .04;
+      segments.push(probe ? { a: w.a, b: w.b, offset } : { a: w.b, b: w.a, offset });
     }
-    const placed = [];
-    const ok = (f, gap = .08) => rectCorners(f).every(p => pointInConvex(zone.polygon, p.x, p.z, .02)) &&
+    let cells = null;
+    const faces = wallFaces(zone, template.walls), placed = [];
+    // Just inside each doorway on this zone's edges.
+    const doorways = doorPoints.flatMap(p => faces.filter(f => Math.abs((p.x - f.x) * f.nx + (p.z - f.z) * f.nz) < .15 && Math.abs((p.x - f.x) * f.nz - (p.z - f.z) * f.nx) <= f.width / 2)
+      .map(f => ({ x: p.x - f.nx * (f.inset + WALK_RADIUS + .05), z: p.z - f.nz * (f.inset + WALK_RADIUS + .05) })));
+    const grid = () => cells ??= floorGrid(zone, faces, doorways);
+    const ok = (f, gap = .08) => rectCorners(f).every(p => inZone(faces, p.x, p.z, .02)) &&
       !placed.some(o => rectsOverlap(f, o, gap)) &&
-      doorPoints.every(p => rectDistance(f, p.x, p.z) > INTERIOR.door.clearance + (f.mode === 'free' || f.mode === 'grid' ? .5 : 0));
+      doorPoints.every(p => rectDistance(f, p.x, p.z) > INTERIOR.door.clearance + (f.mode === 'free' || f.mode === 'grid' ? .5 : 0)) &&
+      walkable(faces, grid, placed, f);
     for (const [item, w, d, h, mode = 'wall'] of list) {
       if (mode === 'wall') {
         const order = segments.map((s, i) => ({ s, k: random() + i * 1e-3 })).sort((a, b) => a.k - b.k).map(o => o.s);
@@ -444,7 +526,7 @@ function furnish(plan, template, random) {
         if (mode === 'grid') for (let x = b.minX + 1.4 + w / 2; x <= b.maxX - 1.4 - w / 2; x += w + aisle) for (let z = b.minZ + 1.4 + d / 2; z <= b.maxZ - 1.4 - d / 2; z += d + aisle) candidates.push({ x, z });
         for (const c of candidates.slice(0, 24)) {
           const f = { item, mode, w, d, h, zone: zone.id, x: c.x, z: c.z, yaw: 0 };
-          if (rectCorners(f).every(p => pointInConvex(zone.polygon, p.x, p.z, mode === 'grid' ? 1 : .9)) && ok(f, .9)) placed.push(f);
+          if (rectCorners(f).every(p => inZone(faces, p.x, p.z, mode === 'grid' ? 1 : .9)) && ok(f, .9)) placed.push(f);
         }
       }
     }
