@@ -488,7 +488,7 @@ export async function createGame({ canvas, modes }) {
     const recoil = weapon?.recoil ?? 0, floor = driving ? player.y : Math.min(player.y, player.groundY ?? player.y);
     // Leave room for the full canopy even in a narrow portrait viewport.
     const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect)) || 9.4;
-    cameraRig.update({ dt, snap, player, yaw: cameraYaw, pitch: cameraPitch, aiming, driving: !!driving, glide, glideDistance, floor, ground: terrainHeight });
+    cameraRig.update({ dt, snap, player, yaw: cameraYaw, pitch: cameraPitch, aiming, driving: !!driving, glide, glideDistance, aspect: camera.aspect || 16 / 9, floor, ground: terrainHeight });
     // The camera keeps its distance; whatever stands between it and the player is cut away.
     world.setCutaway(cameraRig.position, cameraRig.focus, floor);
     camera.position.copy(cameraRig.position);
