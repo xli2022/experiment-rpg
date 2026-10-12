@@ -46,6 +46,7 @@ export async function createGame({ canvas, modes }) {
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, vault: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
   const vector = new THREE.Vector3(), cameraRig = createCameraRig(), cutawayFader = createCutawayFader();
+  let cutawaySurfaces = [];
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
   let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
@@ -512,7 +513,8 @@ export async function createGame({ canvas, modes }) {
     const body = driving ?? player, targets = cutawayTargets(cameraRig.position, body, driving ? CUTAWAY.drive : glide > .5 ? CUTAWAY.glide : CUTAWAY.foot);
     const midX = (body.x + cameraRig.position.x) / 2, midZ = (body.z + cameraRig.position.z) / 2, reach = cameraRig.position.distanceTo(vector.set(body.x, body.y, body.z)) / 2 + 3;
     const blocking = blockingSurfaces(cameraRig.position, targets, scenery().near(midX, midZ, reach).concat(world.interiors.doorLeaves(midX, midZ, reach)));
-    world.setCutaway({ surfaces: cutawayFader.update(blocking, targets.length, snap ? 1 : dt), floor });
+    cutawaySurfaces = cutawayFader.update(blocking, snap ? 1 : dt);
+    world.setCutaway({ surfaces: cutawaySurfaces, floor });
     camera.position.copy(cameraRig.position);
     camera.lookAt(cameraRig.look.x, cameraRig.look.y + recoil * .045, cameraRig.look.z);
     camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();
@@ -586,6 +588,7 @@ export async function createGame({ canvas, modes }) {
       city: { span: world.limit * 2, areaKm2: (world.limit * 2 / 1000) ** 2, districts: world.districts.length, roads: world.plan.roads.length, vertical: true },
       character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: traffic.pedestrians.count, crowdDrawCalls: traffic.pedestrians.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
       camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
+      cutaway: cutawaySurfaces.map(s => ({ id: s.box.id, fade: s.fade })),
       cars: owned.map(c => ({ x: c.x, y: c.y, z: c.z, trafficId: c.trafficId })),
       interior: player.interior && { building: player.interior.id, level: player.interior.level, levels: player.interior.plan.levels, inside: player.interior.inside, layout: player.interior.plan.layout,
         room: player.interior.inside ? roomAt(player.interior.plan, player.interior.level, player.interior.local.x, player.interior.local.z)?.id ?? null : null, lift: nearLift() },

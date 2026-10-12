@@ -3,14 +3,19 @@ import { boxContainsPoint, rayBoxDistance } from '../core/physics.js';
 
 // The follow camera keeps its distance everywhere, indoors and out. Rather
 // than closing in when walls, floors or furniture come between it and the
-// player, it fades them, whole, and only those really in the way:
+// player, it fades them, whole, and only as far as they are in the way:
 //
-// - Each frame, sight lines run from the camera to points spread over the
-//   player's body. A building volume, wall, slab, stair or piece of furniture
-//   fades once it hides a good share of them (a quarter), and stays faded
-//   until it hides less; one that only clips an elbow or a foot stays solid.
-// - A surface fades as a whole, never in a hole round the player. It eases
-//   out over a fraction of a second and back in when it no longer blocks.
+// - Each frame, 64 sight lines run from the camera to points scattered evenly
+//   over the player's body, in a pattern with no rows or columns. How much of
+//   the player a building volume, wall, slab, stair or piece of furniture
+//   hides is the share of them it cuts. An edge sweeping across the body
+//   crosses the lines one at a time, so that share changes in small steps as
+//   the camera moves, never by a whole row at once.
+// - How much a surface fades follows how much it hides: nothing for one that
+//   only clips an elbow or a foot, fully for one that hides a good share of
+//   the body, and in between in between. The fade eases toward that, so a
+//   surface never snaps or flickers between states.
+// - A surface fades as a whole, never in a hole round the player.
 // - The floor the player stands on, and anything at its level, stays solid.
 // - A building shell the camera is inside is skipped: its facade faces away
 //   and is not drawn from there anyway.
@@ -21,70 +26,84 @@ import { boxContainsPoint, rayBoxDistance } from '../core/physics.js';
 
 export const CUTAWAY = Object.freeze({
   slots: 8, // surfaces faded at once
-  ghost: 0, // how much of a faded surface still shows; any more leaves a screen-door pattern over the view
-  enough: .25, keep: .15, // share of the sight lines a surface must hide to fade, and to stay faded
+  ghost: 0, // how much of a fully faded surface still shows; any more leaves a screen-door pattern over the view
+  lines: 64, // sight lines over the body
+  from: .1, to: .3, // share of the body a surface must hide to start fading, and to fade fully
+  rate: 12, // how quickly a fade follows, per second
   clear: .3, // sight lines stop this short of the body, so what it touches doesn't count
-  fadeIn: .2, fadeOut: .3, // seconds
   pad: .01, skin: .05, // a fading box takes in surfaces this close outside it; a building's outer walls, their facade too
   floor: .05,
-  // Points over the body the camera should see, as rows of heights above the
-  // feet and offsets across the view; per framing.
-  foot: Object.freeze({ heights: [.6, 1, 1.35, 1.7], across: [-.22, 0, .22] }),
-  drive: Object.freeze({ heights: [.5, 1, 1.4], across: [-.85, 0, .85] }),
-  glide: Object.freeze({ heights: [.6, 1.2, 1.7, 4.1], across: [-2.2, 0, 2.2] }),
+  // The part of the body the camera should see, as a width across the view
+  // and heights above the feet; per framing.
+  foot: Object.freeze({ width: .5, bottom: .45, top: 1.85 }),
+  drive: Object.freeze({ width: 1.9, bottom: .3, top: 1.5 }),
+  glide: Object.freeze({ width: 4.6, bottom: .4, top: 4.5 }),
 });
 
+// An even scatter over the unit square with no rows or columns (the R2 sequence).
+const SCATTER = Array.from({ length: CUTAWAY.lines }, (_, i) => [(.5 + i * .7548776662466927) % 1, (.5 + i * .5698402909980532) % 1]);
 /** The points of a body standing at `base` as seen from `eye`, for a framing from CUTAWAY. */
 export function cutawayTargets(eye, base, framing = CUTAWAY.foot) {
   const dx = base.x - eye.x, dz = base.z - eye.z, l = Math.hypot(dx, dz) || 1, sx = -dz / l, sz = dx / l;
-  return framing.heights.flatMap(h => framing.across.map(a => ({ x: base.x + sx * a, y: base.y + h, z: base.z + sz * a })));
+  return SCATTER.map(([u, v]) => {
+    const across = (u - .5) * framing.width;
+    return { x: base.x + sx * across, y: base.y + framing.bottom + v * (framing.top - framing.bottom), z: base.z + sz * across };
+  });
 }
 
 // Only building shells and interiors use the faded materials.
 const fadeable = box => !!box.interior || !!box.id?.startsWith('building:');
 const within = (box, p) => p.y >= (box.minY ?? -Infinity) && p.y <= (box.maxY ?? Infinity) && boxContainsPoint(p.x, p.z, box);
 /**
- * How many of the sight lines from `eye` to `targets` each of `boxes` cuts,
- * as a Map from box to count; boxes that cut none are left out.
+ * How much of the body each of `boxes` hides from `eye`, as a Map from box to
+ * the share of the sight lines to `targets` it cuts. Boxes that hide nothing
+ * are left out.
  */
 export function blockingSurfaces(eye, targets, boxes) {
-  const counts = new Map(), rays = targets.map(t => {
-    const x = t.x - eye.x, y = t.y - eye.y, z = t.z - eye.z, length = Math.hypot(x, y, z) || 1;
-    return { direction: { x: x / length, y: y / length, z: z / length }, reach: length - CUTAWAY.clear };
+  const shares = new Map(), rays = targets.map(t => {
+    const x = t.x - eye.x, y = t.y - eye.y, z = t.z - eye.z, length = Math.hypot(x, y, z) || 1, reach = Math.max(0, length - CUTAWAY.clear);
+    const end = { x: eye.x + x / length * reach, y: eye.y + y / length * reach, z: eye.z + z / length * reach };
+    return { direction: { x: x / length, y: y / length, z: z / length }, reach,
+      minX: Math.min(eye.x, end.x), maxX: Math.max(eye.x, end.x), minY: Math.min(eye.y, end.y), maxY: Math.max(eye.y, end.y), minZ: Math.min(eye.z, end.z), maxZ: Math.max(eye.z, end.z) };
   });
+  const all = rays.reduce((a, r) => ({ minX: Math.min(a.minX, r.minX), maxX: Math.max(a.maxX, r.maxX), minY: Math.min(a.minY, r.minY), maxY: Math.max(a.maxY, r.maxY), minZ: Math.min(a.minZ, r.minZ), maxZ: Math.max(a.maxZ, r.maxZ) }),
+    { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity });
+  const apart = (r, box) => r.maxX < box.minX || r.minX > box.maxX || r.maxZ < box.minZ || r.minZ > box.maxZ || r.maxY < (box.minY ?? -Infinity) || r.minY > (box.maxY ?? Infinity);
   for (const collider of boxes) {
     if (!fadeable(collider)) continue;
     // Some pieces are drawn taller than they collide (a counter's wall cupboard).
-    const box = collider.viewMaxY ? { ...collider, maxY: collider.viewMaxY } : collider, inside = within(box, eye);
+    const box = collider.viewMaxY ? { ...collider, maxY: collider.viewMaxY } : collider;
+    if (apart(all, box)) continue;
+    const inside = within(box, eye);
     if (inside && !box.interior) continue;
-    let count = 0;
-    for (const { direction, reach } of rays) if (reach > 0 && (inside || rayBoxDistance(eye, direction, box, reach) < reach)) count++;
-    if (count) counts.set(collider, count);
+    let hidden = 0;
+    for (const ray of rays) if (ray.reach > 0 && (inside || (!apart(ray, box) && rayBoxDistance(eye, ray.direction, box, ray.reach) < ray.reach))) hidden++;
+    if (hidden) shares.set(collider, hidden / rays.length);
   }
-  return counts;
+  return shares;
 }
 
+const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 // Ids are stable while a surface is rebuilt (a window breaks) or moves (a door swings).
 const keyOf = box => box.id ?? `${box.x ?? box.minX}|${box.z ?? box.minZ}|${box.minY}`;
 /**
- * Eases surfaces in and out of the fade. `update(counts, total, dt)` takes
- * blockingSurfaces' counts out of `total` sight lines and returns the
- * surfaces to fade, as [{ box, fade }], most faded first.
+ * Eases surfaces in and out of the fade. `update(shares, dt)` takes
+ * blockingSurfaces' shares and returns the surfaces to fade, as
+ * [{ box, fade }], most faded first. A long `dt` (a cut) settles at once.
  */
 export function createCutawayFader() {
   const surfaces = new Map();
   return {
-    update(counts, total, dt) {
-      const seen = new Map([...counts].map(([box, count]) => [keyOf(box), { box, share: count / Math.max(1, total) }]));
-      for (const [key, { box }] of seen) if (!surfaces.has(key)) surfaces.set(key, { box, fade: 0, on: false });
+    update(shares, dt) {
+      const seen = new Map([...shares].map(([box, share]) => [keyOf(box), { box, share }])), follow = 1 - Math.exp(-CUTAWAY.rate * dt);
+      for (const [key, { box }] of seen) if (!surfaces.has(key)) surfaces.set(key, { box, fade: 0 });
       for (const [key, surface] of surfaces) {
-        const share = seen.get(key)?.share ?? 0;
+        const target = smoothstep(CUTAWAY.from, CUTAWAY.to, seen.get(key)?.share ?? 0);
         if (seen.has(key)) surface.box = seen.get(key).box;
-        surface.on = share >= (surface.on ? CUTAWAY.keep : CUTAWAY.enough);
-        surface.fade = surface.on ? Math.min(1, surface.fade + dt / CUTAWAY.fadeIn) : Math.max(0, surface.fade - dt / CUTAWAY.fadeOut);
-        if (!surface.on && surface.fade === 0) surfaces.delete(key);
+        surface.fade += (target - surface.fade) * follow;
+        if (target === 0 && surface.fade < .004) surfaces.delete(key);
       }
-      return [...surfaces.values()].filter(s => s.fade > 0).sort((a, b) => b.fade - a.fade).slice(0, CUTAWAY.slots).map(({ box, fade }) => ({ box, fade }));
+      return [...surfaces.values()].filter(s => s.fade >= .004).sort((a, b) => b.fade - a.fade).slice(0, CUTAWAY.slots).map(({ box, fade }) => ({ box, fade }));
     },
     clear() { surfaces.clear(); },
   };
@@ -127,7 +146,6 @@ export function setViewCutaway(uniforms, view) {
   });
 }
 
-const smoothstep = (a, b, x) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 /**
  * How much of a surface still shows at a world point, from 1 (solid) down to
  * the ghost: the shaders' own sum, for checks and tests.
@@ -160,14 +178,13 @@ export function patchViewCutaway(material, uniforms) {
     shader.fragmentShader = `varying vec3 vCutaway;
       uniform vec4 cutawayState;
       uniform vec4 cutawaySurfaces[${slots * 3}];
-      // A 4 × 4 ordered-dither threshold for this pixel, in (0, 1).
+      // An 8 × 8 ordered-dither (Bayer) threshold for this pixel, in (0, 1):
+      // 64 steps, so a fade moves through the surface finely.
       float cutawayThreshold(vec2 pixel) {
-        vec2 q = mod(floor(pixel), 4.0);
-        float m = q.y < 1.0 ? (q.x < 1.0 ? 0.0 : q.x < 2.0 ? 8.0 : q.x < 3.0 ? 2.0 : 10.0)
-          : q.y < 2.0 ? (q.x < 1.0 ? 12.0 : q.x < 2.0 ? 4.0 : q.x < 3.0 ? 14.0 : 6.0)
-          : q.y < 3.0 ? (q.x < 1.0 ? 3.0 : q.x < 2.0 ? 11.0 : q.x < 3.0 ? 1.0 : 9.0)
-          : (q.x < 1.0 ? 15.0 : q.x < 2.0 ? 7.0 : q.x < 3.0 ? 13.0 : 5.0);
-        return (m + 0.5) / 16.0;
+        ivec2 q = ivec2(mod(floor(pixel), 8.0));
+        int x = q.x ^ q.y, y = q.y;
+        int m = ((x & 1) << 5) | ((y & 1) << 4) | ((x & 2) << 2) | ((y & 2) << 1) | ((x & 4) >> 1) | ((y & 4) >> 2);
+        return (float(m) + 0.5) / 64.0;
       }
       ${shader.fragmentShader}`.replace('void main() {', `void main() {
       if (cutawayState.y > .5) {
@@ -185,6 +202,6 @@ export function patchViewCutaway(material, uniforms) {
         if (1.0 - cutawayFade * ${number(1 - ghost)} < cutawayThreshold(gl_FragCoord.xy)) discard;
       }`);
   };
-  material.customProgramCacheKey = () => `${key}|view-cutaway-v4`;
+  material.customProgramCacheKey = () => `${key}|view-cutaway-v5`;
   return material;
 }
