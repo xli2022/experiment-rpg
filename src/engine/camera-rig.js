@@ -2,7 +2,7 @@ import * as THREE from 'three';
 
 // The third-person follow camera. It keeps the same distance behind the player
 // everywhere, indoors and out, and never closes in for walls or rooms: the
-// world cuts away whatever comes between it and the player instead (see
+// world fades whatever comes between it and the player instead (see
 // world/view-cutaway.js). Yaw and pitch come straight from the player's input.
 // The look height eases over steps and stairs, and changes of framing (aiming,
 // driving, gliding) move on critically damped springs, so none starts or stops
@@ -35,12 +35,11 @@ export const CAMERA_FRAMES = Object.freeze({
 });
 
 export function createCameraRig() {
-  // `focus` is the player at the look height, where the world's cutaway aims.
-  const target = new THREE.Vector3(), position = new THREE.Vector3(), look = new THREE.Vector3(), focus = new THREE.Vector3(), boom = new THREE.Vector3();
+  const target = new THREE.Vector3(), position = new THREE.Vector3(), look = new THREE.Vector3(), boom = new THREE.Vector3();
   const state = { ready: false, x: 0, z: 0, y: 0, distance: 0, shoulder: 0, rise: 0 };
 
   return {
-    target, position, look, focus, state,
+    target, position, look, state,
     /**
      * `player` is the player's (or car's) position; `floor` the height they
      * stand on; `ground(x, z)` the terrain height; `aspect` the screen's width
@@ -67,7 +66,6 @@ export function createCameraRig() {
       for (const [key, time] of [['distance', .4], ['shoulder', .25], ['rise', .25]]) {
         if (snap) settle(state, key, frame[key]); else spring(state, key, frame[key], time, dt);
       }
-      focus.set(player.x, state.y, player.z);
       target.set(player.x + Math.cos(yaw) * state.shoulder, state.y, player.z - Math.sin(yaw) * state.shoulder);
       boom.set(Math.sin(yaw) * Math.cos(pitch) * state.distance, Math.sin(pitch) * state.distance + state.rise, Math.cos(yaw) * Math.cos(pitch) * state.distance);
       position.copy(target).add(boom);

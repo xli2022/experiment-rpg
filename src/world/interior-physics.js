@@ -128,7 +128,9 @@ export function floorColliders(plan, level) {
     if (level === 0) boxes.push(localBox(plan, lane(s.down), s.near - .05, width, .1, 0, y, y + INTERIOR.door.height, extra('closet')));
   }
   for (const f of template.furniture) {
-    boxes.push(localBox(plan, f.x, f.z, f.w, f.d, f.yaw, y, y + f.h, { id: `${tag}:${f.id}`, interior: plan.id, climbable: false, furniture: f.item }));
+    // The camera's fade sees the whole piece; collisions only its body.
+    const drawn = f.item === 'counter' ? INTERIOR.cupboard.y + INTERIOR.cupboard.h / 2 : f.h;
+    boxes.push(localBox(plan, f.x, f.z, f.w, f.d, f.yaw, y, y + f.h, { id: `${tag}:${f.id}`, interior: plan.id, climbable: false, furniture: f.item, viewMaxY: y + Math.max(f.h, drawn) }));
   }
   return boxes;
 }

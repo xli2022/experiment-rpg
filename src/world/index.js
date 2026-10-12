@@ -6,6 +6,7 @@ import { AFTERLIGHT_LANDMARKS } from './landmarks.js';
 import { MASTER_DISTRICTS, districtAt, terrainHeight, isWater, SHOWCASE } from './master-plan.js';
 import { WORLD_LIMIT, CHUNK_SIZE } from './world-config.js';
 import { setViewCutaway } from './view-cutaway.js';
+export { CUTAWAY, cutawayTargets, blockingSurfaces, createCutawayFader } from './view-cutaway.js';
 
 export { AFTERLIGHT_LANDMARKS, landmarkById, roadside } from './landmarks.js';
 export { WORLD_LIMIT, CHUNK_SIZE } from './world-config.js';
@@ -43,11 +44,12 @@ export function createWorld({ scene, renderer = null, quality = 'high', landmark
       stream.update(camera, focus, now, force);
     },
     /**
-     * See through whatever stands between the camera at `eye` and the player
-     * at `focus` (at the camera's look height), keeping the floor at `floor`
-     * and everything below it. Pass no `eye` to turn it off.
+     * Fade the surfaces that stand between the camera and the player:
+     * `{ surfaces, floor }`, with `surfaces` as [{ box, fade }] (colliders, as
+     * createCutawayFader returns them) and everything at or below `floor`
+     * kept solid. Pass null to fade nothing.
      */
-    setCutaway(eye, focus, floor) { setViewCutaway(city.viewCutaway, eye, focus, floor); },
+    setCutaway(view) { setViewCutaway(city.viewCutaway, view); },
     setQuality(value, { far } = {}) { stream.setQuality(value); atmosphere.setQuality(value, far); },
     snapshot: () => ({ streaming: { ...stream.stats }, blueprints: city.metropolis.blocks.size, interiors: interiors.snapshot() }),
     dispose() { interiors.dispose(); atmosphere.dispose(); stream.dispose(); city.dispose(); },

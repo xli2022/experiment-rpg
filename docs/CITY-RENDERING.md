@@ -214,7 +214,7 @@ Sources are layered: `core` ← `world` ← `traffic` ← `engine` ← `modes`. 
 import { createWorld } from './src/world/index.js';
 const world = createWorld({ scene, renderer, quality: 'high' });   // landmarks default to AFTERLIGHT_LANDMARKS
 world.update({ camera, focus: player, interior, now, dt });       // streaming, weather, interiors
-world.setCutaway(camera.position, playerAtEyeHeight, floorY);     // fade what hides the player
+world.setCutaway({ surfaces: fader.update(blockingSurfaces(eye, cutawayTargets(eye, feet), colliders), 12, dt), floor }); // fade what hides the player
 ```
 
 `createWorld` returns:
@@ -224,7 +224,8 @@ world.setCutaway(camera.position, playerAtEyeHeight, floorY);     // fade what h
 - `spatial`, `spatialFor(interiorContext)`, `interiorContextAt(x, y, z)` and `buildingsNear(x, z, r)`
 - `landmarks`, `landmark(id)` and `spawn`
 - `mapView`, `atmosphere`, `interiors` and `stream`
-- `setCutaway(eye, focus, floor)`, `setQuality(level, { far })`, `snapshot()` and `dispose()`
+- `setCutaway({ surfaces, floor })`, `setQuality(level, { far })`, `snapshot()` and `dispose()`
+- `CUTAWAY`, `cutawayTargets`, `blockingSurfaces` and `createCutawayFader`, to choose what `setCutaway` fades
 
 Landmarks are fixed, reserved sites such as stations, decks and caches. They keep the city identical in every mode; a mode attaches its own meaning to their IDs.
 
@@ -259,7 +260,9 @@ Saves carry **`worldRevision: 7`**. Coordinates from earlier city layouts are no
 
 `engine/camera-rig.js` keeps the camera the same distance behind the player everywhere, indoors and out, and never closes in further. On foot it sits 2.2 m back over the right shoulder, pivoting 2.1 m above the feet with no extra downward tilt, so at the default view the frame cuts the character off at the knees and the head sits just below the middle. On a portrait screen the shoulder offset shrinks so the whole body stays in view. Aiming moves in to 1.9 m. Driving (10.4 m) and a full canopy (9.4 m or more, enough to fit it on a narrow screen) keep their wide views, and the boom eases between framings. Yaw and pitch come straight from the player's input. The look height eases over steps and stairs and cuts on a long drop or a lift ride. Aiming, driving and gliding change the framing on critically damped springs, which start and stop without a jolt. The camera never sinks below the floor the player stands on or the ground beneath it.
 
-Whatever comes between the camera and the player fades out instead. `world/view-cutaway.js` patches building facades and fittings, signs, broken windows and every interior material. Surfaces in a slot along the line from the camera to the player become see-through. The slot is widest at the camera and narrows to the player's shoulders. It reaches from a little above the line of sight down to the player's feet, and stops just short of them, with soft edges. The floor they stand on and everything beyond them stay solid. The fade is dithered: an ordered screen-space pattern drops a share of each surface's pixels, so materials stay opaque, keep writing depth and need no sorting. Close to the camera the slot clears completely; nearer the player, walls stay as a faint ghost, so the room around them still reads. Shots start level with the player, so the walls the view fades don't stop them. Rain is hidden while the player is indoors, wherever the camera is. Each frame the engine calls `world.setCutaway(eye, focus, floor)`.
+Whatever really stands between the camera and the player fades out instead, as a whole surface. Each frame the engine casts 12 sight lines from the camera to points spread over the body (four heights from the knees to the head, three across the shoulders) against the colliders around: building volumes, and inside, the hull, partitions, slabs, stairs, furniture and door leaves where they stand mid-swing. A surface that hides at least a quarter of those lines fades; it stays faded until it hides less than about a sixth, so it never flickers at the threshold. One that only clips an elbow or a foot stays solid, as does a building shell the camera is inside (its facade faces away and isn't drawn from there). A kitchen counter's wall cupboard counts with its counter: its collider carries `viewMaxY`, the top of what is drawn. Up to 8 surfaces fade at once. Each eases out over 0.2 s and back in over 0.3 s, and walls, floors and furniture that don't block stay exactly as they are.
+
+`world/view-cutaway.js` patches building facades and fittings, signs, broken windows and every interior material. Every fragment inside a fading surface's box fades together, so a wall goes as a whole, never in a hole round the player. A building's outer wall reaches 5 cm beyond its box, taking the facade drawn on it. The floor the player stands on, and anything at its level, stays solid. The fade is dithered: an ordered screen-space pattern drops a share of each surface's pixels while it dissolves, so materials stay opaque, keep writing depth and need no sorting. Faded surfaces go completely: a lingering ghost would leave a screen-door pattern over the view. Shots start level with the player, so the walls the view fades don't stop them. Rain is hidden while the player is indoors, wherever the camera is.
 
 ## Verification
 

@@ -10,6 +10,8 @@ export const INTERIOR = Object.freeze({
   revision: 2, storey: 3.6, slab: .3, hull: .3, partition: .14, floorOffset: .12, minHeight: 2.6,
   // Wide enough to walk through at an angle: a 0.86 m body keeps 12 cm either side.
   door: Object.freeze({ width: 1.1, height: 2.15, clearance: 1 }),
+  // The wall cupboard over a kitchen counter, at the back of it.
+  cupboard: Object.freeze({ y: 1.7, h: .7, d: .36 }),
   // A generous core: two-metre-plus flights and landings, and a landing ring
   // round the core as wide, at the same comfortable pitch as before.
   stair: Object.freeze({ lane: 2.4, divider: .2, run: 3.6, rise: 1.8, landing: 2.4 }),

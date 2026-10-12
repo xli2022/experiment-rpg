@@ -22,7 +22,6 @@ test('the camera keeps the same distance everywhere: it never closes in', () => 
     rig.update({ dt, player, yaw: i / 40, pitch: .12, floor: 12 });
     assert.ok(Math.abs(boom(rig) - full) < 1e-6, `frame ${i}: ${boom(rig).toFixed(3)} m`);
   }
-  assert.ok(Math.abs(rig.focus.x - Math.sin(239 / 30) * 4) < 1e-9 && Math.abs(rig.focus.y - (12 + CAMERA_FRAMES.foot.height)) < .01, 'the cutaway aims at the player');
 });
 
 test('stairs ease the camera up step by step, and a lift ride cuts', () => {

@@ -3,7 +3,7 @@ import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
-import { createWorld } from '../world/index.js';
+import { createWorld, CUTAWAY, cutawayTargets, blockingSurfaces, createCutawayFader } from '../world/index.js';
 import { terrainHeight } from '../world/master-plan.js';
 import { levelY, roomAt } from '../world/interior-plan.js';
 import { toLocal } from '../world/interior-physics.js';
@@ -45,7 +45,7 @@ export async function createGame({ canvas, modes }) {
   const state = { started: false, paused: false, mapOpen: false, modal: null, time: 0 };
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, vault: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
-  const vector = new THREE.Vector3(), cameraRig = createCameraRig();
+  const vector = new THREE.Vector3(), cameraRig = createCameraRig(), cutawayFader = createCutawayFader();
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
   let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
@@ -508,8 +508,11 @@ export async function createGame({ canvas, modes }) {
     // Leave room for the full canopy even in a narrow portrait viewport.
     const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect)) || 9.4;
     cameraRig.update({ dt, snap, player, yaw: cameraYaw, pitch: cameraPitch, aiming, driving: !!driving, glide, glideDistance, aspect: camera.aspect || 16 / 9, floor, ground: terrainHeight });
-    // The camera keeps its distance; whatever stands between it and the player is cut away.
-    world.setCutaway(cameraRig.position, cameraRig.focus, floor);
+    // The camera keeps its distance; whatever stands between it and the player fades.
+    const body = driving ?? player, targets = cutawayTargets(cameraRig.position, body, driving ? CUTAWAY.drive : glide > .5 ? CUTAWAY.glide : CUTAWAY.foot);
+    const midX = (body.x + cameraRig.position.x) / 2, midZ = (body.z + cameraRig.position.z) / 2, reach = cameraRig.position.distanceTo(vector.set(body.x, body.y, body.z)) / 2 + 3;
+    const blocking = blockingSurfaces(cameraRig.position, targets, scenery().near(midX, midZ, reach).concat(world.interiors.doorLeaves(midX, midZ, reach)));
+    world.setCutaway({ surfaces: cutawayFader.update(blocking, targets.length, snap ? 1 : dt), floor });
     camera.position.copy(cameraRig.position);
     camera.lookAt(cameraRig.look.x, cameraRig.look.y + recoil * .045, cameraRig.look.z);
     camera.fov = damp(camera.fov, aiming ? 48 : driving ? 66 + Math.abs(driving.speed) * .16 : 62 + glide * 4, 8, dt); camera.updateProjectionMatrix();

@@ -3,6 +3,7 @@ import { INTERIOR, cachedInteriorPlan, floorPlan, levelY } from './interior-plan
 import { buildingEntrances } from './building-design.js';
 import { polygonCentroid } from './building-footprints.js';
 import { toWorld } from './interior-physics.js';
+import { orientedBox } from '../core/physics.js';
 import { patchViewCutaway } from './view-cutaway.js';
 
 // Interior meshes are built on demand per floor, in building-local space. All
@@ -103,7 +104,7 @@ function furniturePiece(builder, f, y, shade) {
   switch (f.item) {
     case 'bed': part(0, .18, 0, w, .36, d, base); part(0, .44, .05, w - .08, .16, d - .14, light); part(0, .56, -d / 2 + .3, w * .8, .12, .35, light); part(0, .55, -d / 2 + .04, w, 1.1, .08, base); break;
     case 'sofa': part(0, .22, .05, w, .44, d - .1, base); part(0, .62, -d / 2 + .12, w, .5, .24, base); for (const k of [-1, 1]) part(k * (w / 2 - .1), .32, 0, .2, .64, d, base); break;
-    case 'counter': part(0, h / 2 - .02, 0, w, h - .04, d, base); part(0, h - .02, .02, w + .02, .04, d + .04, rgb(0x6b6f72)); part(0, 1.7, -d / 2 + .18, w, .7, .36, base); break;
+    case 'counter': part(0, h / 2 - .02, 0, w, h - .04, d, base); part(0, h - .02, .02, w + .02, .04, d + .04, rgb(0x6b6f72)); part(0, INTERIOR.cupboard.y, -d / 2 + INTERIOR.cupboard.d / 2, w, INTERIOR.cupboard.h, INTERIOR.cupboard.d, base); break;
     case 'table': case 'reception': part(0, h - .03, 0, w, .06, d, f.item === 'reception' ? light : base); part(0, (h - .06) / 2, 0, f.item === 'reception' ? w : .14, h - .06, f.item === 'reception' ? d : .14, base); break;
     case 'desk': part(0, h - .03, 0, w, .05, d, base); for (const k of [-1, 1]) part(k * (w / 2 - .03), (h - .05) / 2, 0, .05, h - .05, d, dark); part(0, h + .22, -d / 2 + .15, .55, .34, .04, dark); break;
     case 'shelf': part(0, h / 2, 0, w, h, d, base); for (let k = 1; k < 4; k++) part(0, h * k / 4, .02, w - .08, .03, d - .02, light); break;
@@ -407,6 +408,18 @@ export function createInteriors(scene, city) {
     } else uniforms.interiorCavity.value.w = 0;
   }
 
+  // Door leaves near (x, z) where they stand now, as boxes, for the camera's fade.
+  function doorLeaves(x, z, radius) {
+    const boxes = [];
+    for (const b of active.values()) for (const [level, f] of b.floors) for (const leaf of f.leaves) {
+      if (leaf.kind === 'entrance' || Math.hypot(leaf.world.x - x, leaf.world.z - z) > radius + leaf.w) continue;
+      const pose = leafPose(leaf, leaf.open), at = toWorld(b.plan, pose.x, pose.z);
+      boxes.push(orientedBox(at.x, at.z, pose.width, .05, b.plan.origin.yaw + Math.atan2(-leaf.uz, leaf.ux), leaf.y + leaf.h, leaf.y,
+        { id: `interior:${b.plan.id}:${level}:leaf:${leaf.index}`, interior: b.plan.id }));
+    }
+    return boxes;
+  }
+
   function snapshot() {
     return {
       buildings: [...active.keys()],
@@ -422,5 +435,5 @@ export function createInteriors(scene, city) {
     active.clear(); root.removeFromParent();
     warm.dispose(); for (const material of Object.values(materials)) material.dispose();
   }
-  return { root, update, snapshot, dispose, materials };
+  return { root, update, doorLeaves, snapshot, dispose, materials };
 }
