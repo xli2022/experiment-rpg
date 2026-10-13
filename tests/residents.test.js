@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, opener, TOPICS, HISTORY_TURNS } from '../src/engine/residents/persona.js';
-import { ResidentModel, detectGPU, RESIDENT_CHAT_KEY, RESIDENT_MODELS } from '../src/engine/residents/model.js';
+import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODEL } from '../src/engine/residents/model.js';
 import { ResidentConversation, facingResident, settingsNote, MAX_LINE } from '../src/engine/residents/conversation.js';
 import { createStorage } from '../src/engine/save.js';
 import { gameClock } from '../src/engine/clock.js';
@@ -124,6 +124,8 @@ test('replies are cleaned into a few spoken sentences, or rejected', () => {
   const long = cleanReply(`${'Word '.repeat(70)}end. Short one.`, dara);
   assert.ok(long.length <= 281 && long.endsWith('…'), long);
   for (const bad of ['As an AI language model, I cannot.', 'I am an AI assistant here to help.', '   ', '*nods*', 'Qwen here!']) assert.equal(cleanReply(bad, dara), null, bad);
+  for (const broken of ['ĠtheĠrainĠisĠcold.', 'Not much.Ċ', 'Busy \uFFFD night.', 'Busy night. 今天下雨了。', 'Привет. Busy night.']) assert.equal(cleanReply(broken, dara), null, `broken tokens or another language: ${broken}`);
+  assert.equal(cleanReply('Café’s shut. Señora Ruiz went home — try Kōji’s.', dara), 'Café’s shut. Señora Ruiz went home — try Kōji’s.', 'accented Latin letters are speech');
   assert.equal(previewReply('Dara: Hey th', dara), 'Hey th');
   const robot = residentPersona(walker(1, 'robot-scout', 'robot'));
   assert.equal(fallbackReply(robot, 0), fallbackReply(robot, 0));
@@ -145,12 +147,12 @@ test('only someone close, in front and in sight can be talked to', () => {
   assert.equal(facingResident({ ...player, yaw: Math.PI / 2 }, [at(-2, 0)]).x, -2, 'follows where the player faces');
 });
 
-test('the browser’s graphics decide the build, or why there is none', async () => {
+test('the browser’s graphics decide whether the model runs, or say why not', async () => {
   assert.equal((await detectGPU(undefined)).supported, false);
   assert.equal((await detectGPU({ requestAdapter: async () => null })).supported, false);
   assert.equal((await detectGPU({ requestAdapter: async () => { throw new Error('blocked'); } })).supported, false);
-  assert.deepEqual(await detectGPU(gpu()), { supported: true, model: RESIDENT_MODELS.f16 });
-  assert.deepEqual(await detectGPU(gpu([])), { supported: true, model: RESIDENT_MODELS.f32 }, 'without shader-f16');
+  assert.deepEqual(await detectGPU(gpu()), { supported: true, model: RESIDENT_MODEL });
+  assert.deepEqual(await detectGPU(gpu([])), { supported: true, model: RESIDENT_MODEL }, 'the 32-bit build, with or without shader-f16');
   const software = gpu([], { isFallbackAdapter: true });
   assert.equal((await detectGPU(software)).supported, false, 'a software renderer is too slow to talk');
   assert.equal((await detectGPU(software, { allowSoftware: true })).supported, true);
@@ -165,7 +167,7 @@ test('resident chat stays off until the player turns it on, then remembers', asy
   assert.equal(engines.length, 0);
   assert.equal(await model.setEnabled(true), true);
   assert.equal(model.status, 'ready');
-  assert.equal(engines[0].model, RESIDENT_MODELS.f16);
+  assert.equal(engines[0].model, RESIDENT_MODEL);
   assert.deepEqual(seen, ['off', 'checking', 'loading:Starting', 'loading:Downloading', 'loading:Preparing the graphics card', 'ready']);
   assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true });
   // The next visit loads it again when play starts.
@@ -195,6 +197,11 @@ test('without WebGPU, or when loading fails, the setting explains and the game p
   assert.equal(await failing.setEnabled(true), false);
   assert.deepEqual([failing.status, failing.message, failing.enabled], ['error', 'Network error', true]);
   assert.match(settingsNote(failing.snapshot()), /stopped: Network error Turn it off and on/);
+});
+
+test('a loaded model must repeat a plain sentence before residents use it', () => {
+  for (const text of ['The rain is cold tonight.', '<think>\n\n</think>\n\nThe rain is cold tonight.', '"The rain is cold tonight."']) assert.ok(passesSelfCheck(text), text);
+  for (const text of ['', null, 'ĠtheĠrainĠisĠcold', 'The rain is coldtonight', '雨很冷 tonight', 'theRAINis cold toni ght']) assert.equal(passesSelfCheck(text), false, String(text));
 });
 
 test('turning it off mid-download releases the model when it arrives', async () => {

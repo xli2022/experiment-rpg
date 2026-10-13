@@ -4,12 +4,21 @@
 // Hugging Face into the browser's cache. Story contacts never use it.
 
 export const RESIDENT_CHAT_KEY = 'afterlight.resident-chat.v1';
-// Qwen3.5 0.8B in 4 bits. The f16 build needs the GPU's shader-f16 feature.
-export const RESIDENT_MODELS = Object.freeze({ f16: 'Qwen3.5-0.8B-q4f16_1-MLC', f32: 'Qwen3.5-0.8B-q4f32_1-MLC' });
+// Qwen3.5 0.8B in 4 bits, computing in 32-bit floats on every graphics card.
+// Its f16 build, used where the GPU has shader-f16, wrote broken tokens on Mac
+// and Windows; downloads of it are deleted when the model next loads.
+export const RESIDENT_MODEL = 'Qwen3.5-0.8B-q4f32_1-MLC';
+export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC']);
 // Short, fairly focused replies: a person talking, not an essay.
 export const SAMPLING = Object.freeze({ max_tokens: 80, temperature: .7, top_p: .8, presence_penalty: 1.5, frequency_penalty: 0 });
+// Once loaded, the model must repeat a plain sentence. A model that computes
+// wrongly on this graphics card writes broken tokens instead, and residents
+// would talk nonsense; then the setting reports it.
+export const SELF_CHECK = Object.freeze({ messages: [{ role: 'user', content: 'Repeat exactly: The rain is cold tonight.' }], max_tokens: 16, temperature: 0 });
+export const passesSelfCheck = text => /\bthe rain is cold tonight\b/i.test(String(text ?? ''));
+const UNREADABLE = 'the model writes unreadable text on this graphics card.';
 
-/** Which build this browser can run, or why it can run none. */
+/** Whether this browser can run the model, and if not, why. */
 export async function detectGPU(gpu, { allowSoftware = false } = {}) {
   if (!gpu?.requestAdapter) return { supported: false, reason: 'this browser has no WebGPU.' };
   let adapter = null;
@@ -17,7 +26,7 @@ export async function detectGPU(gpu, { allowSoftware = false } = {}) {
   if (!adapter) return { supported: false, reason: 'no WebGPU graphics adapter is available.' };
   // A software adapter emulates the GPU on the processor: far too slow to talk.
   if ((adapter.info?.isFallbackAdapter ?? adapter.isFallbackAdapter) && !allowSoftware) return { supported: false, reason: 'only a software graphics adapter is available.' };
-  return { supported: true, model: adapter.features?.has('shader-f16') ? RESIDENT_MODELS.f16 : RESIDENT_MODELS.f32 };
+  return { supported: true, model: RESIDENT_MODEL };
 }
 
 function readSettings(storage) {
@@ -61,8 +70,12 @@ async function webLLM(model, onProgress, signal) {
   const worker = modelWorker();
   // Turning the setting off mid-download stops it there.
   signal?.addEventListener('abort', () => worker.terminate(), { once: true });
-  try { await worker.request('load', { model }, { onEvent: event => onProgress(event.progress, event.text) }); }
-  catch (error) { worker.terminate(); throw error; }
+  try {
+    await worker.request('load', { model, retired: RETIRED_MODELS }, { onEvent: event => onProgress(event.progress, event.text) });
+    let text = '';
+    await worker.request('generate', { request: { ...SELF_CHECK, extra_body: { enable_thinking: false } } }, { onEvent: event => { text += event.text; }, stall: 60000 });
+    if (!passesSelfCheck(text)) throw new Error(UNREADABLE);
+  } catch (error) { worker.terminate(); throw error; }
   return {
     generate: (messages, onText) => worker.request('generate', { request: { messages, ...SAMPLING, extra_body: { enable_thinking: false } } }, { onEvent: event => onText(event.text), stall: 60000 }),
     interrupt: () => worker.send('interrupt'),
@@ -71,7 +84,7 @@ async function webLLM(model, onProgress, signal) {
 }
 async function forgetWebLLM() {
   const worker = modelWorker();
-  try { await worker.request('forget', { models: Object.values(RESIDENT_MODELS) }); } finally { worker.terminate(); }
+  try { await worker.request('forget', { models: [RESIDENT_MODEL, ...RETIRED_MODELS] }); } finally { worker.terminate(); }
 }
 
 /**

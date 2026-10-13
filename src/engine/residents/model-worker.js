@@ -1,11 +1,15 @@
 // Runs the resident language model off the game's thread (see model.js). Each
 // request carries an id; the answer is progress or text events, then `done`
 // or `error`. Only this worker loads WebLLM.
-import { CreateMLCEngine, deleteModelAllInfoInCache } from '@mlc-ai/web-llm';
+import { CreateMLCEngine, deleteModelAllInfoInCache, hasModelInCache } from '@mlc-ai/web-llm';
 
 let engine = null;
 const handlers = {
-  async load({ id, model }) { engine = await CreateMLCEngine(model, { initProgressCallback: ({ progress, text }) => self.postMessage({ id, type: 'progress', progress, text }) }); },
+  async load({ id, model, retired = [] }) {
+    // Builds the game no longer uses would otherwise keep their space in the cache.
+    for (const old of retired) { try { if (await hasModelInCache(old)) await deleteModelAllInfoInCache(old); } catch { /* Left for the pause menu's delete. */ } }
+    engine = await CreateMLCEngine(model, { initProgressCallback: ({ progress, text }) => self.postMessage({ id, type: 'progress', progress, text }) });
+  },
   async generate({ id, request }) {
     const chunks = await engine.chat.completions.create({ ...request, stream: true });
     for await (const chunk of chunks) { const text = chunk.choices[0]?.delta?.content; if (text) self.postMessage({ id, type: 'text', text }); }

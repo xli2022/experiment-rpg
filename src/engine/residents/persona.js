@@ -183,6 +183,9 @@ export function chatMessages(persona, history, line) {
 }
 
 const NOT_IN_WORLD = /\b(?:language model|as an ai|ai assistant|virtual assistant|i(?:'|’)?m an ai|i am an ai|chatgpt|openai|qwen|alibaba)\b/i;
+// Broken tokens (raw byte-level pieces, undecodable bytes) or a slide into
+// another language: residents speak English, in Latin letters.
+const BROKEN = /[\uFFFD\u0120\u010A]|(?!\p{Script=Latin})\p{L}/u;
 const LABELS = '(?:you|me|stranger|passer-?by|player|user|resident|assistant)';
 // A name as a regular expression that matches it literally (or nothing, without one).
 const literal = text => String(text ?? '').replace(/[.*+?^${}()|[\]\\-]/g, '\\$&') || '\\b\\B';
@@ -208,7 +211,7 @@ export function cleanReply(text, persona = {}, { sentences = 3, length = 280 } =
     .replace(/\*[^*]*\*?/g, ' ').replace(/\([^)]*\)?/g, ' ').replace(/\[[^\]]*\]?/g, ' ')
     .replace(/\p{Extended_Pictographic}\uFE0F?/gu, '').replace(/\s+/g, ' ').trim();
   if (/^["“][^"“”]*["”]$/.test(s)) s = s.slice(1, -1).trim();
-  if (NOT_IN_WORLD.test(s) || !/\p{L}.*\p{L}/u.test(s)) return null;
+  if (NOT_IN_WORLD.test(s) || BROKEN.test(s) || !/\p{L}.*\p{L}/u.test(s)) return null;
   // Whole sentences only: a reply cut off by the token limit loses its last fragment.
   const parts = s.match(/[^.!?…]+(?:[.!?…]+["”’']?|$)/g) ?? [];
   const whole = parts.filter(part => /[.!?…]["”’']?$/.test(part.trim())), kept = [];
