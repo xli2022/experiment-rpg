@@ -508,7 +508,7 @@ export async function createGame({ canvas, modes }) {
     const recoil = weapon?.recoil ?? 0, floor = driving ? player.y : Math.min(player.y, player.groundY ?? player.y);
     // Leave room for the full canopy even in a narrow portrait viewport.
     const glideDistance = Math.max(9.4, 4 / (Math.tan(THREE.MathUtils.degToRad(33)) * camera.aspect)) || 9.4;
-    cameraRig.update({ dt, snap, player, yaw: cameraYaw, pitch: cameraPitch, aiming, driving: !!driving, glide, glideDistance, aspect: camera.aspect || 16 / 9, floor, ground: terrainHeight });
+    cameraRig.update({ dt, snap, player, fall: (driving ?? player).velocityY ?? 0, yaw: cameraYaw, pitch: cameraPitch, aiming, driving: !!driving, glide, glideDistance, aspect: camera.aspect || 16 / 9, floor, ground: terrainHeight });
     // The camera keeps its distance; whatever stands between it and the player fades.
     const body = driving ?? player, targets = cutawayTargets(cameraRig.position, body, driving ? CUTAWAY.drive : glide > .5 ? CUTAWAY.glide : CUTAWAY.foot);
     const midX = (body.x + cameraRig.position.x) / 2, midZ = (body.z + cameraRig.position.z) / 2, reach = cameraRig.position.distanceTo(vector.set(body.x, body.y, body.z)) / 2 + 3;
@@ -565,12 +565,14 @@ export async function createGame({ canvas, modes }) {
       const minute = 48 + Math.floor(state.time / 45); $('game-time').textContent = `${String((23 + Math.floor(minute / 60)) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
       lastUI = now;
     }
+    // Resizing the canvas clears it: change resolution before drawing this
+    // frame, never after, or the browser shows that blank canvas for a frame.
+    if (!state.paused && document.hasFocus() && !world.stream.stats.queued && resolution.sample(rawDt, RENDER_PROFILES[quality].minScale)) applyResolution();
     renderer.info.reset();
     frameCosts.updateMs = damp(frameCosts.updateMs, performance.now() - updateStart, 3, dt);
     const renderStart = performance.now();
     if (quality === 'high') composer.render(); else renderer.render(scene, camera);
     frameCosts.renderMs = damp(frameCosts.renderMs, performance.now() - renderStart, 3, dt);
-    if (!state.paused && document.hasFocus() && !world.stream.stats.queued && resolution.sample(rawDt, RENDER_PROFILES[quality].minScale)) applyResolution();
   }
 
   // --- Diagnostics -----------------------------------------------------------------

@@ -34,6 +34,10 @@ export const CAMERA_FRAMES = Object.freeze({
   glide: Object.freeze({ distance: 9.4, height: 2.6, shoulder: .2, rise: .5 }),
 });
 
+// How far, in metres, the look height may trail the player's own: little
+// enough that a fall keeps them in the close on-foot frame.
+export const CAMERA_TRAIL = .7;
+
 export function createCameraRig() {
   const target = new THREE.Vector3(), position = new THREE.Vector3(), look = new THREE.Vector3(), boom = new THREE.Vector3();
   const state = { ready: false, x: 0, z: 0, y: 0, distance: 0, shoulder: 0, rise: 0 };
@@ -41,26 +45,39 @@ export function createCameraRig() {
   return {
     target, position, look, state,
     /**
-     * `player` is the player's (or car's) position; `floor` the height they
-     * stand on; `ground(x, z)` the terrain height; `aspect` the screen's width
-     * over its height. `snap` places everything at once (scene cuts, lifts,
-     * teleports).
+     * `player` is the player's (or car's) position; `fall` its vertical
+     * speed; `floor` the height they stand on; `ground(x, z)` the terrain
+     * height; `aspect` the screen's width over its height. `snap` places
+     * everything at once (scene cuts, lifts, teleports).
      */
-    update({ dt, snap = false, player, yaw, pitch, aiming = false, driving = false, glide = 0, glideDistance = CAMERA_FRAMES.glide.distance, aspect = 16 / 9, floor = -Infinity, ground = () => -Infinity }) {
+    update({ dt, snap = false, player, fall = player.velocityY ?? 0, yaw, pitch, aiming = false, driving = false, glide = 0, glideDistance = CAMERA_FRAMES.glide.distance, aspect = 16 / 9, floor = -Infinity, ground = () => -Infinity }) {
       dt = Math.max(dt, 1e-4);
       // A long jump in a single frame is a cut, not motion; so is recovering
       // from a frame with no viewport to measure.
       snap ||= !state.ready || Math.hypot(player.x - state.x, player.z - state.z) > 6 || !Number.isFinite(state.distance + state.y + state.shoulder + state.rise);
       state.x = player.x; state.z = player.z;
+      // The canopy opens over half a second but is gone the moment the
+      // player lands: the canopy's framing follows it out gently instead of
+      // closing seven metres of boom in a few frames.
+      if (snap || glide >= (state.glide ?? 0)) settle(state, 'glide', glide); else glide = spring(state, 'glide', glide, .3, dt);
       const near = aiming ? CAMERA_FRAMES.aim : CAMERA_FRAMES.foot, far = { ...CAMERA_FRAMES.glide, distance: glideDistance };
       // On a portrait screen the close shoulder offset would push the player
       // off its edge.
       const narrow = Math.min(1, Math.max(.4, aspect / (16 / 9)));
       const frame = driving ? CAMERA_FRAMES.drive : Object.fromEntries(Object.keys(near).map(key =>
         [key, (key === 'shoulder' ? near[key] * narrow : near[key]) * (1 - glide) + far[key] * glide]));
-      // Ease the look height over steps and stairs; a long drop or a lift cuts.
-      const y = player.y + frame.height;
-      if (snap || Math.abs(y - state.y) > 2.5) settle(state, 'y', y); else spring(state, 'y', y, .14, dt);
+      // Ease the look height over steps and stairs. A lift or teleport moves
+      // it metres in one frame: that cuts. A fall covers as much over many
+      // frames, so the camera follows it on a spring that quickens with the
+      // fall, trailing no more than a short leash: trailing further and
+      // further, then cutting to catch up, jolted the view as a parachute opened.
+      const y = player.y + frame.height, moved = y - (state.goal ?? y);
+      state.goal = y;
+      if (snap || Math.abs(moved) > 2.5) settle(state, 'y', y);
+      else {
+        spring(state, 'y', y, Math.min(.14, CAMERA_TRAIL * .8 / Math.max(Math.abs(fall), 1e-3)), dt);
+        if (Math.abs(state.y - y) > CAMERA_TRAIL) { state.y = y + Math.sign(state.y - y) * CAMERA_TRAIL; state.ySpeed = moved / dt; }
+      }
       // The boom eases a little slower than the rest: getting into a car
       // pulls it out by eight metres.
       for (const [key, time] of [['distance', .4], ['shoulder', .25], ['rise', .25]]) {

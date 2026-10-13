@@ -4,7 +4,7 @@ import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { MASTER_DISTRICTS as DISTRICTS } from '../src/world/master-plan.js';
 import { terrainHeight } from '../src/world/master-plan.js';
 import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } from '../src/world/building-design.js';
-import { interiorPlan, floorPlan, buildingUnits, levelY, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
+import { interiorPlan, floorPlan, floorLights, buildingUnits, levelY, levelCeiling, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
 import { polygonArea, pointInConvex, polygonFaces, clipConvex, insetConvex } from '../src/world/building-footprints.js';
 import { buildFloor, leafPose } from '../src/world/interiors.js';
 import { interiorColliders, toWorld, toLocal } from '../src/world/interior-physics.js';
@@ -122,6 +122,64 @@ test('street doors sit where the facade draws its entrances', () => {
         Math.hypot(part.x - e.x, part.z - e.z) < .4 + (part.yaw === undefined ? 0 : .2));
       assert.ok(drawn, `${plan.id} draws a door at ${e.id}`);
     }
+  }
+});
+
+// Whether a square ceiling panel overlaps a wall slab, by separating axes.
+function panelHitsWall(l, w) {
+  const half = (w.kind === 'core' ? .2 : INTERIOR.partition) / 2, length = Math.hypot(w.b.x - w.a.x, w.b.z - w.a.z), ux = (w.b.x - w.a.x) / length, uz = (w.b.z - w.a.z) / length;
+  const panel = [[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([i, k]) => ({ x: l.x + i * l.half, z: l.z + k * l.half }));
+  const slab = [[0, -half], [length, -half], [length, half], [0, half]].map(([t, o]) => ({ x: w.a.x + ux * t - uz * o, z: w.a.z + uz * t + ux * o }));
+  return [[1, 0], [0, 1], [ux, uz], [-uz, ux]].every(([ax, az]) => {
+    const p = panel.map(c => c.x * ax + c.z * az), q = slab.map(c => c.x * ax + c.z * az);
+    return Math.max(...p) > Math.min(...q) + 1e-6 && Math.max(...q) > Math.min(...p) + 1e-6;
+  });
+}
+
+test('ceiling lights hang from a real ceiling, clear of every wall, in every room', () => {
+  let stairs = 0;
+  for (const { plan } of plans) for (const level of new Set([0, 1, plan.levels - 1])) {
+    if (level >= plan.levels) continue;
+    const t = floorPlan(plan, level).template, zones = new Map(t.zones.map(z => [z.id, z])), lights = floorLights(plan, level);
+    for (const l of lights) {
+      const zone = zones.get(l.zone);
+      assert.ok(pointInConvex(zone.polygon, l.x, l.z, l.half), `${plan.id} ${zone.kind}: a panel inside its room`);
+      assert.ok(!t.walls.some(w => panelHitsWall(l, w)), `${plan.id} ${zone.kind}: a panel through a wall`);
+      if (!l.stair) { assert.equal(l.y, levelCeiling(plan, level)); continue; }
+      // The stair well has no ceiling below the top floor: the panel hangs
+      // under the half-landing, over the one below it, within its footprint.
+      const s = plan.core.stair;
+      stairs++;
+      assert.ok(level > 0, `${plan.id}: nothing hangs over the ground floor's closed nook`);
+      assert.ok(Math.abs(l.y - (level >= plan.levels - 1 ? levelCeiling(plan, level) : levelY(plan, level) + INTERIOR.stair.rise - INTERIOR.slab)) < 1e-9, `${plan.id} level ${level}: the stair panel hangs from a ceiling`);
+      assert.ok(l.x - l.half >= s.x0 && l.x + l.half <= s.x1 && l.z - l.half >= s.z0 && l.z + l.half <= s.far, `${plan.id}: under the half-landing`);
+    }
+    for (const zone of t.zones) if (!['void', 'shaft', 'stair'].includes(zone.kind)) assert.ok(lights.some(l => l.zone === zone.id), `${plan.id} ${zone.kind} has a light`);
+  }
+  assert.ok(stairs > 300, 'stairs are covered');
+});
+
+test('ceiling lights sit on an even grid centred in each room', () => {
+  let rooms = 0;
+  for (const { plan } of plans.slice(0, 160)) for (const t of plan.templates) for (const zone of t.zones) {
+    const xs = zone.polygon.map(q => q.x), zs = zone.polygon.map(q => q.z), lights = t.lights.filter(l => l.zone === zone.id);
+    if (zone.polygon.length !== 4 || zone.kind === 'stair' || !lights.length || polygonArea(zone.polygon) < (Math.max(...xs) - Math.min(...xs)) * (Math.max(...zs) - Math.min(...zs)) - 1e-6) continue;
+    // A rectangular room's panels mirror about its centre both ways.
+    const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...zs) + Math.max(...zs)) / 2;
+    for (const l of lights) for (const [mx, mz] of [[2 * cx - l.x, l.z], [l.x, 2 * cz - l.z]]) {
+      assert.ok(lights.some(o => Math.hypot(o.x - mx, o.z - mz) < 1e-6), `${plan.id} ${zone.kind}: panels mirror about the room's centre`);
+    }
+    rooms++;
+  }
+  assert.ok(rooms > 500);
+});
+
+test('the drawn light panels are the planned ones, just under their ceilings', () => {
+  const { plan } = plans.find(e => e.plan.levels > 3);
+  for (const level of [0, 1, plan.levels - 1]) {
+    const { fixtures } = buildFloor(plan, level), lights = floorLights(plan, level), ys = new Set();
+    for (let i = 1; i < fixtures.position.length; i += 3) ys.add(+fixtures.position[i].toFixed(4));
+    for (const l of lights) assert.ok(ys.has(+(l.y - .01).toFixed(4)), `level ${level}: a panel at ${l.y - .01}`);
   }
 });
 

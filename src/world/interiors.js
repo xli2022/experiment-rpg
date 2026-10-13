@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { INTERIOR, cachedInteriorPlan, floorPlan, levelY } from './interior-plan.js';
+import { INTERIOR, cachedInteriorPlan, floorLights, floorPlan, levelY } from './interior-plan.js';
 import { buildingEntrances } from './building-design.js';
 import { polygonCentroid } from './building-footprints.js';
 import { toWorld } from './interior-physics.js';
@@ -47,12 +47,14 @@ class Builder {
 
 function lighting(plan, floor) {
   const rooms = new Map(floor.rooms.map(r => [r.local, r])), zones = new Map(floor.template.zones.map(z => [z.id, z]));
-  const lights = floor.template.lights.filter(l => rooms.get(l.room)?.lit), ceiling = floor.ceiling;
+  // The stair is lit too by the panel under the half-landing above it, which the next level hangs.
+  const stair = floor.template.zones.find(z => z.kind === 'stair'), above = floor.level + 1 < plan.levels && stair ? floorLights(plan, floor.level + 1).filter(l => l.stair) : [];
+  const lights = floorLights(plan, floor.level).concat(above.map(l => ({ ...l, zone: stair.id, room: stair.room }))).filter(l => rooms.get(l.room)?.lit);
   return (zoneId, albedo) => (p, n = [0, 1, 0]) => {
     const zone = zones.get(zoneId), room = zone ? rooms.get(zone.room) : null, lit = room?.lit ?? true;
     let warm = 0;
     for (const l of lights) if (!room || l.room === room.local) {
-      const dx = p.x - l.x, dz = p.z - l.z, dy = ceiling - p.y, d2 = dx * dx + dz * dz + dy * dy * .5;
+      const dx = p.x - l.x, dz = p.z - l.z, dy = l.y - p.y, d2 = dx * dx + dz * dz + dy * dy * .5;
       warm += Math.exp(-d2 / 16) * (n[1] < -.5 ? .45 : 1);
     }
     // Warm fixtures over a cool, dim moonlit ambient keep rooms readable without
@@ -230,10 +232,9 @@ export function buildFloor(plan, level, broken = new Map()) {
     }
   }
   for (const f of t.furniture) furniturePiece(surfaces, f, y, albedo => (p, n) => shadeFor(f.zone, albedo)(p, n));
-  for (const l of t.lights) {
+  for (const l of floorLights(plan, level)) {
     const room = floor.rooms.find(r => r.local === l.room), lit = room?.lit;
-    const glow = lit ? [2.1, 1.85, 1.5] : [.16, .16, .17];
-    const yy = floor.ceiling - .01, h = .32;
+    const glow = lit ? [2.1, 1.85, 1.5] : [.16, .16, .17], h = l.half, yy = l.y - .01;
     fixtures.quad({ x: l.x - h, y: yy, z: l.z - h }, { x: l.x + h, y: yy, z: l.z - h }, { x: l.x + h, y: yy, z: l.z + h }, { x: l.x - h, y: yy, z: l.z + h }, () => glow);
   }
   return { floor, surfaces, fixtures, glass, shattered, doors };

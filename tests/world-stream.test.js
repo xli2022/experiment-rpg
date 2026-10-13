@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { WorldStream, ResolutionGovernor } from '../src/world/world-stream.js';
@@ -33,6 +34,13 @@ test('adaptive resolution ignores background stalls and needs sustained frame pr
   assert.ok(governor.scale < 1);
   for (let i = 0; i < 1000; i++) governor.sample(1 / 30, .65);
   assert.equal(governor.scale, .65);
+});
+
+test('a new resolution applies before the frame is drawn, never after: resizing clears the canvas', () => {
+  // Resizing after drawing would show the cleared canvas for a frame: a black flicker.
+  const source = readFileSync(new URL('../src/engine/game.js', import.meta.url), 'utf8'), frame = source.slice(source.indexOf('function frame('));
+  const resize = frame.indexOf('applyResolution()'), draw = frame.indexOf('composer.render()');
+  assert.ok(resize > 0 && draw > 0 && resize < draw);
 });
 
 test('a long road stays visible near its far end even when its owning cell is behind the camera', () => {

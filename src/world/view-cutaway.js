@@ -17,8 +17,9 @@ import { boxContainsPoint, rayBoxDistance } from '../core/physics.js';
 //   surface never snaps or flickers between states.
 // - A surface fades as a whole, never in a hole round the player.
 // - The floor the player stands on, and anything at its level, stays solid.
-// - A building shell the camera is inside is skipped: its facade faces away
-//   and is not drawn from there anyway.
+// - A surface the camera is inside hides the whole body. A building shell the
+//   camera dips into keeps its fade: dropping it there and taking it up again
+//   as the camera came out flashed the facade, and the lobby behind it, solid.
 //
 // The fade is dithered: an ordered screen-space pattern drops a share of each
 // surface's pixels, so materials stay opaque, keep writing depth and need no
@@ -75,7 +76,6 @@ export function blockingSurfaces(eye, targets, boxes) {
     const box = collider.viewMaxY ? { ...collider, maxY: collider.viewMaxY } : collider;
     if (apart(all, box)) continue;
     const inside = within(box, eye);
-    if (inside && !box.interior) continue;
     let hidden = 0;
     for (const ray of rays) if (ray.reach > 0 && (inside || (!apart(ray, box) && rayBoxDistance(eye, ray.direction, box, ray.reach) < ray.reach))) hidden++;
     if (hidden) shares.set(collider, hidden / rays.length);

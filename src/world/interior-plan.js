@@ -15,6 +15,9 @@ export const INTERIOR = Object.freeze({
   // A generous core: two-metre-plus flights and landings, and a landing ring
   // round the core as wide, at the same comfortable pitch as before.
   stair: Object.freeze({ lane: 2.4, divider: .2, run: 3.6, rise: 1.8, landing: 2.4 }),
+  // Ceiling light panels: half their width (a small room's are smaller), and how
+  // far they keep from a wall's line.
+  fixture: Object.freeze({ half: .32, small: .2, clear: .15 }),
   lift: 2.4, liftAbove: 3, ring: 2.4, minDepth: 3.2,
 });
 const OPEN_KINDS = new Set(['landing', 'lobby', 'office', 'shop', 'hall']);
@@ -271,7 +274,7 @@ function floorTemplate(plan, ctx, level, random) {
   buildWalls(plan, ctx, template, level);
   placeWindows(plan, ctx, template, level);
   furnish(plan, template, random);
-  light(template);
+  light(template, ctx.core);
   return template;
 }
 
@@ -543,16 +546,34 @@ function furnish(plan, template, random) {
   template.furniture = furniture.map((f, i) => ({ id: `f${i}`, ...f }));
 }
 
-function light(template) {
-  const lights = [];
+// Ceiling panels on an even grid centred in each zone, each panel clear of the
+// walls round it. The stair has no ceiling below the top floor, only the open
+// well: it gets one fixture of its own (see floorLights).
+function light(template, core) {
+  const lights = [], { half, small, clear } = INTERIOR.fixture;
+  const fits = (zone, x, z, size = half) => [[-1, -1], [1, -1], [1, 1], [-1, 1]].every(([i, k]) => pointInConvex(zone.polygon, x + i * size, z + k * size, clear));
   for (const zone of template.zones) {
     if (['shaft', 'void'].includes(zone.kind)) continue;
-    const b = bounds(zone.polygon), spacing = zone.kind === 'hall' ? 7 : 4.6, points = [];
-    for (let x = b.minX + spacing / 2; x < b.maxX; x += spacing) for (let z = b.minZ + spacing / 2; z < b.maxZ; z += spacing) {
-      if (pointInConvex(zone.polygon, x, z, .5)) points.push({ x, z });
+    if (zone.kind === 'stair') {
+      if (core) lights.push({ zone: zone.id, room: zone.room, x: (core.stair.x0 + core.stair.x1) / 2, z: (core.stair.z0 + core.stair.far) / 2, half, stair: true });
+      continue;
     }
-    if (!points.length) points.push(polygonCentroid(zone.polygon));
-    for (const p of points) lights.push({ zone: zone.id, room: zone.room, x: p.x, z: p.z });
+    const b = bounds(zone.polygon), spacing = zone.kind === 'hall' ? 7 : 4.6, points = [];
+    const nx = Math.max(1, Math.round((b.maxX - b.minX) / spacing)), nz = Math.max(1, Math.round((b.maxZ - b.minZ) / spacing));
+    for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) {
+      const x = b.minX + (b.maxX - b.minX) * (i + .5) / nx, z = b.minZ + (b.maxZ - b.minZ) * (k + .5) / nz;
+      if (fits(zone, x, z)) points.push({ x, z, half });
+    }
+    // A small or slanted room takes one panel where it fits: at its centre, or
+    // the centre of the floor left once the panel's reach is taken off the
+    // walls; failing that, a smaller one.
+    for (const size of [half, small]) {
+      if (points.length) break;
+      const centres = [zone.polygon, insetConvex(zone.polygon, size * Math.SQRT2 + clear), insetConvex(zone.polygon, size + clear)].filter(p => p.length).map(polygonCentroid);
+      const centre = centres.find(c => fits(zone, c.x, c.z, size));
+      if (centre) points.push({ ...centre, half: size });
+    }
+    for (const p of points) lights.push({ zone: zone.id, room: zone.room, x: p.x, z: p.z, half: p.half });
   }
   template.lights = lights;
 }
@@ -603,6 +624,21 @@ export function levelY(plan, level) { return plan.floor0 + level * INTERIOR.stor
 export function levelCeiling(plan, level) { return level >= plan.levels - 1 ? plan.top : levelY(plan, level + 1) - INTERIOR.slab; }
 export function levelAt(plan, y) {
   return Math.max(0, Math.min(plan.levels - 1, Math.floor((y - plan.floor0 + .6) / INTERIOR.storey)));
+}
+
+/**
+ * The light fittings of one level, each with the height of the ceiling it
+ * hangs from. The stair well has no ceiling below the top floor: there the
+ * stair's panel hangs under the level's half-landing, over the half-landing
+ * of the level below (the ground floor's has only a closed nook beneath it).
+ * The top floor closes the well with its ceiling.
+ */
+export function floorLights(plan, level) {
+  const template = plan.templates[Math.min(level, plan.templates.length - 1)], ceiling = levelCeiling(plan, level);
+  return template.lights.flatMap(l => {
+    if (!l.stair || level >= plan.levels - 1) return [{ ...l, y: ceiling }];
+    return level ? [{ ...l, y: levelY(plan, level) + INTERIOR.stair.rise - INTERIOR.slab }] : [];
+  });
 }
 
 /** Rooms and units with stable IDs at one level. */

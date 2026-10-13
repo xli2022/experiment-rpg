@@ -45,9 +45,9 @@ test('how much a surface hides the player is a share of the body, not a yes or n
   // A camera inside a partition sees its faces from within: it is in the way.
   const partition = wall(eye.x, eye.z, .14, 3);
   assert.equal(blockingSurfaces(eye, targets, [partition]).get(partition), 1);
-  // A building's shell seen from inside isn't drawn, so it never counts.
+  // So does a building's shell around the camera.
   const shell = orientedPrism(0, 4, 8, 8, 0, 20, 0, 'rectangle', { id: 'building:tower' });
-  assert.ok(!blockingSurfaces(eye, targets, [shell]).has(shell));
+  assert.equal(blockingSurfaces(eye, targets, [shell]).get(shell), 1);
   // ...but seen from outside it does, and streets, cars and props never do.
   const across = orientedPrism(0, 1, 8, .6, 0, 20, 0, 'rectangle', { id: 'building:corner' }), deck = orientedBox(0, 1, 8, .6, 0, 20, 0, { kind: 'deck' });
   const outside = blockingSurfaces(eye, targets, [across, deck]);
@@ -74,6 +74,17 @@ test('as the camera sweeps past a wall, its share and fade change smoothly, neve
   }
   // It only ever eases out, never back in.
   for (let k = 1; k < fades.length; k++) assert.ok(fades[k] <= fades[k - 1] + 1e-4, `fade at ${k}`);
+});
+
+test('a camera dipping into a building in the way and out again keeps it faded: no flash of its facade', () => {
+  // The player stands beyond a tower; the camera sways through its facade.
+  const tower = orientedPrism(0, 0, 8, 8, 0, 20, 0, 'rectangle', { id: 'building:tower' }), feet = { x: 0, y: 0, z: -5.5 }, fader = createCutawayFader();
+  const shares = from => blockingSurfaces(from, cutawayTargets(from, feet), [tower]);
+  fader.update(shares({ x: .3, y: 2.4, z: 4.4 }), 1);
+  for (let k = 0; k <= 120; k++) {
+    const from = { x: .3, y: 2.4, z: 4 + .45 * Math.cos(k / 6) }, fade = fader.update(shares(from), 1 / 60).find(s => s.box === tower)?.fade ?? 0;
+    assert.ok(fade > .99, `frame ${k}, ${from.z > 4 ? 'outside' : 'inside'}: faded ${fade.toFixed(3)}`);
+  }
 });
 
 test('a fade eases toward how much the surface hides, and a cut settles at once', () => {

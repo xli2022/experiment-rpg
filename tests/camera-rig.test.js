@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { CAMERA_FRAMES, createCameraRig, spring } from '../src/engine/camera-rig.js';
+import { CAMERA_FRAMES, CAMERA_TRAIL, createCameraRig, spring } from '../src/engine/camera-rig.js';
+import { stepJump } from '../src/engine/player/jump.js';
 
 const dt = 1 / 60;
 const boom = rig => rig.position.distanceTo(rig.target);
@@ -36,6 +37,28 @@ test('stairs ease the camera up step by step, and a lift ride cuts', () => {
   assert.ok(hop < .05, `no visible hop at each riser (${hop.toFixed(3)} m in a frame)`);
   rig.update({ dt, player: { x: 0, y: 18, z: -4 }, yaw: Math.PI, pitch: .12, floor: 18 });
   assert.ok(Math.abs(rig.target.y - 18 - CAMERA_FRAMES.foot.height) < 1e-9, 'a long change of level snaps');
+});
+
+test('a long fall keeps the camera with the player and never cuts as the parachute opens or lands', () => {
+  // Walk off a 60 m roof: twelve metres of free fall, the canopy, the landing.
+  for (const fps of [30, 60, 144]) {
+    const step = 1 / fps, rig = createCameraRig(), player = { x: 0, y: 60, z: 0, groundY: 60, jumpPhase: '' };
+    rig.update({ dt: step, player, yaw: 0, pitch: .12, floor: 60 });
+    let opened = false, last = rig.position.clone(), lastY = player.y, fastest = 0;
+    for (let i = 0; i < fps * 12; i++) {
+      stepJump(player, step, 0);
+      const glide = player.parachute?.openness ?? 0;
+      opened ||= glide > .99;
+      rig.update({ dt: step, player, yaw: 0, pitch: .12, glide, floor: Math.min(player.y, player.groundY) });
+      if (glide === 0) assert.ok(Math.abs(rig.state.y - player.y - CAMERA_FRAMES.foot.height) <= CAMERA_TRAIL + 1e-9 || opened, `${fps} FPS frame ${i}: the falling player stays in frame`);
+      // Apart from following the player, the camera only ever glides: its
+      // speed is the same at every frame rate, where a cut is one frame long.
+      fastest = Math.max(fastest, Math.hypot(rig.position.x - last.x, rig.position.y - last.y - (player.y - lastY), rig.position.z - last.z) / step);
+      last = rig.position.clone(); lastY = player.y;
+    }
+    assert.ok(opened && player.y === 0, 'the canopy opened and the player landed');
+    assert.ok(fastest < 15, `${fps} FPS: the camera moved ${fastest.toFixed(1)} m/s on its own`);
+  }
 });
 
 test('on foot the frame cuts the character off at the knees; driving and a canopy keep their wide views', () => {
