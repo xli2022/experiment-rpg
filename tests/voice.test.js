@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DialogueVoice, speechChunks, selectVoice, VOICE_STORAGE_KEY } from '../src/modes/story/voice.js';
+import { DialogueVoice, speechChunks, selectVoice, VOICE_STORAGE_KEY } from '../src/engine/voice.js';
 import { VOICE_PROFILES } from '../src/actors/npc-profiles.js';
 
 function harness(storage) {
@@ -102,4 +102,16 @@ test('unresponsive engines time out and can be retried without delayed old speec
   old.onstart(); old.onend(); assert.equal(voice.snapshot().status, 'error');
   voice.replay(); latest().onstart(); [...pending.values()][0](); assert.equal(voice.snapshot().status, 'error');
   voice.dispose(); assert.equal(pending.size, 0);
+});
+
+test('a background resident speaks through the same voice with a profile of their own', () => {
+  const {voice,synth,events,latest} = harness();
+  synth.voices = [{name:'Microsoft Zira',lang:'en-US',localService:true},{name:'Microsoft David',lang:'en-US',localService:true}]; events.get('voiceschanged')();
+  const resident = {id:'walker:3',pitch:.8,rate:.9,voiceSlot:0,preferred:['David','Male']};
+  voice.speak('Trams are late again.', resident);
+  assert.deepEqual([latest().pitch, latest().rate, latest().voice.name], [.8, .9, 'Microsoft David']);
+  assert.equal(voice.snapshot().contact, 'walker:3');
+  voice.replay(); assert.equal(latest().pitch, .8, 'replay keeps the speaker');
+  voice.speak('Hello.', 'mara'); assert.equal(voice.snapshot().contact, 'mara'); assert.equal(latest().pitch, VOICE_PROFILES.mara.pitch);
+  voice.dispose();
 });

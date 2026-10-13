@@ -27,13 +27,14 @@ export function facingResident(player, people, visible = () => true) {
 
 /**
  * One conversation at a time. Replies stream in from the model and are
- * cleaned up before they stay on screen; a failed or unusable reply becomes
- * a short fallback line in the resident's voice. Closing stops the reply
- * being written, and nothing late reaches the next conversation.
+ * cleaned up before they stay on screen and are spoken; a failed or unusable
+ * reply becomes a short fallback line in the resident's voice. Saying
+ * something new or leaving stops the speech and the reply being written, and
+ * nothing late reaches the next conversation.
  */
 export class ResidentConversation {
-  constructor({ model, view }) {
-    Object.assign(this, { model, view });
+  constructor({ model, view, voice = null }) {
+    Object.assign(this, { model, view, voice });
     this.persona = null; this.history = []; this.turns = 0; this.serial = 0; this.busy = false;
   }
   open(persona) {
@@ -45,6 +46,7 @@ export class ResidentConversation {
     const text = String(line ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_LINE), persona = this.persona;
     if (!persona || this.busy || !text) return null;
     const serial = ++this.serial, current = () => serial === this.serial;
+    this.voice?.stop();
     this.busy = true; this.view.said(text); this.view.reply('', true);
     let reply = null;
     try {
@@ -56,10 +58,12 @@ export class ResidentConversation {
     this.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
     this.turns++; this.busy = false;
     this.view.reply(reply, false);
+    this.voice?.speak(reply, persona.voice);
     return reply;
   }
   close() {
     if (this.busy) this.model.interrupt();
+    if (this.persona) this.voice?.stop();
     this.serial++; this.busy = false; this.persona = null; this.history = []; this.turns = 0;
   }
   snapshot() {
@@ -70,7 +74,7 @@ export class ResidentConversation {
 
 const SPECIES_COLORS = { human: '#7ee6e3', robot: '#e8cd95', alien: '#c5a3ff' };
 // The panel in index.html (#resident-chat), reusing the story's dialogue styles.
-function createView({ touch, onSay, onClose }) {
+function createView({ touch, onSay, onClose, onReplay, onVoice }) {
   const root = $('resident-chat'), text = $('resident-text'), said = $('resident-said'), topics = $('resident-topics');
   const form = $('resident-form'), field = $('resident-input'), send = $('resident-send'), status = $('resident-status');
   let lines = [];
@@ -80,6 +84,8 @@ function createView({ touch, onSay, onClose }) {
     const [kind, index] = target.dataset.resident.split(':');
     if (kind === 'close') onClose();
     if (kind === 'topic') onSay(lines[Number(index)]);
+    if (kind === 'replay') onReplay();
+    if (kind === 'voice') onVoice();
   });
   form.addEventListener('submit', event => { event.preventDefault(); if (onSay(field.value)) field.value = ''; });
   return {
@@ -106,6 +112,14 @@ function createView({ touch, onSay, onClose }) {
     },
     status({ status: state, message }) {
       status.textContent = state === 'error' ? `The resident model stopped (${message}). Turn it off and on in the pause menu.` : 'Replies are written by an AI model on this device';
+    },
+    // The shared voice's state, as the story's dialogue card shows it.
+    voice({ message, supported, enabled, volume, status: speech }) {
+      $('resident-voice-status').textContent = message;
+      $('resident-voice-replay').disabled = !supported || !enabled || !volume;
+      const toggle = $('resident-voice-toggle');
+      toggle.disabled = !supported; toggle.textContent = enabled ? 'Voice on' : 'Voice off'; toggle.setAttribute('aria-pressed', String(enabled));
+      $('resident-monogram').classList.toggle('speaking', speech === 'speaking');
     },
   };
 }
@@ -137,13 +151,16 @@ function bindSettings(model, touch) {
  * conversation panel. The engine asks `prompt()` for the E prompt and calls
  * `open()`; a mode's own characters come first and never reach this.
  */
-export function createResidentChat({ ui, hud, storage, touch = false, playing = () => true, model = new ResidentModel({ storage }) }) {
+export function createResidentChat({ ui, hud, storage, voice = null, touch = false, playing = () => true, model = new ResidentModel({ storage }) }) {
   ui.register('resident-chat');
   let conversation = null, wasReady = model.ready;
   const view = createView({ touch,
     onSay: line => { if (conversation.busy || !String(line ?? '').trim()) return false; conversation.say(line); return true; },
-    onClose: () => ui.close() });
-  conversation = new ResidentConversation({ model, view });
+    onClose: () => ui.close(),
+    onReplay: () => voice?.replay(),
+    onVoice: () => { if (!voice) return; voice.setEnabled(!voice.enabled); if (voice.enabled) voice.replay(); } });
+  conversation = new ResidentConversation({ model, view, voice });
+  voice?.subscribe(state => view.voice(state));
   bindSettings(model, touch);
   model.subscribe(state => {
     if (state.status === 'ready' && !wasReady && playing()) hud.notify('RESIDENTS // Conversations ready. Face someone and press E to talk.', 5);

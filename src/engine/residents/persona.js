@@ -52,6 +52,11 @@ const CONCERNS = {
   robot: ['a maintenance check that keeps being postponed', 'getting your route exactly right', 'rain in your joints', 'understanding human small talk', 'a scratch on your casing'],
   alien: ['how loud the city is', 'finding food that tastes like home', 'the tram map', 'a festival back home you are missing', 'learning local slang'],
 };
+// Installed device voices by name, as the story cast picks theirs.
+const VOICE_NAMES = {
+  woman: ['Zira', 'Samantha', 'Aria', 'Jenny', 'Hazel', 'Serena', 'Sonia', 'Susan', 'Victoria', 'Libby', 'Karen'],
+  man: ['David', 'Daniel', 'Guy', 'Mark', 'George', 'Ryan', 'Alex'],
+};
 const BUILDING_KINDS = { office: 'office tower', apartment: 'apartment block', terrace: 'row of terraced homes', market: 'market building', civic: 'civic building', warehouse: 'warehouse', factory: 'factory' };
 const DESK_ROLES = { office: 'office worker', civic: 'city clerk', warehouse: 'shift supervisor', factory: 'shift supervisor' };
 
@@ -95,6 +100,25 @@ function indoorScene({ spot, activity, room, home, level, building }) {
   return { doing: `inside ${at}` };
 }
 
+/**
+ * How a resident sounds with the browser's voices, in the shape of the story
+ * cast's VOICE_PROFILES: an order of preferred device voices, starting at a
+ * different one for each person, then pitch and pace by build, age and kind.
+ */
+export function residentVoice({ key, species, gender, age }) {
+  const unit = salt => hash(`${key}:voice:${salt}`) / 4294967296;
+  const pool = species === 'human' && VOICE_NAMES[gender] ? gender : unit('pool') < .5 ? 'woman' : 'man', names = VOICE_NAMES[pool];
+  const turn = Math.floor(unit('turn') * names.length);
+  let pitch = { woman: 1.06, man: .86 }[species === 'human' && gender] ?? 1, rate = 1;
+  if (age) { pitch -= (age - 35) * .004; rate -= (age - 35) * .003; }
+  // Robots and aliens speak well above or below anyone in the crowd.
+  if (species === 'robot') { pitch = unit('register') < .5 ? .62 : 1.38; rate = .9; }
+  if (species === 'alien') { pitch = unit('register') < .5 ? .68 : 1.3; rate = .84; }
+  pitch += (unit('pitch') - .5) * .16; rate += (unit('rate') - .5) * .12;
+  return { id: key, pitch: Math.min(1.45, Math.max(.55, pitch)), rate: Math.min(1.2, Math.max(.75, rate)), voiceSlot: hash(`${key}:voice:slot`) % 16,
+    preferred: [...names.slice(turn), ...names.slice(0, turn), pool === 'woman' ? 'Female' : 'Male'], label: 'Resident' };
+}
+
 const roomKind = id => typeof id === 'string' ? id.slice(id.lastIndexOf(':') + 1).replace(/-\d+$/, '') : null;
 
 /** A pedestrian from traffic, as plain data for `residentPersona`. */
@@ -122,11 +146,11 @@ export function residentPersona(resident, { time = 0 } = {}) {
   else title = role = profile?.archetype ? ARCHETYPE_ROLES[profile.archetype] ?? profile.archetype.toLowerCase() : pick(JOBS[profile?.outfit] ?? JOBS.casual, 'job');
   const clock = gameClock(time), h = clock.hours;
   const part = h < 5 ? 'the small hours' : h < 8 ? 'early morning' : h < 12 ? 'morning' : h < 17 ? 'afternoon' : h < 21 ? 'evening' : 'late evening';
-  const district = resident.district ?? { name: 'Afterlight', description: '' };
+  const district = resident.district ?? { name: 'Afterlight', description: '' }, gender = profile?.gender ?? null, age = profile?.age ?? null;
   return {
     key, species, title: title.split(',')[0], role,
-    name: pick(species === 'human' ? NAMES[profile?.gender] ?? [...NAMES.woman, ...NAMES.man] : NAMES[species], 'name'),
-    age: profile?.age ?? null,
+    name: pick(species === 'human' ? NAMES[gender] ?? [...NAMES.woman, ...NAMES.man] : NAMES[species], 'name'),
+    gender, age, voice: residentVoice({ key, species, gender, age }),
     mood: pick(MOODS[species], 'mood'), style: pick(STYLES[species], 'style'), concern: pick(CONCERNS[species], 'concern'),
     doing: scene.doing,
     where: district.description ? `${district.name} (${lowerFirst(district.description).replace(/\.$/, '')})` : district.name,

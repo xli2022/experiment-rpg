@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { residentPersona, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, opener, TOPICS, HISTORY_TURNS } from '../src/engine/residents/persona.js';
+import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, opener, TOPICS, HISTORY_TURNS } from '../src/engine/residents/persona.js';
 import { ResidentModel, detectGPU, RESIDENT_CHAT_KEY, RESIDENT_MODELS } from '../src/engine/residents/model.js';
 import { ResidentConversation, facingResident, settingsNote, MAX_LINE } from '../src/engine/residents/conversation.js';
 import { createStorage } from '../src/engine/save.js';
@@ -236,6 +236,44 @@ test('deleting the download turns the setting off', async () => {
   assert.deepEqual([deleted.length, model.enabled, model.downloaded, model.status], [1, false, false, 'off']);
   assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: false, downloaded: false });
   assert.match(settingsNote(model.snapshot()), /^The downloaded model was deleted\. Chat with people/);
+});
+
+test('each resident has a voice of their own, in the shape the story cast uses', () => {
+  const personas = [...CROWD_PROFILES.map((p, i) => residentPersona(walker(i, p.id))), ...VISITOR_PROFILES.map((p, i) => residentPersona(walker(40 + i, p.id, p.species)))];
+  for (const { key, species, gender, voice } of personas) {
+    assert.equal(voice.id, key);
+    assert.ok(voice.pitch >= .55 && voice.pitch <= 1.45 && voice.rate >= .75 && voice.rate <= 1.2, `${key}: ${voice.pitch} / ${voice.rate}`);
+    assert.ok(Number.isInteger(voice.voiceSlot) && voice.preferred.length > 3);
+    assert.ok(['Female', 'Male'].includes(voice.preferred.at(-1)), 'any installed voice of the right kind will do last');
+    if (species === 'human') assert.equal(voice.preferred.at(-1), gender === 'woman' ? 'Female' : 'Male');
+    else assert.ok(voice.pitch < .8 || voice.pitch > 1.2, `${key}: robots and aliens sound unlike the crowd`);
+  }
+  assert.deepEqual(residentPersona(walker(3, 'resident-3')).voice, residentPersona(walker(3, 'resident-3')).voice, 'the same person keeps one voice');
+  assert.ok(new Set(personas.map(p => p.voice.preferred[0])).size >= 6, 'people start from different device voices');
+  assert.ok(new Set(personas.map(p => p.voice.pitch.toFixed(2))).size >= 20, 'and pitch their voices differently');
+  const at = age => residentVoice({ key: 'walker:9', species: 'human', gender: 'man', age });
+  assert.ok(at(64).pitch < at(27).pitch && at(64).rate < at(27).rate, 'with the same seed, an older voice is lower and slower');
+});
+
+test('residents speak each finished reply and fall silent when interrupted or left', async () => {
+  const spoken = [], stops = [];
+  const voice = { speak: (text, profile) => spoken.push([text, profile.id]), stop: () => stops.push(true) };
+  let release;
+  const model = { generate: (messages, { onText }) => new Promise(resolve => { release = text => { onText(text); resolve(text); }; }), interrupt() {} };
+  const conversation = new ResidentConversation({ model, view: { show() {}, said() {}, reply() {} }, voice });
+  const persona = residentPersona(walker(8, 'resident-8'));
+  const greeting = conversation.open(persona);
+  release('Evening. Rain again.'); await greeting;
+  assert.deepEqual(spoken, [['Evening. Rain again.', persona.key]], 'spoken once, when finished, in their voice');
+  const before = stops.length, next = conversation.say('What do you do?');
+  assert.equal(stops.length, before + 1, 'saying something new stops the line being spoken');
+  conversation.close();
+  assert.equal(stops.length, before + 2, 'leaving stops it too');
+  release('I fix trams.'); await next;
+  assert.equal(spoken.length, 1, 'nothing is spoken after leaving');
+  const failing = new ResidentConversation({ model: { generate: async () => { throw new Error('Device was lost.'); }, interrupt() {} }, view: { show() {}, said() {}, reply() {} }, voice });
+  await failing.open(persona);
+  assert.deepEqual(spoken.at(-1), [fallbackReply(persona, 0), persona.key], 'fallback lines are spoken as well');
 });
 
 function harness(generate) {

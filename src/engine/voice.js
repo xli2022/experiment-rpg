@@ -1,4 +1,6 @@
-import { VOICE_PROFILES } from '../../actors/npc-profiles.js';
+import { VOICE_PROFILES } from '../actors/npc-profiles.js';
+
+// Spoken dialogue for every mode: story contacts and background residents.
 
 export const VOICE_STORAGE_KEY = 'afterlight.voice.v1';
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
@@ -49,7 +51,7 @@ export class DialogueVoice {
   snapshot() {
     return { supported: this.supported, enabled: this.enabled, volume: this.volume, status: this.status,
       message: !this.supported ? 'Voice unavailable in this browser · subtitles remain on' : !this.enabled || !this.volume ? 'Voice muted · subtitles on' : this.message,
-      voiceName: this.voiceName ?? null, availableVoices: this.voices.length, contact: this.last?.id ?? null };
+      voiceName: this.voiceName ?? null, availableVoices: this.voices.length, contact: (typeof this.last?.speaker === 'string' ? this.last.speaker : this.last?.speaker?.id) ?? null };
   }
   subscribe(listener) { this.listeners.add(listener); listener(this.snapshot()); return () => this.listeners.delete(listener); }
   emit() { for (const listener of this.listeners) listener(this.snapshot()); }
@@ -66,13 +68,14 @@ export class DialogueVoice {
     if (this.supported) { try { this.synth.cancel(); } catch { /* A missing service must never block dialogue. */ } }
     this.setStatus('stopped', 'Voice stopped · replay anytime');
   }
-  replay() { if (this.last) this.speak(this.last.text, this.last.id); }
-  speak(text, id) {
-    this.stop(); this.last = { text, id };
+  replay() { if (this.last) this.speak(this.last.text, this.last.speaker); }
+  /** `speaker` is a story contact's id, or a voice profile like VOICE_PROFILES' with an `id`. */
+  speak(text, speaker) {
+    this.stop(); this.last = { text, speaker };
     if (!this.supported || !this.enabled || !this.volume) { this.emit(); return; }
     const chunks = speechChunks(text), serial = this.serial;
     if (!chunks.length) return;
-    const profile = VOICE_PROFILES[id] ?? VOICE_PROFILES.mara;
+    const profile = typeof speaker === 'string' || !speaker ? VOICE_PROFILES[speaker] ?? VOICE_PROFILES.mara : speaker;
     const voice = selectVoice(this.voices, profile);
     this.voiceName = voice?.name ?? 'Browser default';
     const fail = message => {

@@ -81,6 +81,9 @@
           <div class="control-grid"><span>Move / drive</span><kbd>W A S D / ↑ ↓ ← →</kbd><span>Look around</span><kbd>MOUSE / DRAG</kbd><span class="armed-only">Fire weapon</span><kbd class="armed-only">LEFT CLICK</kbd><span class="armed-only">Aim</span><kbd class="armed-only">RIGHT CLICK</kbd><span>Sprint / walk</span><kbd>SHIFT / ALT</kbd><span>Climb / release wall</span><kbd>E</kbd><span>Jump / handbrake</span><kbd>SPACE</kbd><span>Use / enter / exit vehicle</span><kbd>E</kbd><span class="armed-only">Reload</span><kbd class="armed-only">R</kbd><span>City map</span><kbd>M</kbd><span>Pause / release mouse</span><kbd>ESC</kbd></div>
           <div class="setting-row"><label for="quality">Visual quality</label><select id="quality"><option value="high">High · neon bloom</option><option value="low">Performance · mobile</option></select></div>
           <div class="setting-row"><label for="sensitivity">Look sensitivity</label><input id="sensitivity" type="range" min="0.4" max="2" step="0.1" value="1" /></div>
+          <div class="setting-row"><label for="voice-enabled">Spoken NPC dialogue</label><input id="voice-enabled" type="checkbox" checked /></div>
+          <div class="setting-row voice-volume-row"><label for="voice-volume">Voice volume <output id="voice-volume-value" for="voice-volume">80%</output></label><input id="voice-volume" type="range" min="0" max="100" step="5" value="80" /></div>
+          <p id="voice-settings-note" class="menu-note"></p>
           <div class="setting-row"><label for="resident-chat-toggle">Talk with residents (AI)</label><input id="resident-chat-toggle" type="checkbox" /></div>
           <p id="resident-chat-note" class="menu-note resident-note"></p>
           <button id="resident-chat-forget" class="text-button hidden" type="button">Delete the downloaded resident model</button>
@@ -97,6 +100,7 @@
         <header class="dialogue-heading"><div id="resident-monogram" class="person-monogram" aria-hidden="true"></div><div><div id="resident-role" class="eyebrow"></div><h2 id="resident-name"></h2><div id="resident-mood" class="resident-mood"></div></div><button class="icon-button" data-resident="close" aria-label="Leave conversation">×</button></header>
         <p id="resident-said" class="resident-said"></p>
         <p id="resident-text" class="dialogue-text resident-text" aria-live="polite"></p>
+        <div class="dialogue-voice"><span id="resident-voice-status" role="status" aria-live="polite"></span><button id="resident-voice-replay" type="button" data-resident="replay">Replay voice</button><button id="resident-voice-toggle" type="button" data-resident="voice" aria-pressed="true">Voice on</button></div>
         <div id="resident-topics" class="dialogue-choices"></div>
         <form id="resident-form" class="resident-form"><input id="resident-input" type="text" maxlength="140" autocomplete="off" enterkeyhint="send" placeholder="Say something…" aria-label="Say something" /><button id="resident-send" class="rpg-button accent" type="submit">Say</button></form>
         <footer>AFTERLIGHT / STREET TALK <span id="resident-status">Replies are written by an AI model on this device</span></footer>

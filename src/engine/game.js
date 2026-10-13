@@ -26,6 +26,7 @@ import { createContactShadows } from './contact-shadows.js';
 import { setupFullscreen } from './fullscreen.js';
 import { createStorage, LAST_MODE_KEY } from './save.js';
 import { gameClock } from './clock.js';
+import { DialogueVoice } from './voice.js';
 import { createResidentChat, facingResident } from './residents/conversation.js';
 import { walkerResident, occupantResident } from './residents/persona.js';
 import { loadCharacterAssets, createCharacter, animateCharacter, characterShot } from './player/characters.js';
@@ -48,6 +49,8 @@ export async function createGame({ canvas, modes }) {
   const state = { started: false, paused: false, mapOpen: false, modal: null, time: 0 };
   const player = { x: 0, y: 0, z: 0, yaw: -Math.PI / 2, velocityY: 0, vx: 0, vz: 0, speed: 0, jumpPhase: '', jumpTime: 0, jumpElapsed: 0, launched: false, groundY: 0, climb: null, climbCandidate: null, vault: null, pushTime: 0, parachute: null, interior: null };
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
+  // Spoken dialogue, shared by every mode's characters and the residents.
+  const voice = new DialogueVoice({ storage });
   const vector = new THREE.Vector3(), cameraRig = createCameraRig(), cutawayFader = createCutawayFader();
   let cutawaySurfaces = [];
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets, residents;
@@ -123,7 +126,7 @@ export async function createGame({ canvas, modes }) {
     const track = fn => { cleanups.push(fn); return fn; };
     contactSourcesRef = contactSources;
     return {
-      THREE, scene, camera, renderer, world, traffic, assets, storage, audio, effects, weapon, input, state,
+      THREE, scene, camera, renderer, world, traffic, assets, storage, audio, voice, effects, weapon, input, state,
       clock: { get time() { return state.time; }, set time(value) { state.time = value; } },
       actorRange: () => RENDER_PROFILES[quality].actors,
       hud: {
@@ -196,6 +199,14 @@ export async function createGame({ canvas, modes }) {
       if (state.started) audio.init();
       syncSoundButton();
       if (state.started && !state.paused) canvas.focus();
+    });
+    $('voice-enabled').addEventListener('change', e => voice.setEnabled(e.target.checked));
+    $('voice-volume').addEventListener('input', e => voice.setVolume(Number(e.target.value) / 100));
+    voice.subscribe(state => {
+      $('voice-enabled').checked = state.enabled; $('voice-enabled').disabled = !state.supported;
+      $('voice-volume').value = Math.round(state.volume * 100); $('voice-volume').disabled = !state.supported;
+      $('voice-volume-value').textContent = `${Math.round(state.volume * 100)}%`;
+      $('voice-settings-note').textContent = state.supported ? 'Spoken dialogue uses your browser’s voices. Subtitles stay on. Sound effects have a separate speaker button.' : 'This browser has no speech service. All dialogue remains available as subtitles.';
     });
     $('quality').addEventListener('change', e => setQuality(e.target.value));
     $('sensitivity').addEventListener('input', e => { input.sensitivity = Number(e.target.value); });
@@ -625,7 +636,7 @@ export async function createGame({ canvas, modes }) {
       rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
       performance: { ...frameCosts, scale: resolution.scale, activeCrowd: traffic.pedestrians.active, streaming: { ...world.stream.stats }, blueprints: world.metropolis.blocks.size }, population: traffic.pedestrians.snapshot(),
       shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(), occupants: traffic.occupants.snapshot(),
-      residents: { ...residents.snapshot(), nearby: residentCandidates().map(c => ({ x: c.x, y: c.y, z: c.z, distance: Math.hypot(c.x - player.x, c.z - player.z), c })).sort((a, b) => a.distance - b.distance).slice(0, 5).map(({ c, ...near }) => ({ ...near, inSight: inSight(c) })), ahead: !!residentAhead() },
+      voice: voice.snapshot(), residents: { ...residents.snapshot(), nearby: residentCandidates().map(c => ({ x: c.x, y: c.y, z: c.z, distance: Math.hypot(c.x - player.x, c.z - player.z), c })).sort((a, b) => a.distance - b.distance).slice(0, 5).map(({ c, ...near }) => ({ ...near, inSight: inSight(c) })), ahead: !!residentAhead() },
       city: { span: world.limit * 2, areaKm2: (world.limit * 2 / 1000) ** 2, districts: world.districts.length, roads: world.plan.roads.length, vertical: true },
       character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: traffic.pedestrians.count, crowdDrawCalls: traffic.pedestrians.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
       camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
@@ -663,10 +674,10 @@ export async function createGame({ canvas, modes }) {
       interact, jump, map: toggleMap, pause: () => ui.togglePause(),
       reload: () => weapon.reload(), fire: () => weapon.fire(),
       journal: () => mode?.onAction?.('journal'), medkit: () => mode?.onAction?.('medkit'),
-      blur: () => { mode?.onMenu?.(); if (state.started && !state.paused) ui.setPause(true); }, audio: () => audio.init(),
+      blur: () => { mode?.onMenu?.(); voice.stop(); if (state.started && !state.paused) ui.setPause(true); }, audio: () => audio.init(),
     });
     ui = createUI({ state, input, audio, onMenu: id => { mode?.onMenu?.(id); residents?.onMenu(id); if (id && state.started) save(); } });
-    residents = createResidentChat({ ui, hud, storage, touch: input.touch, playing: () => state.started });
+    residents = createResidentChat({ ui, hud, storage, voice, touch: input.touch, playing: () => state.started });
     owned = traffic.owned;
     weapon = createWeapon({ camera, character, audio, effects, hud, input, traffic }, {
       canAct: () => state.started && !state.paused && !driving && !player.climb && !player.vault && !player.parachute,
@@ -682,8 +693,8 @@ export async function createGame({ canvas, modes }) {
     renderer.compile(scene, camera);
     $('loading').style.opacity = '0'; setTimeout(() => $('loading').classList.add('hidden'), 500);
     lastFrame = performance.now(); frame(lastFrame);
-    document.addEventListener('visibilitychange', () => { if (document.hidden) mode?.onMenu?.(); });
-    window.addEventListener('pagehide', () => { mode?.onMenu?.(); save(); if (animationId) cancelAnimationFrame(animationId); });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { mode?.onMenu?.(); voice.stop(); } });
+    window.addEventListener('pagehide', () => { mode?.onMenu?.(); voice.stop(); save(); if (animationId) cancelAnimationFrame(animationId); });
     window.addEventListener('pageshow', event => { if (event.persisted) { lastFrame = performance.now(); frame(lastFrame); } });
   }
 

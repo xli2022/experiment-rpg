@@ -87,7 +87,7 @@ The top-right full-screen button expands the game and its interface together, re
 
 The city map supports dragging and zooming within the city boundary; Entire city centers the complete map. Mobile layouts account for portrait, landscape and screen safe areas, with the full map fitting within the landscape popup.
 
-Sound effects default to on and begin when you start playing; the speaker button mutes or unmutes them. **Spoken NPC dialogue starts enabled**, using the browser’s available English voices with per-character voice selection, pitch and pacing. Conversations have Replay and Voice on/off controls, and settings include a separate voice volume slider. Voice preferences persist independently of your story. Subtitles always remain visible. Selecting another response, leaving a conversation or hiding the page cancels playback. A missing or blocked speech service shows a message and leaves every dialogue choice usable. Device voices and quality vary; this is synthesized speech, not recorded voice acting. The game uses the [Web Speech synthesis API](https://webaudio.github.io/web-speech-api/#tts-section), needs no microphone or API key, and the browser may use local or network speech services.
+Sound effects default to on and begin when you start playing; the speaker button mutes or unmutes them. **Spoken NPC dialogue starts enabled**, for story contacts and for residents you talk to, using the browser’s available English voices with per-character voice selection, pitch and pacing. Conversations have Replay and Voice on/off controls, and the pause menu has the spoken-dialogue settings, with a separate voice volume slider, in every mode. Voice preferences persist independently of your story. Subtitles always remain visible. Selecting another response, leaving a conversation or hiding the page cancels playback. A missing or blocked speech service shows a message and leaves every dialogue choice usable. Device voices and quality vary; this is synthesized speech, not recorded voice acting. The game uses the [Web Speech synthesis API](https://webaudio.github.io/web-speech-api/#tts-section), needs no microphone or API key, and the browser may use local or network speech services.
 
 To borrow a car, walk up to one that is stopped or crawling in traffic and press **E** (or **USE** on touch). In the story you can also hit a moving car three times to stop it. There are no designated parked cars. Pedestrian and traffic targets vary with the district, available street space and graphics quality.
 
@@ -99,7 +99,7 @@ Health and armor slowly recover out of combat. Defeat returns you to your last r
 
 Background residents, the people on the street and inside buildings, can talk when **Talk with residents (AI)** is turned on in the pause menu. It is off by default. Turning it on downloads Qwen3.5 0.8B, a small open language model (4-bit, about 450 MB, Apache-2.0), once from Hugging Face into the browser's cache. WebLLM then loads it onto the graphics card in a worker, so play carries on meanwhile. It uses about 1.6 GB of graphics memory, or 1.9 GB on cards without 16-bit shaders. The pause menu shows progress, and a notice says when residents are ready. It needs WebGPU on a hardware graphics card, as in current desktop Chrome or Edge. Elsewhere the setting says why it is unavailable, and the game is unchanged. Phones and tablets may not have the memory.
 
-Face a passer-by or someone indoors within about 2.5 m and press **E** (**USE** on touch). The prompt names their job. The world pauses while you talk. They answer your greeting; then pick a quick line or type up to 140 characters. Each resident's name, job, mood, worry and manner are seeded from their own ID, so the same person stays the same person. They know their district, what they are doing (crossing the street, working a shop counter, waiting for the lift), the hour and the rain, and nothing else. Robots and aliens speak as themselves. Replies are trimmed to one to three spoken sentences. An unusable reply, such as one that steps out of character, and any failure become a short fallback line. Replies are written on your device; nothing you type leaves the browser. Resident lines are text only, without speech. Story contacts and quests never use the model, and come first when you press E near them. **Delete the downloaded resident model** in the pause menu turns the setting off and frees the space.
+Face a passer-by or someone indoors within about 2.5 m and press **E** (**USE** on touch). The prompt names their job. The world pauses while you talk. They answer your greeting; then pick a quick line or type up to 140 characters. Each resident's name, job, mood, worry and manner are seeded from their own ID, so the same person stays the same person. They know their district, what they are doing (crossing the street, working a shop counter, waiting for the lift), the hour and the rain, and nothing else. Robots and aliens speak as themselves. Replies are trimmed to one to three spoken sentences. An unusable reply, such as one that steps out of character, and any failure become a short fallback line. Replies are written on your device; nothing you type leaves the browser. Residents speak their lines aloud with a voice of their own: a preferred device voice, different people starting from different ones, with pitch and pace set by build and age. Robots and aliens speak well above or below the crowd. The panel has the same Replay and Voice on/off controls as story conversations; saying something new or leaving stops the speech. Story contacts and quests never use the model, and come first when you press E near them. **Delete the downloaded resident model** in the pause menu turns the setting off and frees the space.
 
 ## Project layout
 
@@ -131,13 +131,14 @@ Sources are layered, and each layer imports only those before it: `core` → `wo
   - `hud.js` / `ui.js` / `mode-picker.js` / `map-controls.js` — HUD, map, menus and mode cards
   - `weapon.js` / `effects.js` — the optional weapon, tracers and sparks
   - `residents/` — optional AI conversations with background residents: `persona.js` (who each resident is, the prompt and reply cleanup), `model.js` / `model-worker.js` (the setting and the in-browser model) and `conversation.js` (the panel and turn-taking)
+  - `voice.js` — spoken dialogue for story contacts and residents, shared through the host
   - `input.js`, `audio.js`, `clock.js`, `shadows.js`, `contact-shadows.js`, `save.js` and `fullscreen.js`
   - `style.css` / `ui.css` / `mobile.css` — styles
 - `src/modes/index.js` — the mode registry; see [game modes](docs/MODES.md)
 - `src/modes/story/` — The Last Signal:
   - `campaign.js` — quest and economy engine with versioned saves
   - `content.js` — contacts, quests, items and endings on landmark positions
-  - `dialogue.js` / `voice.js` — conversations and speech
+  - `dialogue.js` — conversations, spoken through the engine's `voice.js`
   - `rpg-ui.js` / `hud.js` — journal, shops, map sidebar and story panels
   - `world-life.js` / `drones.js` — contacts in the city, and patrols
 - `src/modes/free-roam/` — Free roam, the minimal example mode
@@ -187,12 +188,13 @@ The geometry regression suite scans all 900 city blocks with the live story rese
 
 NPC/voice verification inspected all seven cast models and their portraits, opened Mara and Rook conversations, accepted a job, exercised replay/mute/exit, reloaded saved voice preferences, and checked portrait (390 × 844) and landscape (844 × 390) layouts. The production build loaded without console errors and omitted development diagnostics. The test browser initially reported speech playback starting, then its native service returned `synthesis-failed`, including for standalone default-voice utterances outside the game. Error fallback was verified; reliable audible playback and voice quality still require checking on the target device.
 
-Resident conversations are covered by `tests/residents.test.js` with a stand-in model. The tests cover seeded personas for every crowd and visitor design and for real interior spots, the brief, reply cleanup and who can be talked to. They cover the setting: opting in, browsers without WebGPU, a failed load, turning it off mid-download, a lost graphics device and deleting the download. They also cover the conversation flow. In headless Chromium, again with a stand-in model, the browser checks covered:
+Resident conversations are covered by `tests/residents.test.js` with a stand-in model. The tests cover seeded personas for every crowd and visitor design and for real interior spots, the brief, reply cleanup and who can be talked to. They cover the setting: opting in, browsers without WebGPU, a failed load, turning it off mid-download, a lost graphics device and deleting the download. They also cover the conversation flow and residents' seeded voices, including which lines are spoken. In headless Chromium, again with a stand-in model, the browser checks covered:
 
 - the setting's progress and ready notice;
 - the Talk prompt in front of a passer-by, in free roam and in the story;
 - the panel, the quick lines and typing (E, M and J typed into the field stay text);
 - Escape interrupting a reply;
+- residents speaking each reply in their own voice, with a recording stand-in for the browser's speech service; Replay, Voice on/off, leaving cancelling speech, and Mara still speaking with her own voice through the shared one;
 - Mara's written dialogue taking precedence beside her;
 - portrait (390 × 844) and landscape (844 × 390) layouts.
 

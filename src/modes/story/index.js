@@ -3,7 +3,6 @@ import { Campaign, freshProgress, readSave, writeSave, WORLD_REVISION } from './
 import { WORLD_OBJECTS, ENCOUNTERS, QUESTS, districtAt, placeById } from './content.js';
 import { createWorldLife, COLORS, SYMBOLS } from './world-life.js';
 import { RPGUI } from './rpg-ui.js';
-import { DialogueVoice } from './voice.js';
 import { createDrone } from './drones.js';
 import { createStoryHud } from './hud.js';
 import { createNPCPortraits } from '../../actors/npc-appearance.js';
@@ -53,7 +52,7 @@ function createStory(host, fresh) {
   const { scene, world, storage, assets, audio, effects, weapon, ui } = host, you = host.player;
   const saved = fresh ? { progress: freshProgress(), position: null, loaded: false } : readSave(storage);
   const campaign = new Campaign(saved.progress), vitals = { health: 100, armor: campaign.maxArmor, damageAt: -100 };
-  const voice = new DialogueVoice({ storage }), drones = [], direction = new THREE.Vector3(), point = new THREE.Vector3();
+  const voice = host.voice, drones = [], direction = new THREE.Vector3(), point = new THREE.Vector3();
   let savedRevision = -1, saveWarningShown = false;
   host.clock.time = campaign.data.elapsed;
 
@@ -76,19 +75,9 @@ function createStory(host, fresh) {
   });
   ui.register('journal', 'KeyJ'); ui.register('dialogue');
   const storyHud = createStoryHud(host, { journal: toggleJournal, medkit: useMedkit });
+  // Spoken dialogue settings belong to the engine's pause menu; the voice is shared.
   const settings = document.createElement('div');
-  settings.innerHTML = `<div class="setting-row"><label for="voice-enabled">Spoken NPC dialogue</label><input id="voice-enabled" type="checkbox" checked /></div>
-    <div class="setting-row voice-volume-row"><label for="voice-volume">Voice volume <output id="voice-volume-value" for="voice-volume">80%</output></label><input id="voice-volume" type="range" min="0" max="100" step="5" value="80" /></div>
-    <p id="voice-settings-note" class="menu-note"></p>
-    <p class="menu-note">J — journal · Q — medkit · E — talk to contacts and use terminals. Shoot rogue drones; hit a traffic car three times to stop it and drive.</p>`;
-  settings.querySelector('#voice-enabled').addEventListener('change', e => voice.setEnabled(e.target.checked));
-  settings.querySelector('#voice-volume').addEventListener('input', e => voice.setVolume(Number(e.target.value) / 100));
-  const unsubscribeVoice = voice.subscribe(state => {
-    settings.querySelector('#voice-enabled').checked = state.enabled; settings.querySelector('#voice-enabled').disabled = !state.supported;
-    settings.querySelector('#voice-volume').value = Math.round(state.volume * 100); settings.querySelector('#voice-volume').disabled = !state.supported;
-    settings.querySelector('#voice-volume-value').textContent = `${Math.round(state.volume * 100)}%`;
-    settings.querySelector('#voice-settings-note').textContent = state.supported ? 'Spoken dialogue uses your browser’s voices. Subtitles stay on. Sound effects have a separate speaker button.' : 'This browser has no speech service. All dialogue remains available as subtitles.';
-  });
+  settings.innerHTML = '<p class="menu-note">J — journal · Q — medkit · E — talk to contacts and use terminals. Shoot rogue drones; hit a traffic car three times to stop it and drive.</p>';
   ui.menu([
     { label: 'Return to your last refuge', action: () => { respawn(); ui.close(); } },
     { label: 'Start a new story…', action: () => rpgUI.confirmNewStory() },
@@ -289,7 +278,7 @@ function createStory(host, fresh) {
       };
     },
     dispose() {
-      unsubscribeVoice(); voice.dispose(); rpgUI.dispose(); storyHud.dispose();
+      voice.stop(); rpgUI.dispose(); storyHud.dispose();
       worldLife.dispose();
       for (const drone of drones) { scene.remove(drone.root); drone.dispose(); }
     },
