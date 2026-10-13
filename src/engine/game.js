@@ -311,7 +311,8 @@ export async function createGame({ canvas, modes }) {
   function liftPrompt() { return nearLift() ? { caption: `ELEVATOR / FLOOR ${player.interior.level + 1} OF ${player.interior.plan.levels}`, label: 'Choose a floor' } : null; }
 
   // --- Windows ---------------------------------------------------------------
-  // Shots break the pane they hit; on foot, E smashes the window in arm's reach.
+  // Shots break the pane they hit; indoors, E smashes the window in arm's reach.
+  // Outside, E is left for grabbing the wall.
   function breakWindow(point, direction) {
     const pane = world.breakWindowAt(point);
     if (pane?.fresh) { effects.shatter(pane, direction); audio.glass(); }
@@ -319,7 +320,7 @@ export async function createGame({ canvas, modes }) {
   }
   const reachOrigin = new THREE.Vector3(), reachDirection = new THREE.Vector3();
   function windowAhead() {
-    if (driving || player.climb || player.vault || player.parachute || !state.started) return null;
+    if (driving || player.climb || player.vault || player.parachute || !state.started || !player.interior?.inside) return null;
     reachDirection.set(-Math.sin(player.yaw), 0, -Math.cos(player.yaw));
     // Low sills, tall plinths: try the hands at a few heights.
     for (const height of [1.3, 1, 1.6]) {
@@ -336,7 +337,8 @@ export async function createGame({ canvas, modes }) {
   // --- Player actions ----------------------------------------------------------
   function interact() {
     if (!state.started || state.paused) return;
-    if (player.climb || player.vault || player.parachute) return;
+    if (player.vault || player.parachute) return;
+    if (player.climb) { dropClimb(player); return; }
     if (driving) {
       if (Math.abs(driving.speed) > 7) { hud.notify('Slow down before exiting the vehicle.', 2); return; }
       const exit = findExitPosition(driving, nearbyColliders(driving.x, driving.z, 8, driving), .48, world.limit);
@@ -356,9 +358,11 @@ export async function createGame({ canvas, modes }) {
       // A traffic car waiting beside you (at a red light, in a queue) can be taken.
       const stopped = nearestCar ? null : traffic.hijackable(player);
       if (stopped) nearestCar = traffic.takeOver(stopped);
+      // With nothing more specific in reach, E grabs the nearest wall.
+      if (!nearestCar && grabWall()) return;
       if (!nearestCar) {
         const nearTraffic = traffic.cars.some(car => Math.abs(player.y - car.y) < 2 && Math.hypot(player.x - car.x, player.z - car.z) < 9);
-        hud.notify(nearTraffic ? `Step up to a car while it waits at a light, then press E${weapon.enabled ? ', or hit it three times to stop it' : ''}.` : mode?.interactHint?.() ?? 'Approach a window, an elevator or a stopped vehicle. E to interact.', 3);
+        hud.notify(nearTraffic ? `Step up to a car while it waits at a light, then press E${weapon.enabled ? ', or hit it three times to stop it' : ''}.` : mode?.interactHint?.() ?? 'Approach a wall, a window, an elevator or a stopped vehicle. E to interact.', 3);
         return;
       }
       resetTraversal();
@@ -401,11 +405,6 @@ export async function createGame({ canvas, modes }) {
     cameraYaw = player.yaw; cameraPitch = .05;
     input.firing = input.aiming = false; weapon.cancel();
     return true;
-  }
-  function toggleClimb() {
-    if (driving || !state.started || state.paused || player.vault) return;
-    if (player.climb) dropClimb(player);
-    else if (!grabWall()) hud.notify('Move within arm’s reach of a building wall to climb.', 2);
   }
   function resetTraversal() {
     player.climb = player.climbCandidate = player.vault = player.interior = null; player.groundY = player.pushTime = 0;
@@ -451,7 +450,7 @@ export async function createGame({ canvas, modes }) {
       if (player.vault) stepVault(player, dt);
       else if (player.climb) {
         const result = stepClimb(player, axes, dt, colliders, sprint);
-        if (result === 'roof') { hud.notify('ROOFTOP // Keep exploring. Space to jump; C to grab another wall.', 3); save(); }
+        if (result === 'roof') { hud.notify('ROOFTOP // Keep exploring. Space to jump; E to grab another wall.', 3); save(); }
       } else {
         const walk = input.keys.has('AltLeft') || input.keys.has('AltRight');
         const aiming = weapon.enabled && !player.parachute && input.aiming, firing = weapon.enabled && !player.parachute && input.firing;
@@ -624,7 +623,7 @@ export async function createGame({ canvas, modes }) {
     effects = createEffects(scene);
     hud = new HUD(world);
     input = new Input(canvas, {
-      interact, jump, climb: toggleClimb, map: toggleMap, pause: () => ui.togglePause(),
+      interact, jump, map: toggleMap, pause: () => ui.togglePause(),
       reload: () => weapon.reload(), fire: () => weapon.fire(),
       journal: () => mode?.onAction?.('journal'), medkit: () => mode?.onAction?.('medkit'),
       blur: () => { mode?.onMenu?.(); if (state.started && !state.paused) ui.setPause(true); }, audio: () => audio.init(),

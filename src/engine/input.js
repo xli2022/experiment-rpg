@@ -16,7 +16,6 @@ export class Input {
       if (code === 'KeyM') callbacks.map();
       if (code === 'KeyJ') callbacks.journal();
       if (code === 'KeyQ') callbacks.medkit();
-      if (code === 'KeyC') callbacks.climb();
     };
     window.addEventListener('keydown', e => {
       if (e.code === 'Escape') { e.preventDefault(); if (!e.repeat) callbacks.pause(); return; }
@@ -95,7 +94,6 @@ export class Input {
     });
     control('touch-fire', () => { this.firing = true; callbacks.fire(); }, undefined, () => { this.firing = false; });
     control('touch-interact', () => callbacks.interact());
-    control('touch-climb', () => callbacks.climb());
     control('touch-reload', () => callbacks.reload());
     control('touch-jump', () => { this.keys.add('Space'); callbacks.jump(); }, undefined, () => this.keys.delete('Space'));
     this.resetTouch = () => { for (const reset of resets) reset(); };

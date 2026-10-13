@@ -32,12 +32,12 @@ export class HUD {
       const busy = !!driving || climbing || gliding;
       n['weapon-panel'].classList.toggle('hidden', busy || !armed); n['driving-panel'].classList.toggle('hidden', !driving);
       for (const id of ['crosshair', 'touch-fire', 'touch-reload']) $(id).style.display = busy || !armed ? 'none' : '';
-      $('touch-interact').style.display = climbing || gliding ? 'none' : '';
+      $('touch-interact').style.display = gliding ? 'none' : '';
       const jump = $('touch-jump'), interact = $('touch-interact');
       jump.querySelector('span').textContent = driving ? 'BRAKE' : 'JUMP';
       jump.setAttribute('aria-label', driving ? 'Handbrake' : 'Jump');
-      interact.querySelector('span').textContent = driving ? 'EXIT' : 'USE';
-      interact.setAttribute('aria-label', driving ? 'Exit vehicle' : 'Talk, use, or enter vehicle');
+      interact.querySelector('span').textContent = driving ? 'EXIT' : climbing ? 'LET GO' : 'USE';
+      interact.setAttribute('aria-label', driving ? 'Exit vehicle' : climbing ? 'Let go of the wall' : 'Talk, use, climb a wall, or enter vehicle');
       $('joystick').querySelector('.joystick-label').textContent = driving ? 'DRIVE' : climbing ? 'CLIMB' : gliding ? 'GLIDE' : 'MOVE';
       document.body.classList.toggle('armed', armed);
       this.lastChrome = chrome;
@@ -47,7 +47,6 @@ export class HUD {
     const showGlide = gliding && !driving && state.started && !state.paused;
     $('climb-panel').classList.toggle('hidden', !showClimb && !showGlide); $('climb-panel').classList.toggle('near-wall', !climbing && !gliding);
     $('climb-panel').classList.toggle('gliding', showGlide);
-    $('touch-climb').classList.toggle('hidden', !showClimb); $('touch-climb').textContent = climbing ? 'LET GO' : 'CLIMB';
     if (showGlide) {
       $('climb-title').textContent = player.parachute.openness < 1 ? 'PARACHUTE OPENING' : 'PARACHUTE';
       $('climb-height').textContent = `${Math.max(0, Math.round(player.y - player.groundY))} M`;
@@ -57,7 +56,9 @@ export class HUD {
       $('climb-title').textContent = !climbing ? 'WALL WITHIN REACH' : face.mode === 'mantle' ? 'PULLING UP' : face.blocked ? 'MOVE ALONG THE WALL' : 'CLIMBING';
       $('climb-height').textContent = `${Math.round(climbing ? player.y : face.roofY)} M`;
       $('climb-progress').style.width = `${Math.min(100, Math.max(0, (player.y - face.baseY) / Math.max(1, face.roofY - face.baseY) * 100))}%`;
-      $('climb-controls').textContent = touch ? climbing ? 'Stick: climb & move sideways. ↑ jump off. LET GO to drop.' : 'Tap CLIMB to grab this wall.' : climbing ? 'W/S up & down · A/D sideways\nShift climb faster · Space jump off · C release' : 'C to climb · Space to grab a wall ahead';
+      // E/USE reaches for the wall only when nothing nearer claims it.
+      const claimed = !!(prompt || nearestCar);
+      $('climb-controls').textContent = touch ? climbing ? 'Stick: climb & move sideways. ↑ jump off. LET GO to drop.' : claimed ? 'Tap JUMP facing the wall to grab it.' : 'Tap USE to grab this wall.' : climbing ? 'W/S up & down · A/D sideways\nShift climb faster · Space jump off · E release' : claimed ? 'Space to grab a wall ahead' : 'E to climb · Space to grab a wall ahead';
     }
     if (driving) { const speed = Math.round(Math.abs(driving.speed) * 3.6); n.speed.textContent = speed; n['speed-bar'].style.width = `${Math.min(speed / 151 * 100, 100)}%`; }
     const canInteract = !driving && !climbing && !gliding && (prompt || nearestCar) && state.started && !state.paused;

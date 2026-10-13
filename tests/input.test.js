@@ -91,6 +91,15 @@ test('holding Escape opens or closes a menu only once', t => {
   assert.equal(pauses, 1);
 });
 
+test('E is the one key for using things and for grabbing or releasing walls', t => {
+  let interacts = 0;
+  const { input, window } = harness(t, { callbacks: { interact() { interacts++; } } });
+  input.setEnabled(true);
+  window.dispatch('keydown', { code: 'KeyE', repeat: false });
+  window.dispatch('keydown', { code: 'KeyC', repeat: false });
+  assert.equal(interacts, 1, 'C no longer has an action of its own');
+});
+
 test('menu transitions cancel captured touch gestures until a fresh touch starts', t => {
   const { input, document } = harness(t, { touch: true });
   input.setEnabled(true);
@@ -156,7 +165,7 @@ test('movement, drag look, and firing retain independent fingers without continu
 });
 
 test('held touch actions reject extra fingers and only their owner can release them', t => {
-  const called = { fire: 0, jump: 0, interact: 0, reload: 0, climb: 0 };
+  const called = { fire: 0, jump: 0, interact: 0, reload: 0 };
   const callbacks = Object.fromEntries(Object.keys(called).map(action => [action, () => called[action]++]));
   const { input, document } = harness(t, { touch: true, callbacks }); input.setEnabled(true);
   for (const action of Object.keys(called)) {

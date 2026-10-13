@@ -59,7 +59,7 @@ body.touch #joystick.active #joystick-thumb{background:#d9ff864d;border-color:va
 body.touch .touch-actions{
   right:var(--touch-right);bottom:var(--actions-bottom);width:auto;height:auto;transform:none;
   display:grid;grid-template-columns:48px 48px 64px;grid-template-rows:48px 48px;gap:10px;
-  grid-template-areas:'use reload fire' 'climb jump fire';align-items:center;z-index:2;
+  grid-template-areas:'use reload fire' '. jump fire';align-items:center;z-index:2;
 }
 body.touch .touch-actions button{
   position:static;inset:auto;transform:none;width:48px;height:48px;margin:0;padding:5px 2px;
@@ -72,7 +72,6 @@ body.touch .touch-actions button span{font:600 7px 'Barlow',sans-serif;letter-sp
 body.touch #touch-interact{grid-area:use;border-color:#b9df8799;color:#e3f4b4}
 body.touch #touch-reload{grid-area:reload}
 body.touch #touch-jump{grid-area:jump}
-body.touch #touch-climb{grid-area:climb;width:48px;height:48px;color:var(--cyan);border-color:#7ee6e377;font-size:9px}
 body.touch .touch-actions #touch-fire{grid-area:fire;width:64px;height:72px;border-radius:23px;background:#253627d9;border-color:#deff7aaa;color:var(--acid);gap:6px}
 body.touch #touch-fire svg{width:28px;height:28px}
 body.touch .touch-actions button.active,body.touch .touch-actions button:active{background:#4a603be6;border-color:var(--acid);box-shadow:0 0 0 3px #deff7a20}
