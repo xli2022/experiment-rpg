@@ -7,6 +7,7 @@ Afterlight is a city engine that hosts plug-in game modes. The engine owns every
 - the player on foot, climbing, gliding and driving
 - the camera, HUD, map and menus
 - saving cadence, and an optional weapon
+- optional AI conversations with background residents (see [resident conversations](../README.md#resident-conversations))
 
 A mode adds the game on top: goals, rules, characters, its own HUD panels and its own save slot. Two modes ship:
 
@@ -51,7 +52,7 @@ Every hook is optional. The engine calls them as follows.
 | `label` | Every HUD update | Mode name in the status line. |
 | `update(dt, { now, time, player, driving, camera })` | Every unpaused frame | The game's simulation. |
 | `hud({ player, goal, time })` | About 12 times a second | Refresh the mode's panels. |
-| `interactable(player)` | Every HUD update and on E | `{ caption, label, use() }` for the nearest usable thing, or `null`. |
+| `interactable(player)` | Every HUD update and on E | `{ caption, label, use() }` for the nearest usable thing, or `null`. It comes before talking to residents, windows and cars. |
 | `interactHint()` | E with nothing nearby | Help text. |
 | `objective()` | Every frame | Waypoint `{ x, y, z, label, text, hidden? }` or `null`. |
 | `mapMarkers({ player, expanded })` | Map draws | `[{ x, z, color, symbol?, radius?, dim? }]` |

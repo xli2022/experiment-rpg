@@ -11,5 +11,5 @@ function showError(error) {
 
 createGame({ canvas: $('world'), modes: MODES }).then(game => {
   // Diagnostics (and a teleport for checking places) only in Vite's development mode.
-  if (import.meta.env.DEV) window.__AFTERLIGHT__ = { snapshot: () => game.snapshot(), teleport: (spot, view) => game.teleport(spot, view) };
+  if (import.meta.env.DEV) window.__AFTERLIGHT__ = { snapshot: () => game.snapshot(), teleport: (spot, view) => game.teleport(spot, view), residents: game.residents };
 }).catch(showError);

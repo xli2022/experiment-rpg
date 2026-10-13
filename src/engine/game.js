@@ -25,6 +25,9 @@ import { createShadows } from './shadows.js';
 import { createContactShadows } from './contact-shadows.js';
 import { setupFullscreen } from './fullscreen.js';
 import { createStorage, LAST_MODE_KEY } from './save.js';
+import { gameClock } from './clock.js';
+import { createResidentChat, facingResident } from './residents/conversation.js';
+import { walkerResident, occupantResident } from './residents/persona.js';
 import { loadCharacterAssets, createCharacter, animateCharacter, characterShot } from './player/characters.js';
 import { beginJump, stepJump, resetFall } from './player/jump.js';
 import { createParachute, updateParachute } from './player/parachute.js';
@@ -47,8 +50,8 @@ export async function createGame({ canvas, modes }) {
   const resolution = new ResolutionGovernor(), frameCosts = { updateMs: 0, renderMs: 0 }, audio = new GameAudio();
   const vector = new THREE.Vector3(), cameraRig = createCameraRig(), cutawayFader = createCutawayFader();
   let cutawaySurfaces = [];
-  let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets;
-  let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
+  let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets, residents;
+  let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0, lastDrawn = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
 
   // --- Modes ---------------------------------------------------------------
@@ -91,7 +94,7 @@ export async function createGame({ canvas, modes }) {
     try { storage.setItem(LAST_MODE_KEY, id); } catch { /* The choice lasts for this session. */ }
     $('brand-mode').textContent = (definition.brand ?? definition.title).toUpperCase();
     state.started = true; state.paused = false; document.body.classList.add('playing'); $('welcome').classList.add('hidden');
-    input.setEnabled(true); audio.init(); renderer.compile(scene, camera);
+    input.setEnabled(true); audio.init(); renderer.compile(scene, camera); residents.wake();
     hud.notify(mode.welcome?.() ?? `${definition.title.toUpperCase()} // The city is yours.`, 7);
     save();
   }
@@ -334,6 +337,33 @@ export async function createGame({ canvas, modes }) {
   }
   function windowPrompt() { return !nearestCar && windowAhead() ? { caption: 'WINDOW / GLASS', label: 'Smash the glass' } : null; }
 
+  // --- Residents ---------------------------------------------------------------
+  // With resident conversations on, the passer-by (or, indoors, the person on
+  // this floor) in front of the player can be talked to. A mode's own
+  // characters are its interactables and always come first.
+  const sightFrom = new THREE.Vector3(), sightDirection = new THREE.Vector3();
+  function inSight(c) {
+    sightFrom.set(player.x, player.y + 1.4, player.z);
+    sightDirection.set(c.x - player.x, c.y + (c.seated ? 1 : 1.4) - sightFrom.y, c.z - player.z);
+    const distance = sightDirection.length();
+    return rayObstructionDistance(sightFrom, sightDirection.divideScalar(distance), distance, scenery()) > distance - .3;
+  }
+  // People on this floor when indoors, otherwise the passers-by in view.
+  function residentCandidates() {
+    const inside = player.interior?.inside ? player.interior : null;
+    return inside
+      ? traffic.occupants.visible.filter(p => p.occupant.plan.id === inside.id && p.occupant.level === inside.level).map(p => ({ x: p.occupant.x, y: p.occupant.y, z: p.occupant.z, seated: p.occupant.pose === 'sit', indoors: true, person: p }))
+      : traffic.pedestrians.walkers.filter(p => p.shown).map(p => ({ x: p.x, y: p.y, z: p.z, person: p }));
+  }
+  function residentAhead() {
+    if (!residents.ready || driving || player.climb || player.vault || player.parachute) return null;
+    const near = facingResident(player, residentCandidates(), inSight);
+    if (!near) return null;
+    const district = world.districtAt(near.x, near.z);
+    return near.indoors ? occupantResident(near.person, district) : walkerResident(near.person, district);
+  }
+  function residentPrompt() { const resident = residentAhead(); return resident ? residents.prompt(resident, state.time) : null; }
+
   // --- Player actions ----------------------------------------------------------
   function interact() {
     if (!state.started || state.paused) return;
@@ -352,6 +382,8 @@ export async function createGame({ canvas, modes }) {
       if (nearLift()) { openElevator(); return; }
       const target = mode?.interactable?.(player);
       if (target) { target.use(); return; }
+      const resident = residentAhead();
+      if (resident) { residents.open(resident, state.time); return; }
       nearestCar = findNearestCar();
       const glass = nearestCar ? null : windowAhead();
       if (glass) { breakWindow(glass.point, glass.direction); return; }
@@ -561,10 +593,10 @@ export async function createGame({ canvas, modes }) {
     hud.waypoint(camera, goal, player, vector, state.started && !state.paused);
     $('crosshair').classList.toggle('aim', !!input.aiming);
     if (now - lastUI > 85) {
-      hud.update({ state, player, driving, nearestCar, fps, prompt: liftPrompt() ?? (state.started ? mode?.interactable?.(player) ?? windowPrompt() ?? hijackPrompt() : null), weapon, label: mode?.label ?? definition?.title?.toUpperCase() ?? 'AFTERLIGHT' });
+      hud.update({ state, player, driving, nearestCar, fps, prompt: liftPrompt() ?? (state.started ? mode?.interactable?.(player) ?? residentPrompt() ?? windowPrompt() ?? hijackPrompt() : null), weapon, label: mode?.label ?? definition?.title?.toUpperCase() ?? 'AFTERLIGHT' });
       if (state.started) mode?.hud?.({ player, goal, time: state.time });
       drawMaps();
-      const minute = 48 + Math.floor(state.time / 45); $('game-time').textContent = `${String((23 + Math.floor(minute / 60)) % 24).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`;
+      $('game-time').textContent = gameClock(state.time).text;
       lastUI = now;
     }
     // Resizing the canvas clears it: change resolution before drawing this
@@ -572,6 +604,10 @@ export async function createGame({ canvas, modes }) {
     if (!state.paused && document.hasFocus() && !world.stream.stats.queued && resolution.sample(rawDt, RENDER_PROFILES[quality].minScale)) applyResolution();
     renderer.info.reset();
     frameCosts.updateMs = damp(frameCosts.updateMs, performance.now() - updateStart, 3, dt);
+    // A resident conversation pauses the world: redraw the still scene a few
+    // times a second and leave the graphics card to the language model.
+    if (state.modal === 'resident-chat' && now - lastDrawn < 250) return;
+    lastDrawn = now;
     const renderStart = performance.now();
     if (quality === 'high') composer.render(); else renderer.render(scene, camera);
     frameCosts.renderMs = damp(frameCosts.renderMs, performance.now() - renderStart, 3, dt);
@@ -589,6 +625,7 @@ export async function createGame({ canvas, modes }) {
       rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
       performance: { ...frameCosts, scale: resolution.scale, activeCrowd: traffic.pedestrians.active, streaming: { ...world.stream.stats }, blueprints: world.metropolis.blocks.size }, population: traffic.pedestrians.snapshot(),
       shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(), occupants: traffic.occupants.snapshot(),
+      residents: { ...residents.snapshot(), nearby: residentCandidates().map(c => ({ x: c.x, y: c.y, z: c.z, distance: Math.hypot(c.x - player.x, c.z - player.z), c })).sort((a, b) => a.distance - b.distance).slice(0, 5).map(({ c, ...near }) => ({ ...near, inSight: inSight(c) })), ahead: !!residentAhead() },
       city: { span: world.limit * 2, areaKm2: (world.limit * 2 / 1000) ** 2, districts: world.districts.length, roads: world.plan.roads.length, vertical: true },
       character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: traffic.pedestrians.count, crowdDrawCalls: traffic.pedestrians.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
       camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
@@ -628,7 +665,8 @@ export async function createGame({ canvas, modes }) {
       journal: () => mode?.onAction?.('journal'), medkit: () => mode?.onAction?.('medkit'),
       blur: () => { mode?.onMenu?.(); if (state.started && !state.paused) ui.setPause(true); }, audio: () => audio.init(),
     });
-    ui = createUI({ state, input, audio, onMenu: id => { mode?.onMenu?.(id); if (id && state.started) save(); } });
+    ui = createUI({ state, input, audio, onMenu: id => { mode?.onMenu?.(id); residents?.onMenu(id); if (id && state.started) save(); } });
+    residents = createResidentChat({ ui, hud, storage, touch: input.touch, playing: () => state.started });
     owned = traffic.owned;
     weapon = createWeapon({ camera, character, audio, effects, hud, input, traffic }, {
       canAct: () => state.started && !state.paused && !driving && !player.climb && !player.vault && !player.parachute,
@@ -650,5 +688,5 @@ export async function createGame({ canvas, modes }) {
   }
 
   await boot();
-  return { activate, deactivate, snapshot, teleport: placeAt, get mode() { return definition?.id ?? null; } };
+  return { activate, deactivate, snapshot, teleport: placeAt, residents, get mode() { return definition?.id ?? null; } };
 }

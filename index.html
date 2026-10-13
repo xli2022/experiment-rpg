@@ -81,6 +81,9 @@
           <div class="control-grid"><span>Move / drive</span><kbd>W A S D / ↑ ↓ ← →</kbd><span>Look around</span><kbd>MOUSE / DRAG</kbd><span class="armed-only">Fire weapon</span><kbd class="armed-only">LEFT CLICK</kbd><span class="armed-only">Aim</span><kbd class="armed-only">RIGHT CLICK</kbd><span>Sprint / walk</span><kbd>SHIFT / ALT</kbd><span>Climb / release wall</span><kbd>E</kbd><span>Jump / handbrake</span><kbd>SPACE</kbd><span>Use / enter / exit vehicle</span><kbd>E</kbd><span class="armed-only">Reload</span><kbd class="armed-only">R</kbd><span>City map</span><kbd>M</kbd><span>Pause / release mouse</span><kbd>ESC</kbd></div>
           <div class="setting-row"><label for="quality">Visual quality</label><select id="quality"><option value="high">High · neon bloom</option><option value="low">Performance · mobile</option></select></div>
           <div class="setting-row"><label for="sensitivity">Look sensitivity</label><input id="sensitivity" type="range" min="0.4" max="2" step="0.1" value="1" /></div>
+          <div class="setting-row"><label for="resident-chat-toggle">Talk with residents (AI)</label><input id="resident-chat-toggle" type="checkbox" /></div>
+          <p id="resident-chat-note" class="menu-note resident-note"></p>
+          <button id="resident-chat-forget" class="text-button hidden" type="button">Delete the downloaded resident model</button>
           <div id="mode-settings"></div>
           <p class="menu-note">W/S — climb up/down · A/D — move along wall.<br>Space — jump, grab a wall, or jump away. Keep climbing to pull onto a clear roof.<br>Your parachute opens automatically during long falls. WASD / stick to steer; land to pack it away.<br>E — grab or let go of a wall, open the elevator, enter a stopped car or take over one waiting at a red light.<br>Progress saves automatically in this browser. Touch controls appear on mobile; landscape gives you the best view.</p>
           <button id="resume-button" class="primary-button">BACK TO THE STREETS <span>↗</span></button>
@@ -90,6 +93,14 @@
       </div>
       <div id="city-map" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="city-map-title"><section class="city-map-card"><div class="map-heading"><div><div class="eyebrow">AFTERLIGHT CITY / DISTRICT NETWORK</div><h2 id="city-map-title">Know your streets.</h2></div><button id="close-map" class="icon-button" aria-label="Close city map">×</button></div><canvas id="full-map" width="900" height="700"></canvas><div class="map-legend"><span><i class="legend-player"></i> YOU</span><span><i class="legend-car"></i> VEHICLE</span><span><i class="legend-goal"></i> OBJECTIVE</span></div></section></div>
       <div id="service" class="modal-layer hidden" role="dialog" aria-modal="true" aria-labelledby="service-title"><section class="service-card"><header class="rpg-heading"><div><div id="service-kicker" class="eyebrow"></div><h2 id="service-title"></h2></div><button class="icon-button" data-action="close" aria-label="Close panel">×</button></header><div id="service-content"></div></section></div>
+      <div id="resident-chat" class="modal-layer dialogue-layer hidden" role="dialog" aria-modal="true" aria-labelledby="resident-name"><section class="dialogue-card resident-card">
+        <header class="dialogue-heading"><div id="resident-monogram" class="person-monogram" aria-hidden="true"></div><div><div id="resident-role" class="eyebrow"></div><h2 id="resident-name"></h2><div id="resident-mood" class="resident-mood"></div></div><button class="icon-button" data-resident="close" aria-label="Leave conversation">×</button></header>
+        <p id="resident-said" class="resident-said"></p>
+        <p id="resident-text" class="dialogue-text resident-text" aria-live="polite"></p>
+        <div id="resident-topics" class="dialogue-choices"></div>
+        <form id="resident-form" class="resident-form"><input id="resident-input" type="text" maxlength="140" autocomplete="off" enterkeyhint="send" placeholder="Say something…" aria-label="Say something" /><button id="resident-send" class="rpg-button accent" type="submit">Say</button></form>
+        <footer>AFTERLIGHT / STREET TALK <span id="resident-status">Replies are written by an AI model on this device</span></footer>
+      </section></div>
       <div id="loading"><div class="loading-logo">AFTERLIGHT</div><div class="loading-bar"><i></i></div><p id="loading-text">CONNECTING TO AFTERLIGHT CITY...</p></div>
       <div id="error" class="modal-layer hidden"><section class="menu-card"><h2>Connection interrupted.</h2><p id="error-message"></p><button class="primary-button" onclick="location.reload()">RECONNECT ↗</button></section></div>
     </main>

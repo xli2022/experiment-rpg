@@ -47,6 +47,7 @@ Remove-Item Env:PAGES_BASE_PATH
 Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western hills and dense central neighborhoods to Blackwater Bay. The original street connections, district arrangement and coastline fit within one quarter of the former area. Buildings keep their full authored size, 26–49 m across, lined up along each street with narrow side passages, so taller roofs offer downward jumps to nearby lower ones. In the story, start at the Eastpoint hideout and follow the pedestrian ramp south to **Mara on the Upper Market**, four metres above the street. In any mode, step up to a car waiting at a red light and press **E** to drive it.
 
 - **Living streets.** Cars keep their lanes, queue at two-phase traffic lights, give way at quiet junctions, wait for people on crosswalks, and signal and brake visibly. Pedestrians walk the sidewalks, wait for the walk signal, and stop to talk, check a phone, stroll in pairs or jog. Indoors, people sit on sofas and at desks, browse shops, wait for the lift and staff the lobbies. See [traffic](docs/CITY-RENDERING.md#traffic) and [people inside](docs/CITY-RENDERING.md#people-inside).
+- **Talk to residents (optional, AI).** Turn on *Talk with residents* in the pause menu, then face any passer-by or person indoors and press E. They answer in a few lines written live by a small open language model running in your browser, with a name, job, mood and worry of their own and the place and hour they are in. Story contacts keep their written dialogue. See [resident conversations](#resident-conversations).
 - **Free roam.** No quests, enemies or weapon: explore, climb, glide, drive and enter buildings. Its panel counts the districts visited and buildings entered, and the map shows transit stations. Free roam keeps its own save, separate from the story.
 
 - **Six campaign chapters, two evidence paths, and three playable endings.** Meet eight named contacts, ask about their lives, accept local work, and make the final broadcast.
@@ -69,7 +70,7 @@ Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western 
 | Right mouse | Aim; can be held together with left mouse |
 | Shift / Alt | Sprint / walk; default movement is a brisk jog |
 | Space | Jump; vault out through a window ahead; grab a wall ahead; jump away while climbing; handbrake in a car |
-| E | Talk, use terminals, collect items, rest, use a lift, enter/exit a nearby car, take a car waiting in traffic, or smash a window in arm's reach from inside; otherwise grab a nearby wall, and let go while climbing. WASD climbs up/down and sideways |
+| E | Talk to contacts (and to residents, with resident conversations on), use terminals, collect items, rest, use a lift, enter/exit a nearby car, take a car waiting in traffic, or smash a window in arm's reach from inside; otherwise grab a nearby wall, and let go while climbing. WASD climbs up/down and sideways |
 | R | Reload the 24-round magazine; unlimited reserve ammo |
 | J | Open/close the field journal (story): quests, inventory, contacts and memories |
 | Q | Use a field medkit (story, +60 health) |
@@ -93,6 +94,12 @@ To borrow a car, walk up to one that is stopped or crawling in traffic and press
 High quality adds neon bloom; Performance mode uses shorter scenery/detail distances, fewer animated actors and rain particles, and a lower resolution cap. Mobile selects Performance mode automatically, and resolution adapts to sustained frame pressure. Scenery loads in nearby and visible cells, with distant instance buffers released as you travel. The map supports drag-to-pan, zoom buttons, and neighborhood/city views. See [city scale, rendering research and measured results](docs/CITY-RENDERING.md).
 
 Health and armor slowly recover out of combat. Defeat returns you to your last refuge without erasing quest progress. Menus and conversations pause the world. Map destination lines indicate a bearing, not an obstacle-avoiding driving route.
+
+### Resident conversations
+
+Background residents, the people on the street and inside buildings, can talk when **Talk with residents (AI)** is turned on in the pause menu. It is off by default. Turning it on downloads Qwen3.5 0.8B, a small open language model (4-bit, about 450 MB, Apache-2.0), once from Hugging Face into the browser's cache. WebLLM then loads it onto the graphics card in a worker, so play carries on meanwhile. It uses about 1.6 GB of graphics memory, or 1.9 GB on cards without 16-bit shaders. The pause menu shows progress, and a notice says when residents are ready. It needs WebGPU on a hardware graphics card, as in current desktop Chrome or Edge. Elsewhere the setting says why it is unavailable, and the game is unchanged. Phones and tablets may not have the memory.
+
+Face a passer-by or someone indoors within about 2.5 m and press **E** (**USE** on touch). The prompt names their job. The world pauses while you talk. They answer your greeting; then pick a quick line or type up to 140 characters. Each resident's name, job, mood, worry and manner are seeded from their own ID, so the same person stays the same person. They know their district, what they are doing (crossing the street, working a shop counter, waiting for the lift), the hour and the rain, and nothing else. Robots and aliens speak as themselves. Replies are trimmed to one to three spoken sentences. An unusable reply, such as one that steps out of character, and any failure become a short fallback line. Replies are written on your device; nothing you type leaves the browser. Resident lines are text only, without speech. Story contacts and quests never use the model, and come first when you press E near them. **Delete the downloaded resident model** in the pause menu turns the setting off and frees the space.
 
 ## Project layout
 
@@ -123,7 +130,8 @@ Sources are layered, and each layer imports only those before it: `core` → `wo
   - `camera-rig.js` — the third-person follow camera
   - `hud.js` / `ui.js` / `mode-picker.js` / `map-controls.js` — HUD, map, menus and mode cards
   - `weapon.js` / `effects.js` — the optional weapon, tracers and sparks
-  - `input.js`, `audio.js`, `shadows.js`, `contact-shadows.js`, `save.js` and `fullscreen.js`
+  - `residents/` — optional AI conversations with background residents: `persona.js` (who each resident is, the prompt and reply cleanup), `model.js` / `model-worker.js` (the setting and the in-browser model) and `conversation.js` (the panel and turn-taking)
+  - `input.js`, `audio.js`, `clock.js`, `shadows.js`, `contact-shadows.js`, `save.js` and `fullscreen.js`
   - `style.css` / `ui.css` / `mobile.css` — styles
 - `src/modes/index.js` — the mode registry; see [game modes](docs/MODES.md)
 - `src/modes/story/` — The Last Signal:
@@ -160,7 +168,7 @@ The named women wear distinct fitted shirts or tailored blouses and skirts, with
 
 ## Scope and verification
 
-This remains a browser-scale game: open-city exploration, enterable procedural interiors, arcade vehicles, voiced text dialogue and drone combat. Humans share a common animated rig; robots and aliens use their source rigs. Speech has no lip synchronization or prerecorded performances. There is no multiplayer. Saves are local to this browser and origin, not synchronized across devices. UI fonts use Google Fonts with system fallbacks; game assets load locally.
+This remains a browser-scale game: open-city exploration, enterable procedural interiors, arcade vehicles, voiced text dialogue, optional AI-written small talk with residents and drone combat. Humans share a common animated rig; robots and aliens use their source rigs. Speech has no lip synchronization or prerecorded performances. There is no multiplayer. Saves are local to this browser and origin, not synchronized across devices. UI fonts use Google Fonts with system fallbacks; game assets load locally. The optional resident model downloads from Hugging Face only when the player turns resident conversations on.
 
 The automated suite covers traversal, city generation, campaign state and characters. Traversal checks include prompt acceleration/braking, rotated wall and roof collision, climbing and mantling at 30/60/120 FPS, blocked ledges, cancelling a mantle without getting stuck, raised-surface landings, jump-off/roof falls, the actual skeletal climbing pose, and rooftop saves. City tests cover connected roads, sloped support, building/road clearance, street-facing geometry, bounded streaming and district populations. Traffic tests build the city's junction network and check:
 
@@ -178,5 +186,16 @@ Earlier browser verification covered the first chapter, driving, save continuati
 The geometry regression suite scans all 900 city blocks with the live story reservations. It checks building and interchange signs against rendered bridge solids, all 63 interactable labels across camera angles, tree crowns against buildings and infrastructure, supported streetlights, and rail clearance at curved road joins. `tests/world-geometry.test.js` checks every building against every other building, road, deck, pier, embankment and piece of street furniture. It also checks that lamps stay out of buildings and door walkways, that footways stay clear of posts and railings, and that low raised roads stand on embankments. The title layout uses a bounded content area, with two columns on short landscape screens and gameplay readouts hidden until play. With Playwright available, run `node scripts/check_mobile_layout.mjs` against the dev server (`LAYOUT_URL` overrides its default `http://127.0.0.1:5174`; `PLAYWRIGHT_MODULE` can select an existing installation). It renders the real mode cards and each mode's HUD panels, checks 57 title and HUD layouts (19 viewports, each with the title, Story and Free roam) using fallback fonts, and saves screenshots in `test-results/mobile-layout/`.
 
 NPC/voice verification inspected all seven cast models and their portraits, opened Mara and Rook conversations, accepted a job, exercised replay/mute/exit, reloaded saved voice preferences, and checked portrait (390 × 844) and landscape (844 × 390) layouts. The production build loaded without console errors and omitted development diagnostics. The test browser initially reported speech playback starting, then its native service returned `synthesis-failed`, including for standalone default-voice utterances outside the game. Error fallback was verified; reliable audible playback and voice quality still require checking on the target device.
+
+Resident conversations are covered by `tests/residents.test.js` with a stand-in model. The tests cover seeded personas for every crowd and visitor design and for real interior spots, the brief, reply cleanup and who can be talked to. They cover the setting: opting in, browsers without WebGPU, a failed load, turning it off mid-download, a lost graphics device and deleting the download. They also cover the conversation flow. In headless Chromium, again with a stand-in model, the browser checks covered:
+
+- the setting's progress and ready notice;
+- the Talk prompt in front of a passer-by, in free roam and in the story;
+- the panel, the quick lines and typing (E, M and J typed into the field stay text);
+- Escape interrupting a reply;
+- Mara's written dialogue taking precedence beside her;
+- portrait (390 × 844) and landscape (844 × 390) layouts.
+
+There were no console errors. People indoors were checked in Node against real interior plans, not in the browser. WebLLM downloaded and loaded the real model in that browser on a software graphics adapter, but the adapter crashed on the first reply. Real replies, their speed and memory use still need checking on a machine with a graphics card.
 
 The fashion and personal-story update was inspected in an animated cast gallery and the production game. Rook’s nested topic menu and brass-bird reply were checked at desktop and 390 × 844 phone sizes, with no horizontal overflow, quest advancement or console warnings/errors. Browser audio was muted for that separate visual check.
