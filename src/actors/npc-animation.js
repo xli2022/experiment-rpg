@@ -13,7 +13,8 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
     if (!clip) throw new Error(`Unknown NPC animation: ${name}`);
     return actions[name] ??= mixer.clipAction(clip).setEffectiveWeight(0).play();
   }
-  const idle = actionFor('Idle');
+  // The pose held while not moving: Idle, or another clip such as a seated one.
+  let rest = actionFor('Idle');
   let walking = actionFor(walk), gaitSpeed = walkSpeed, gait = walk, selected, walkWeight = initial === walk ? 1 : 0;
   const controller = {
     actions,
@@ -28,6 +29,13 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
       mixer.update(0);
     },
     get gait() { return gait; },
+    /** Hold `name` (for example a seated clip) while not moving; false if the rig lacks it. */
+    setRest(name) {
+      if (!available.has(name)) return false;
+      rest = actionFor(name); rest.setLoop(THREE.LoopRepeat, Infinity).play();
+      return true;
+    },
+    get rest() { return rest.getClip().name; },
     /** Swap the moving clip (for example Walk to Jog); its own speed calibrates playback. */
     setGait(name) {
       if (name === gait) return true;
@@ -43,9 +51,9 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
       const movingSpeed = Math.abs(speed), moving = movingSpeed > .04;
       walkWeight = THREE.MathUtils.damp(walkWeight, moving ? 1 : 0, 12, dt);
       for (const action of Object.values(actions)) action.setEffectiveWeight(0);
-      idle.setEffectiveWeight(1 - walkWeight).setEffectiveTimeScale(1);
+      rest.setEffectiveWeight(1 - walkWeight).setEffectiveTimeScale(1);
       walking.setEffectiveWeight(walkWeight).setEffectiveTimeScale(moving ? movingSpeed / gaitSpeed : 0);
-      selected = moving ? walking : idle;
+      selected = moving ? walking : rest;
       mixer.update(dt);
     },
   };

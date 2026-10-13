@@ -18,6 +18,8 @@ export const INTERIOR = Object.freeze({
   // Ceiling light panels: half their width (a small room's are smaller), and how
   // far they keep from a wall's line.
   fixture: Object.freeze({ half: .32, small: .2, clear: .15 }),
+  // The chair drawn at a desk someone works at: footprint, seat and back heights.
+  chair: Object.freeze({ w: .48, d: .48, seat: .46, back: .95 }),
   lift: 2.4, liftAbove: 3, ring: 2.4, minDepth: 3.2,
 });
 const OPEN_KINDS = new Set(['landing', 'lobby', 'office', 'shop', 'hall']);
@@ -469,26 +471,33 @@ function floorGrid(zone, faces, doorways) {
   const seeds = doorways.map(cellAt).filter(k => k >= 0);
   const base = inside.slice();
   flood(base, nx, nz, seeds.length ? seeds : [inside.indexOf(1)].filter(k => k >= 0));
-  for (let k = 0; k < base.length; k++) base[k] = base[k] === 2 ? 1 : 0;
-  return { minX: b.minX, minZ: b.minZ, cell, nx, nz, inside: base, seeds };
+  let count = 0;
+  for (let k = 0; k < base.length; k++) { base[k] = base[k] === 2 ? 1 : 0; count += base[k]; }
+  return { minX: b.minX, minZ: b.minZ, cell, nx, nz, inside: base, count, seeds };
 }
-// One scratch buffer serves every check.
-let freeCells = new Uint8Array(4096);
+// Whether piece `f` leaves the floor round `placed` walkable in one piece.
 function walkable(faces, grid, placed, f) {
-  // A piece a body's width clear of every other piece, and of the walls beside
-  // and in front of it, can't cut anything off. Only closer ones are checked,
-  // and those only just a body's width away too: the band a body's centre can
-  // pass through such a gap is narrower than the grid can see.
-  // (A wall piece's back corners lie beyond its own wall.)
+  return isolated(faces, f, placed) || connected(grid(), [...placed, f]);
+}
+// A piece a body's width clear of every other piece, and of the walls beside
+// and in front of it, can't cut anything off. Only closer ones are checked,
+// and those only just a body's width away too: the band a body's centre can
+// pass through such a gap is narrower than the grid can see.
+// (A wall piece's back corners lie beyond its own wall.)
+function isolated(faces, f, others) {
   const reach = 2 * WALK_RADIUS + .2;
   const nearWall = rectCorners({ ...f, w: f.w + 2 * reach, d: f.d + 2 * reach }).some((p, k) => !(f.mode === 'wall' && k < 2) && !inZone(faces, p.x, p.z, -1e-9));
-  if (!nearWall && !placed.some(o => rectsOverlap(f, o, 2 * reach))) return true;
-  const { minX, minZ, cell, nx, nz, inside, seeds } = grid();
+  return !nearWall && !others.some(o => rectsOverlap(f, o, 2 * reach));
+}
+// Whether the floor left free round `pieces` is one piece reached from the
+// doorways. One scratch buffer serves every check.
+let freeCells = new Uint8Array(4096);
+function connected({ minX, minZ, cell, nx, nz, inside, count, seeds }, pieces) {
   if (freeCells.length < inside.length) freeCells = new Uint8Array(inside.length);
   const free = freeCells.subarray(0, inside.length);
   free.set(inside);
   // Stamp each piece, grown by the body's radius, over the cells it covers.
-  for (const o of [...placed, f]) {
+  for (const o of pieces) {
     const r = Math.hypot(o.w, o.d) / 2 + WALK_RADIUS, c = Math.cos(o.yaw), s = Math.sin(o.yaw), hw = o.w / 2, hd = o.d / 2;
     for (let i = Math.max(0, Math.floor((o.x - r - minX) / cell)); i < Math.min(nx, Math.ceil((o.x + r - minX) / cell)); i++) {
       const dx = minX + (i + .5) * cell - o.x;
@@ -497,15 +506,13 @@ function walkable(faces, grid, placed, f) {
         if (!free[k]) continue;
         // As rectDistance, unrolled: the cell centre in the piece's frame.
         const dz = minZ + (j + .5) * cell - o.z, ex = Math.max(0, Math.abs(dx * c - dz * s) - hw), ez = Math.max(0, Math.abs(dx * s + dz * c) - hd);
-        if (ex * ex + ez * ez < WALK_RADIUS * WALK_RADIUS) free[k] = 0;
+        if (ex * ex + ez * ez < WALK_RADIUS * WALK_RADIUS) { free[k] = 0; count--; }
       }
     }
   }
   // Every doorway stays open, and one of them reaches all the floor that is
   // left, the other doorways included.
   if (seeds.some(k => !free[k])) return false;
-  let count = 0;
-  for (let k = 0; k < free.length; k++) count += free[k];
   if (count < 2) return true;
   return flood(free, nx, nz, [seeds.length ? seeds[0] : free.indexOf(1)]) === count;
 }
@@ -517,18 +524,33 @@ function nearMiss(f, o) {
   return gap > 2 * WALK_RADIUS - .1 && gap < 2 * WALK_RADIUS + .15;
 }
 
-// Block furniture against real walls, keeping every doorway and its approach
-// clear and the floor round it walkable.
-function furnish(plan, template, random) {
-  const furniture = [], doorPoints = template.doors.map(d => ({ x: d.x, z: d.z }));
+// Every doorway of a floor: room doors, street doors and the stair's foot.
+function doorPointsOf(plan, template) {
+  const points = template.doors.map(d => ({ x: d.x, z: d.z }));
   for (const seg of template.perimeter) for (const o of seg.openings) if (o.entrance) {
     const t = (o.from + o.to) / 2, length = Math.hypot(seg.b.x - seg.a.x, seg.b.z - seg.a.z);
-    doorPoints.push({ x: seg.a.x + (seg.b.x - seg.a.x) * t / length, z: seg.a.z + (seg.b.z - seg.a.z) * t / length });
+    points.push({ x: seg.a.x + (seg.b.x - seg.a.x) * t / length, z: seg.a.z + (seg.b.z - seg.a.z) * t / length });
   }
   if (plan.core) {
     const s = plan.core.stair;
-    for (const lane of [s.up, s.down]) doorPoints.push({ x: (lane.x0 + lane.x1) / 2, z: s.near });
+    for (const lane of [s.up, s.down]) points.push({ x: (lane.x0 + lane.x1) / 2, z: s.near });
   }
+  return points;
+}
+// A zone's wall faces and the floor its doorways reach (built on first use).
+function roomOf(template, zone, doorPoints) {
+  const faces = wallFaces(zone, template.walls);
+  // Just inside each doorway on this zone's edges.
+  const doorways = doorPoints.flatMap(p => faces.filter(f => Math.abs((p.x - f.x) * f.nx + (p.z - f.z) * f.nz) < .15 && Math.abs((p.x - f.x) * f.nz - (p.z - f.z) * f.nx) <= f.width / 2)
+    .map(f => ({ x: p.x - f.nx * (f.inset + WALK_RADIUS + .05), z: p.z - f.nz * (f.inset + WALK_RADIUS + .05) })));
+  let cells = null;
+  return { faces, grid: () => cells ??= floorGrid(zone, faces, doorways) };
+}
+
+// Block furniture against real walls, keeping every doorway and its approach
+// clear and the floor round it walkable.
+function furnish(plan, template, random) {
+  const furniture = [], doorPoints = doorPointsOf(plan, template);
   for (const zone of template.zones) {
     const list = FURNITURE[zone.kind];
     if (!list) continue;
@@ -540,12 +562,7 @@ function furnish(plan, template, random) {
       const offset = (w.kind === 'core' ? .2 : INTERIOR.partition) / 2 + .04;
       segments.push(probe ? { a: w.a, b: w.b, offset } : { a: w.b, b: w.a, offset });
     }
-    let cells = null;
-    const faces = wallFaces(zone, template.walls), placed = [];
-    // Just inside each doorway on this zone's edges.
-    const doorways = doorPoints.flatMap(p => faces.filter(f => Math.abs((p.x - f.x) * f.nx + (p.z - f.z) * f.nz) < .15 && Math.abs((p.x - f.x) * f.nz - (p.z - f.z) * f.nx) <= f.width / 2)
-      .map(f => ({ x: p.x - f.nx * (f.inset + WALK_RADIUS + .05), z: p.z - f.nz * (f.inset + WALK_RADIUS + .05) })));
-    const grid = () => cells ??= floorGrid(zone, faces, doorways);
+    const { faces, grid } = roomOf(template, zone, doorPoints), placed = [];
     const ok = (f, gap = .08) => rectCorners(f).every(p => inZone(faces, p.x, p.z, .02)) &&
       !placed.some(o => rectsOverlap(f, o, gap) || nearMiss(f, o)) &&
       doorPoints.every(p => rectDistance(f, p.x, p.z) > INTERIOR.door.clearance + (f.mode === 'free' || f.mode === 'grid' ? .5 : 0)) &&
@@ -585,6 +602,95 @@ function furnish(plan, template, random) {
     furniture.push(...placed);
   }
   template.furniture = furniture.map((f, i) => ({ id: `f${i}`, ...f }));
+}
+
+/**
+ * Spots where people may sit or stand on a floor layout (see spotsIn), made
+ * on first use and kept: a floor needs them only once it is shown. Each
+ * spot holds the room a body takes up, checked as a piece of furniture is,
+ * so the floor stays walkable with everyone in. A piece with someone at it
+ * is, to the rest of the room, one larger piece: if that stands clear of
+ * everything else, nothing is cut off.
+ */
+export function templateSpots(plan, template) {
+  if (template.spots) return template.spots;
+  const spots = [], doorPoints = doorPointsOf(plan, template);
+  for (const zone of template.zones) {
+    const placed = template.furniture.filter(f => f.zone === zone.id);
+    if (!placed.length && zone.kind !== 'landing') continue;
+    const { faces, grid } = roomOf(template, zone, doorPoints), taken = [];
+    for (const spot of spotsIn(zone, placed, template)) {
+      const body = { ...spot.body, mode: 'free' }, bodies = taken.map(o => o.body);
+      if (rectCorners(body).every(p => inZone(faces, p.x, p.z, .02)) && !placed.some(o => o !== spot.piece && rectsOverlap(body, o, .05)) &&
+        !bodies.some(o => rectsOverlap(body, o, .1)) && doorPoints.every(p => rectDistance(body, p.x, p.z) > INTERIOR.door.clearance) &&
+        (isolated(faces, spot.piece ? withBody(spot.piece, body) : body, placed.filter(o => o !== spot.piece).concat(bodies)) || connected(grid(), placed.concat(bodies, [body])))) taken.push({ ...spot, body });
+    }
+    for (const { piece, ...spot } of taken) spots.push({ id: `s${spots.length}`, piece: piece?.id ?? null, ...spot });
+  }
+  return template.spots = spots;
+}
+
+// A piece grown, in its own frame, to take in a body at it.
+function withBody(piece, body) {
+  const c = Math.cos(piece.yaw), s = Math.sin(piece.yaw), local = rectCorners(body).map(p => {
+    const dx = p.x - piece.x, dz = p.z - piece.z;
+    return { x: dx * c - dz * s, z: dx * s + dz * c };
+  });
+  const x0 = Math.min(-piece.w / 2, ...local.map(p => p.x)), x1 = Math.max(piece.w / 2, ...local.map(p => p.x));
+  const z0 = Math.min(-piece.d / 2, ...local.map(p => p.z)), z1 = Math.max(piece.d / 2, ...local.map(p => p.z)), mx = (x0 + x1) / 2, mz = (z0 + z1) / 2;
+  return { ...piece, x: piece.x + mx * c + mz * s, z: piece.z - mx * s + mz * c, w: x1 - x0, d: z1 - z0 };
+}
+
+// Spots where people sit or stand, each with its pose, what they do there and
+// the body it takes up: seats on sofas and benches facing out, a chair at a
+// desk, standing places facing counters, shelves, displays, wardrobes and
+// racks, a clerk at the end of a shop counter or reception desk, a pair
+// talking across a meeting table and someone waiting at the lift. Seated
+// people's feet rest just past the seat's front edge.
+const STAND = .56;
+function spotsIn(zone, placed, template) {
+  const out = [];
+  for (const piece of placed) {
+    const c = Math.cos(piece.yaw), s = Math.sin(piece.yaw), at = (lx, lz) => ({ x: piece.x + lx * c + lz * s, z: piece.z - lx * s + lz * c });
+    const { w, d } = piece, facing = piece.yaw, away = piece.yaw + Math.PI;
+    const stand = (kind, activity, lx, lz, yaw = facing, group = null) => {
+      const p = at(lx, lz);
+      out.push({ kind, activity, pose: 'stand', piece, zone: zone.id, ...p, yaw, group, body: { ...p, w: STAND, d: STAND, yaw } });
+    };
+    const seat = (kind, lx) => {
+      const p = at(lx, d / 2 - .09), legs = at(lx, d / 2 + .14);
+      out.push({ kind, activity: 'rest', pose: 'sit', piece, zone: zone.id, ...p, yaw: away, body: { ...legs, w: .5, d: .3, yaw: facing } });
+    };
+    switch (piece.item) {
+      case 'sofa': seat('sofa', -w / 4); seat('sofa', w / 4); break;
+      case 'bench': seat('bench', 0); break;
+      case 'desk': {
+        const p = at(0, d / 2 + .04), chair = at(0, d / 2 + .3);
+        out.push({ kind: 'desk', activity: 'type', pose: 'sit', piece, zone: zone.id, ...p, yaw: facing, chair: { ...chair, yaw: facing }, body: { ...chair, w: .5, d: .55, yaw: facing } });
+        break;
+      }
+      case 'counter': if (zone.kind === 'shop') stand('clerk', 'clerk', w / 2 - .4, d / 2 + .35, away); else stand('counter', 'cook', 0, d / 2 + .3); break;
+      case 'reception': stand('clerk', 'clerk', w / 2 - .45, d / 2 + .35, away); break;
+      case 'shelf': case 'display': stand('shelf', 'browse', 0, d / 2 + .32); break;
+      case 'mailboxes': stand('mailboxes', 'browse', 0, d / 2 + .32); break;
+      case 'wardrobe': stand('wardrobe', 'browse', 0, d / 2 + .35); break;
+      case 'rack': stand('rack', 'browse', 0, d / 2 + .4); break;
+      case 'table':
+        if (zone.kind === 'meeting') { const group = `${zone.id}:${piece.x.toFixed(2)}`; stand('meeting', 'talk', 0, d / 2 + .4, facing, group); stand('meeting', 'talk', 0, -d / 2 - .4, away, group); }
+        else stand('table', 'look', 0, d / 2 + .35);
+    }
+  }
+  // Waiting beside the lift, clear of its doorway, turned toward the door.
+  if (zone.kind === 'landing') for (const door of template.doors) if (door.kind === 'lift') {
+    const ux = Math.sin(door.yaw), uz = Math.cos(door.yaw), nx = uz, nz = -ux;
+    for (const side of [1, -1]) for (const along of [1.2, -1.2]) {
+      const x = door.x + nx * side * .75 + ux * along, z = door.z + nz * side * .75 + uz * along;
+      if (!pointInConvex(zone.polygon, x, z, .3)) continue;
+      const yaw = Math.atan2(x - door.x, z - door.z);
+      out.push({ kind: 'lift', activity: 'wait', pose: 'stand', piece: null, zone: zone.id, x, z, yaw, group: null, body: { x, z, w: STAND, d: STAND, yaw } });
+    }
+  }
+  return out;
 }
 
 // Ceiling panels on an even grid centred in each zone, each panel clear of the
@@ -680,6 +786,29 @@ export function floorLights(plan, level) {
     if (!l.stair || level >= plan.levels - 1) return [{ ...l, y: ceiling }];
     return level ? [{ ...l, y: levelY(plan, level) + INTERIOR.stair.rise - INTERIOR.slab }] : [];
   });
+}
+
+// How likely each spot is taken, late at night: someone up in a lit flat,
+// a few people working late, a clerk in every shop and lobby. Offices in a
+// building whose windows are mostly dark are emptier still.
+const OCCUPANCY = { sofa: .4, counter: .3, table: .2, desk: .3, wardrobe: .15, bench: .3, clerk: .85, shelf: .3, mailboxes: .15, rack: .3, meeting: .35, lift: .12 };
+const HOME_GUESTS = 2;
+/**
+ * The people on one level, a deterministic pick of its template's spots: in
+ * a flat only while its lights are on, and at most two to a flat.
+ */
+export function floorOccupants(plan, level) {
+  const floor = floorPlan(plan, level), rooms = new Map(floor.rooms.map(r => [r.local, r])), zones = new Map(floor.template.zones.map(z => [z.id, z]));
+  const late = plan.windowLighting === 'lit' ? 1 : .4, homes = new Map(), out = [];
+  for (const spot of templateSpots(plan, floor.template)) {
+    const room = rooms.get(zones.get(spot.zone)?.room);
+    if (!room?.lit) continue;
+    const chance = OCCUPANCY[spot.kind] * (spot.kind === 'desk' && !room.unit ? late : 1);
+    if (hash(`${floor.label}:${plan.id}:${spot.group ?? spot.id}:here`) % 1000 / 1000 >= chance) continue;
+    if (room.unit) { const n = homes.get(room.unit) ?? 0; if (n >= HOME_GUESTS) continue; homes.set(room.unit, n + 1); }
+    out.push({ ...spot, id: `${plan.id}#${level}:${spot.id}`, spot: spot.id, room: room.id, unit: room.unit, y: floor.y });
+  }
+  return out;
 }
 
 /** Rooms and units with stable IDs at one level. */

@@ -3,6 +3,7 @@ import { buildNetwork } from './network.js';
 import { createSignalProps, signalState, walkState } from './signals.js';
 import { createVehicles, VEHICLE_PROFILES, TAKEOVER_HITS } from './vehicles.js';
 import { createPedestrians } from './pedestrians.js';
+import { createOccupants } from './occupants.js';
 import { populationFor } from './population.js';
 import { carCollider, clamp, seededRandom } from '../core/physics.js';
 
@@ -10,6 +11,7 @@ export { buildNetwork } from './network.js';
 export { signalState, walkState } from './signals.js';
 export { VEHICLE_PROFILES, TAKEOVER_HITS, IDM, idmAcceleration } from './vehicles.js';
 export { populationFor } from './population.js';
+export { OCCUPANTS } from './occupants.js';
 
 const networks = new WeakMap();
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
@@ -26,6 +28,8 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
   const root = new THREE.Group(); root.name = 'Traffic';
   const vehicles = createVehicles({ scene: root, network, plan, random });
   const pedestrians = createPedestrians({ scene, network, plan, spatial: world.spatial, assets, random: seededRandom(707) });
+  // People inside buildings; the game updates them once the world's interior floors are up to date.
+  const occupants = createOccupants({ scene, assets });
   const props = createSignalProps(root, network, plan);
   scene.add(root);
   const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 4);
@@ -86,7 +90,7 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
   }
 
   return {
-    root, network, cars, vehicles: cars, owned, pedestrians,
+    root, network, cars, vehicles: cars, owned, pedestrians, occupants,
     get time() { return time; },
     signals: { state: (node, approach) => signalState(node, approach, time), walk: (node, approach) => walkState(node, approach, time) },
     /** Advance traffic. `vehicle` is the car the player drives (if any); `range` is the visible actor range. */
@@ -119,9 +123,9 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
       return { hit: true, hitsRemaining, car: hitsRemaining ? null : takeOver(car) };
     },
     colliders(x, z, radius = 8) { return cars.filter(c => Math.hypot(c.x - x, c.z - z) < radius + 4).map(carCollider); },
-    setQuality(value) { level = value; profile = VEHICLE_PROFILES[value] ?? VEHICLE_PROFILES.high; pedestrians.setQuality(value); scanTime = 0; },
+    setQuality(value) { level = value; profile = VEHICLE_PROFILES[value] ?? VEHICLE_PROFILES.high; pedestrians.setQuality(value); occupants.setQuality(value); scanTime = 0; },
     /** A scene cut: everything respawns around the new position, and may appear in view. */
-    reset() { vehicles.clear(); pedestrians.reset(); props.invalidate(); first = true; scanTime = 0; vehicles.sync(time); },
+    reset() { vehicles.clear(); pedestrians.reset(); occupants.reset(); props.invalidate(); first = true; scanTime = 0; vehicles.sync(time); },
     snapshot() {
       return { capacity: profile.count, target, active: cars.length, district: population.district, time, drawCalls: root.children.length,
         signals: props.snapshot(), owned: owned.length,
@@ -129,6 +133,6 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
         cars: cars.map(c => ({ id: c.id, x: c.x, y: c.y, z: c.z, speed: c.speed, accel: c.accel, yaw: c.yaw, pitch: c.pitch, roll: c.roll, piece: c.piece.id,
           turn: c.piece.turn ?? c.route[0]?.turn ?? null, brake: c.brake, signal: c.signal, cause: c.cause, waitingFor: c.denied, body: c.body.id, damageHits: c.hits, hitsRemaining: TAKEOVER_HITS - c.hits })) };
     },
-    dispose() { vehicles.dispose(); pedestrians.dispose(); props.dispose(); scene.remove(root); },
+    dispose() { vehicles.dispose(); pedestrians.dispose(); occupants.dispose(); props.dispose(); scene.remove(root); },
   };
 }

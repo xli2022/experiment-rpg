@@ -4,11 +4,11 @@ import { VerticalMetropolis } from '../src/world/vertical-city.js';
 import { MASTER_DISTRICTS as DISTRICTS } from '../src/world/master-plan.js';
 import { terrainHeight } from '../src/world/master-plan.js';
 import { buildingDesign, buildingDetails, buildingEntrances, buildingVolumes } from '../src/world/building-design.js';
-import { interiorPlan, floorPlan, floorLights, buildingUnits, levelY, levelCeiling, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
+import { interiorPlan, floorPlan, floorLights, floorOccupants, buildingUnits, levelY, levelCeiling, INTERIOR, sharedSegments } from '../src/world/interior-plan.js';
 import { polygonArea, pointInConvex, polygonFaces, clipConvex, insetConvex } from '../src/world/building-footprints.js';
 import { buildFloor, leafPose } from '../src/world/interiors.js';
 import { interiorColliders, toWorld, toLocal } from '../src/world/interior-physics.js';
-import { circleHitsBox, moveWithCollisions, overlapsHeight, seededRandom } from '../src/core/physics.js';
+import { circleHitsBox, moveWithCollisions, orientedBox, overlapsHeight, seededRandom } from '../src/core/physics.js';
 
 const metropolis = new VerticalMetropolis();
 const blueprints = [...new Map(DISTRICTS.flatMap(d => metropolis.area(d.x - 70, d.z - 70, d.x + 70, d.z + 70))
@@ -243,14 +243,20 @@ test('rooms are furnished sparely: their essentials, a few extras, and small blo
   for (const kind of ['living', 'bedroom', 'office', 'shop']) assert.ok(kinds[kind].area / kinds[kind].items > 15, `${kind}: one piece per ${(kinds[kind].area / kinds[kind].items).toFixed(1)} m²`);
 });
 
-test('furniture leaves each floor walkable in one piece, and walks across it never stick', () => {
+test('furniture and the people inside leave each floor walkable in one piece, and walks across it never stick', () => {
   // Every spot a body can stand on is reachable from the rest of the floor, and
-  // a player steering along a path round the furniture keeps moving.
+  // a player steering along a path round the furniture and people keeps moving.
   const radius = .43, step = .1, random = seededRandom(3);
-  let floors = 0, walks = 0;
+  let floors = 0, walks = 0, people = 0;
   for (const { plan } of plans.filter((e, i) => i % 3 === 0).slice(0, 60)) for (const level of new Set([0, Math.min(1, plan.levels - 1)])) {
     const t = plan.templates[Math.min(level, plan.templates.length - 1)], y = levelY(plan, level);
-    const boxes = interiorColliders(plan, level).filter(b => !b.supportOnly && overlapsHeight(b, y, 1.8));
+    // Seated workers' chairs are among the colliders; everyone else stands in their own place.
+    const bodies = floorOccupants(plan, level).filter(o => !o.chair).map(o => {
+      const at = toWorld(plan, o.body.x, o.body.z);
+      return orientedBox(at.x, at.z, o.body.w, o.body.d, plan.origin.yaw + o.body.yaw, y + 1.8, y);
+    });
+    people += bodies.length;
+    const boxes = interiorColliders(plan, level).filter(b => !b.supportOnly && overlapsHeight(b, y, 1.8)).concat(bodies);
     const minX = Math.min(...plan.inner.map(q => q.x)), minZ = Math.min(...plan.inner.map(q => q.z));
     const nx = Math.ceil((Math.max(...plan.inner.map(q => q.x)) - minX) / step), nz = Math.ceil((Math.max(...plan.inner.map(q => q.z)) - minZ) / step);
     const centre = k => toWorld(plan, minX + (Math.floor(k / nz) + .5) * step, minZ + (k % nz + .5) * step), grid = new Int32Array(nx * nz).fill(-1);
@@ -302,5 +308,5 @@ test('furniture leaves each floor walkable in one piece, and walks across it nev
       walks++;
     }
   }
-  assert.ok(floors > 60 && walks > 150, `${floors} floors, ${walks} walks`);
+  assert.ok(floors > 60 && walks > 150 && people > 60, `${floors} floors, ${walks} walks, ${people} people`);
 });

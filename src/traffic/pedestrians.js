@@ -19,13 +19,17 @@ function inPath(a, b) {
   return rx * fx + rz * fz > 0 && Math.abs(rx * -fz + rz * fx) < .75;
 }
 
-/** The fixed avatar pool: every human wardrobe interleaved with the visitors. */
-export function createAvatarPool({ citizen, visitors = {}, humanBases = {} }, random = seededRandom(707)) {
-  const roster = [];
+/**
+ * The fixed avatar pool: every human wardrobe interleaved with the visitors,
+ * or `count` of them from `start` round that roster.
+ */
+export function createAvatarPool({ citizen, visitors = {}, humanBases = {} }, random = seededRandom(707), { start = 0, count = Infinity } = {}) {
+  const full = [];
   for (let i = 0; i < Math.max(CROWD_PROFILES.length, VISITOR_PROFILES.length * 2); i++) {
-    if (CROWD_PROFILES[i]) roster.push({ human: CROWD_PROFILES[i] });
-    if (i % 2 === 0 && VISITOR_PROFILES[i / 2]) roster.push({ visitor: VISITOR_PROFILES[i / 2] });
+    if (CROWD_PROFILES[i]) full.push({ human: CROWD_PROFILES[i] });
+    if (i % 2 === 0 && VISITOR_PROFILES[i / 2]) full.push({ visitor: VISITOR_PROFILES[i / 2] });
   }
+  const roster = Array.from({ length: Math.min(count, full.length) }, (_, i) => full[(start + i) % full.length]);
   let fallback = 0;
   return roster.map(({ visitor, human }, i) => {
     const available = visitor && visitors[visitor.id];

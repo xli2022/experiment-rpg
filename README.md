@@ -46,7 +46,7 @@ Remove-Item Env:PAGES_BASE_PATH
 
 Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western hills and dense central neighborhoods to Blackwater Bay. The original street connections, district arrangement and coastline fit within one quarter of the former area. Buildings keep their full authored size, 26–49 m across, lined up along each street with narrow side passages, so taller roofs offer downward jumps to nearby lower ones. In the story, start at the Eastpoint hideout and follow the pedestrian ramp south to **Mara on the Upper Market**, four metres above the street. In any mode, step up to a car waiting at a red light and press **E** to drive it.
 
-- **Living streets.** Cars keep their lanes, queue at two-phase traffic lights, give way at quiet junctions, wait for people on crosswalks, and signal and brake visibly. Pedestrians walk the sidewalks, wait for the walk signal, and stop to talk, check a phone, stroll in pairs or jog. See [traffic](docs/CITY-RENDERING.md#traffic).
+- **Living streets.** Cars keep their lanes, queue at two-phase traffic lights, give way at quiet junctions, wait for people on crosswalks, and signal and brake visibly. Pedestrians walk the sidewalks, wait for the walk signal, and stop to talk, check a phone, stroll in pairs or jog. Indoors, people sit on sofas and at desks, browse shops, wait for the lift and staff the lobbies. See [traffic](docs/CITY-RENDERING.md#traffic) and [people inside](docs/CITY-RENDERING.md#people-inside).
 - **Free roam.** No quests, enemies or weapon: explore, climb, glide, drive and enter buildings. Its panel counts the districts visited and buildings entered, and the map shows transit stations. Free roam keeps its own save, separate from the story.
 
 - **Six campaign chapters, two evidence paths, and three playable endings.** Meet eight named contacts, ask about their lives, accept local work, and make the final broadcast.
@@ -114,6 +114,7 @@ Sources are layered, and each layer imports only those before it: `core` → `wo
   - `signals.js` — signal timing and its props
   - `vehicles.js` — car agents and the instanced fleet
   - `pedestrians.js` — walkers and the avatar pool
+  - `occupants.js` — people inside buildings, on the interior floors standing near the player
   - `population.js` — district budgets
   - `car-model.js` — the procedural car
 - `src/actors/` — NPC rigs, appearance, wardrobe, visitors, grounding and speed-aware animation, shared by traffic, the engine and modes

@@ -129,6 +129,14 @@ Indoors the player jogs rather than sprints. The camera keeps the same distance 
 - **What is shown:** inside, the current floor ±1. Outside on foot, the lobby of any building whose door is within 25 m; nothing new is built while driving. At most one floor is built per frame, and unused floors are released after 1.5 s.
 - **Shell cut-outs:** the facade, industrial, stone and glass materials share a small clip uniform set. Up to four street doorways are cut out of the shell once their lobby exists. For the occupied building, its cavity discards exterior trim such as balcony rings that would otherwise cross the rooms.
 
+### People inside
+
+Buildings are lived in. Each floor layout has places for people (`templateSpots()`), made the first time the floor is shown and kept: two seats on a sofa and one on a lobby bench, a chair at a desk, standing room at a kitchen counter, a living-room table, a shelf, a shop display, a wardrobe, a warehouse rack or the mailboxes, a clerk at the end of a shop counter or reception desk, and room beside the lift. Each place holds the room a body takes up and is checked as a piece of furniture is, so the floor stays walkable in one piece with everyone in it and nobody blocks a doorway. Seated people's feet rest just past the seat's front edge.
+
+`floorOccupants(plan, level)` picks who is in, the same on every visit. It is late at night: in a flat someone is up only while its lights are on, at most two to a flat, on the sofa, at the counter, at the table or the desk; a few people work late, fewer in a building whose windows are mostly dark; every shop and lobby has a clerk, and now and then a customer browses or someone waits for the lift. A typical floor has about five people. A desk someone works at gets a chair, drawn and solid like the rest of the furniture.
+
+`traffic/occupants.js` shows them with a pool of ten avatars (six on Performance) from the pedestrian roster, on the interior floors standing round the player only, so nobody appears without a room round them, and goes with their floor. The nearest people get avatars, those on the player's floor first. Humans sit in a seated pose made from the driving clip's legs and body with the idle clip's loose arms, or at a desk in the driving pose itself, hands over the keyboard; robots and aliens stand. They browse shelves, type, read a phone in their lap, look down at a counter, talk across a meeting table or look round, and glance up at the player passing within a few metres. Standing people are solid: the player walks round them. They receive the city's light like pedestrians and have contact shadows; `snapshot().occupants` lists who is shown.
+
 ### Broken windows
 
 Windows are the panes the facade atlas paints: one per 2.7 m bay and 3.6 m storey, at a position that depends on the facade style. `facade-windows.js` holds that pane table, and the atlas is drawn from it. Each facade volume's walls count their bays from the corner where their texture starts. A box face runs from its second corner back to its first, a prism face from first to second, and a circle continues round its whole perimeter. Rooms open exactly these panes on the base volume, so a window seen from the street is the window in the room. A pane split by a partition opens on both sides of it. Industrial sheds keep their clerestory band and don't break.
@@ -294,7 +302,8 @@ Interior suites generate plans for buildings across every district. They check:
 - reachability of every room from a street door or stair landing
 - stairs and lifts where required, and doors matching the drawn entrances
 - unique unit IDs, floors above the terrain, and furniture clear of doorways
-- sparely furnished rooms, and furniture that leaves each floor walkable in one piece, and walks round it that never stick
+- sparely furnished rooms, and furniture and people inside that leave each floor walkable in one piece, and walks round them that never stick
+- people inside who sit only where there is a seat, are home only in lit flats, stay the same on every visit and never outlast their floor
 
 Physics tests check:
 - that the hull matches the shell for collision and rays outside door gaps

@@ -237,7 +237,7 @@ export async function createGame({ canvas, modes }) {
   function scenery() { return world.spatialFor(player.interior); }
   function allCars() { return owned.concat(traffic.cars); }
   function nearbyColliders(x, z, radius = 8, exclude = null, spatial = scenery()) {
-    return spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider));
+    return spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider), traffic.occupants.colliders(x, z, radius));
   }
   // Walls are only climbable from outside a building's outline.
   function climbColliders() { return player.interior?.inside ? nearbyColliders(player.x, player.z, 3) : nearbyColliders(player.x, player.z, 3, null, world.spatial); }
@@ -499,6 +499,7 @@ export async function createGame({ canvas, modes }) {
     for (const { root } of traffic.pedestrians.people) if (root.visible && root.parent) {
       items.push({ x: root.position.x, z: root.position.z, y: Math.max(.055, root.position.y + .015), width: 1.6, length: 1.6 });
     }
+    traffic.occupants.shadows(items);
     for (const source of contactSourcesRef) source(items);
     contactShadows.update(items);
   }
@@ -542,6 +543,8 @@ export async function createGame({ canvas, modes }) {
       if (mode) mode.update?.(dt, { now: now / 1000, time: state.time, player, driving, camera });
     }
     world.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused, driving: !!driving });
+    // People inside stand only on the floors standing after this update.
+    traffic.occupants.update(state.paused ? 0 : dt, { player, camera, floors: world.interiors.floors(), time: state.time });
     // Retire distant abandoned takeovers only after they are outside the visible
     // car range. Nearby cars and the vehicle being driven never disappear.
     if (owned.length > 8) for (const car of [...owned]) {
@@ -586,7 +589,7 @@ export async function createGame({ canvas, modes }) {
       yaw: cameraYaw, pitch: cameraPitch, fps, quality, touch: input.touch, drawCalls: renderer.info.render.calls,
       rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
       performance: { ...frameCosts, scale: resolution.scale, activeCrowd: traffic.pedestrians.active, streaming: { ...world.stream.stats }, blueprints: world.metropolis.blocks.size }, population: traffic.pedestrians.snapshot(),
-      shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(),
+      shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(), occupants: traffic.occupants.snapshot(),
       city: { span: world.limit * 2, areaKm2: (world.limit * 2 / 1000) ** 2, districts: world.districts.length, roads: world.plan.roads.length, vertical: true },
       character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: traffic.pedestrians.count, crowdDrawCalls: traffic.pedestrians.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
       camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
@@ -616,7 +619,7 @@ export async function createGame({ canvas, modes }) {
     character = createCharacter(assets.player); scene.add(character.root);
     parachute = createParachute(); character.root.add(parachute.root);
     traffic = createTraffic({ scene, world, assets });
-    shadows = createShadows(renderer, scene, world.atmosphere.moon, { dynamicRoots: [traffic.root, character.root, ...traffic.pedestrians.people.map(p => p.root)] });
+    shadows = createShadows(renderer, scene, world.atmosphere.moon, { dynamicRoots: [traffic.root, character.root, ...traffic.pedestrians.people.map(p => p.root), ...traffic.occupants.avatars.map(p => p.root)] });
     contactShadows = createContactShadows(scene);
     effects = createEffects(scene);
     hud = new HUD(world);

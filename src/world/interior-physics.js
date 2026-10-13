@@ -1,6 +1,6 @@
 import { orientedBox, boxCoordinates } from '../core/physics.js';
 import { polygonFaces, pointInConvex } from './building-footprints.js';
-import { INTERIOR, levelY, levelAt } from './interior-plan.js';
+import { INTERIOR, levelY, levelAt, floorOccupants } from './interior-plan.js';
 
 // Interior collision lives only in an "interior context": while the player is
 // inside (or within reach of) a building, its solid shell collider is swapped
@@ -131,6 +131,11 @@ export function floorColliders(plan, level) {
     // The camera's fade sees the whole piece; collisions only its body.
     const drawn = f.item === 'counter' ? INTERIOR.cupboard.y + INTERIOR.cupboard.h / 2 : f.h;
     boxes.push(localBox(plan, f.x, f.z, f.w, f.d, f.yaw, y, y + f.h, { id: `${tag}:${f.id}`, interior: plan.id, climbable: false, furniture: f.item, viewMaxY: y + Math.max(f.h, drawn) }));
+  }
+  // A chair at each desk someone works at on this level.
+  const { chair } = INTERIOR;
+  for (const o of floorOccupants(plan, level)) if (o.chair) {
+    boxes.push(localBox(plan, o.chair.x, o.chair.z, chair.w, chair.d, o.chair.yaw, y, y + chair.back, { id: `${tag}:chair:${o.spot}`, interior: plan.id, climbable: false, furniture: 'chair' }));
   }
   return boxes;
 }

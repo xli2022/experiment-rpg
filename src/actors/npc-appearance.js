@@ -361,6 +361,18 @@ function makeWardrobe(body, bones, profile) {
   return { ownedGeometry, ownedMaterials, batches: groups.size };
 }
 
+// Seated at rest: the driving clip's seated legs and body, with the arms
+// hanging loose as they do in Idle rather than holding a wheel. Made once per
+// rig; an empty list if the rig has no seated clip.
+const ARMS = /^(Clavicle|UpperArm|Forearm|Hand|Finger)/;
+export function seatedClips(asset) {
+  if (asset.userData.seatedClips) return asset.userData.seatedClips;
+  const driving = asset.animations.find(clip => clip.name === 'Driving'), idle = asset.animations.find(clip => clip.name === 'Idle');
+  const clips = driving && idle ? [new THREE.AnimationClip('Seated', idle.duration,
+    [...driving.tracks.filter(track => !ARMS.test(track.name)), ...idle.tracks.filter(track => ARMS.test(track.name))])] : [];
+  return asset.userData.seatedClips = clips;
+}
+
 export function createNPC(asset, profile, clipName = 'Idle') {
   const root = new THREE.Group(); root.name = `NPC_${profile.id}`;
   const fitted = fittedProfile(profile, asset);
@@ -389,7 +401,7 @@ export function createNPC(asset, profile, clipName = 'Idle') {
   const walk = clipName === 'WalkFormal' ? 'WalkFormal' : 'Walk';
   const stride = scale * profile.depth, motion = asset.userData?.motionSpeeds ?? {};
   const speeds = Object.fromEntries(Object.entries(motion).map(([name, speed]) => [name, speed * stride]));
-  const animation = createNPCAnimation(mixer, asset.animations, { initial: clipName, walk,
+  const animation = createNPCAnimation(mixer, [...asset.animations, ...seatedClips(asset)], { initial: clipName, walk,
     walkSpeed: (motion[walk] ?? 1.084589) * stride, speeds });
   let presenceAction = null;
   if (profile.stance) {
@@ -418,6 +430,7 @@ export function createNPC(asset, profile, clipName = 'Idle') {
     update(dt, speed) { animation.update(dt, speed); updatePresence(); ground(dt); },
     setAnimation(name) { animation.setAnimation(name); updatePresence(); ground(); }, scale, profile, wardrobeBatches: wardrobe.batches,
     setGait: name => animation.setGait(name), get gait() { return animation.gait; },
+    setRest: name => animation.setRest(name), get rest() { return animation.rest; },
     dispose() {
       if (disposed) return;
       disposed = true;

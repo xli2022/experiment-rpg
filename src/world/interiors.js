@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { INTERIOR, cachedInteriorPlan, floorLights, floorPlan, levelY } from './interior-plan.js';
+import { INTERIOR, cachedInteriorPlan, floorLights, floorOccupants, floorPlan, levelY } from './interior-plan.js';
 import { buildingEntrances } from './building-design.js';
 import { polygonCentroid } from './building-footprints.js';
 import { toWorld } from './interior-physics.js';
@@ -232,6 +232,12 @@ export function buildFloor(plan, level, broken = new Map()) {
     }
   }
   for (const f of t.furniture) furniturePiece(surfaces, f, y, albedo => (p, n) => shadeFor(f.zone, albedo)(p, n));
+  // Chairs at the desks people work at; its back faces away from the desk.
+  for (const o of floorOccupants(plan, level)) if (o.chair) {
+    const { w, d, seat, back } = INTERIOR.chair, c = Math.cos(o.chair.yaw), s = Math.sin(o.chair.yaw), shade = shadeFor(o.zone, rgb(0x3d464f));
+    const part = (lz, ly, pw, ph, pd) => surfaces.box(o.chair.x + lz * s, y + ly, o.chair.z + lz * c, pw, ph, pd, o.chair.yaw, shade);
+    part(0, seat - .04, w, .08, d); part(d / 2 - .03, (seat + back) / 2, w, back - seat, .06); part(0, (seat - .08) / 2, .07, seat - .08, .07); part(0, .03, w * .8, .06, d * .8);
+  }
   for (const l of floorLights(plan, level)) {
     const room = floor.rooms.find(r => r.local === l.room), lit = room?.lit;
     const glow = lit ? [2.1, 1.85, 1.5] : [.16, .16, .17], h = l.half, yy = l.y - .01;
@@ -436,5 +442,7 @@ export function createInteriors(scene, city) {
     active.clear(); root.removeFromParent();
     warm.dispose(); for (const material of Object.values(materials)) material.dispose();
   }
-  return { root, update, doorLeaves, snapshot, dispose, materials };
+  /** The floors standing now, as { plan, level }: where people inside may be shown. */
+  function floors() { return [...active.values()].flatMap(b => [...b.floors.keys()].map(level => ({ plan: b.plan, level }))); }
+  return { root, update, doorLeaves, floors, snapshot, dispose, materials };
 }
