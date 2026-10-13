@@ -1,5 +1,5 @@
 import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply, opener, TOPICS } from './persona.js';
-import { ResidentModel } from './model.js';
+import { ResidentModel, RESIDENT_MODELS } from './model.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
@@ -125,7 +125,7 @@ function createView({ touch, onSay, onClose, onReplay, onVoice }) {
 }
 
 /** The pause-menu note for the resident-chat setting. */
-export function settingsNote({ status, progress, message }, touch = false) {
+export function settingsNote({ status, progress, message, size }, touch = false) {
   switch (status) {
     case 'idle': return 'On. The resident model loads when you start playing.';
     case 'checking': return 'Checking your graphics card…';
@@ -134,14 +134,15 @@ export function settingsNote({ status, progress, message }, touch = false) {
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
     case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
   }
-  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by a small AI model on your graphics card. Turning this on downloads about 450 MB once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
+  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by a small AI model on your graphics card. Turning this on downloads about ${(RESIDENT_MODELS[size] ?? RESIDENT_MODELS.small).download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
 }
 function bindSettings(model, touch) {
-  const toggle = $('resident-chat-toggle'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
+  const toggle = $('resident-chat-toggle'), size = $('resident-chat-model'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
   toggle.addEventListener('change', () => model.setEnabled(toggle.checked));
+  size.addEventListener('change', () => model.setSize(size.value));
   forget.addEventListener('click', () => model.forget());
   model.subscribe(state => {
-    toggle.checked = state.enabled; note.textContent = settingsNote(state, touch);
+    toggle.checked = state.enabled; size.value = state.size; note.textContent = settingsNote(state, touch);
     forget.classList.toggle('hidden', !state.downloaded || ['checking', 'loading'].includes(state.status));
   });
 }
