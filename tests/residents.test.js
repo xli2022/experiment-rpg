@@ -124,7 +124,9 @@ test('replies are cleaned into a few spoken sentences, or rejected', () => {
   const long = cleanReply(`${'Word '.repeat(70)}end. Short one.`, dara);
   assert.ok(long.length <= 281 && long.endsWith('…'), long);
   for (const bad of ['As an AI language model, I cannot.', 'I am an AI assistant here to help.', '   ', '*nods*', 'Qwen here!']) assert.equal(cleanReply(bad, dara), null, bad);
-  for (const broken of ['ĠtheĠrainĠisĠcold.', 'Not much.Ċ', 'Busy \uFFFD night.', 'Busy night. 今天下雨了。', 'Привет. Busy night.']) assert.equal(cleanReply(broken, dara), null, `broken tokens or another language: ${broken}`);
+  for (const broken of ['ĠtheĠrainĠisĠcold.', 'Not much.Ċ', 'Busy \uFFFD night.']) assert.equal(cleanReply(broken, dara), null, `broken tokens: ${broken}`);
+  for (const other of ['Busy night. 今天下雨了。', 'Привет. Busy night.', '今天下雨了！电车又晚了。']) assert.equal(cleanReply(other, dara), other, `another language is still speech: ${other}`);
+  assert.equal(cleanReply('今天下雨了。电车又晚了。还有', dara), '今天下雨了。电车又晚了。', 'a cut-off Chinese fragment is dropped');
   assert.equal(cleanReply('Café’s shut. Señora Ruiz went home — try Kōji’s.', dara), 'Café’s shut. Señora Ruiz went home — try Kōji’s.', 'accented Latin letters are speech');
   assert.equal(previewReply('Dara: Hey th', dara), 'Hey th');
   const robot = residentPersona(walker(1, 'robot-scout', 'robot'));
