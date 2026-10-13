@@ -224,6 +224,25 @@ test('furniture stays inside its room and clear of doorways', () => {
   }
 });
 
+test('rooms are furnished sparely: their essentials, a few extras, and small blocks of desks, displays and racks', () => {
+  const kinds = {};
+  for (const { plan } of plans) for (const t of plan.templates) {
+    const zones = new Map(t.zones.map(z => [z.id, z]));
+    for (const zone of t.zones) {
+      const items = t.furniture.filter(f => f.zone === zone.id), k = kinds[zone.kind] ??= { zones: 0, items: 0, area: 0, has: {} };
+      k.zones++; k.items += items.length; k.area += polygonArea(zone.polygon);
+      for (const item of new Set(items.map(f => f.item))) k.has[item] = (k.has[item] ?? 0) + 1;
+      const block = items.filter(f => f.mode === 'grid');
+      assert.ok(block.length <= 6, `${plan.id} ${zone.kind}: ${block.length} ${block[0]?.item}s in a block`);
+      assert.ok(items.every(f => zones.get(f.zone) === zone));
+    }
+  }
+  // Homes keep what makes them homes.
+  assert.ok(kinds.bedroom.has.bed / kinds.bedroom.zones > .9 && kinds.living.has.sofa / kinds.living.zones > .95 && kinds.bath.has.sink / kinds.bath.zones > .9);
+  // At most one piece for every 15 m² of a living room, bedroom, office or shop floor.
+  for (const kind of ['living', 'bedroom', 'office', 'shop']) assert.ok(kinds[kind].area / kinds[kind].items > 15, `${kind}: one piece per ${(kinds[kind].area / kinds[kind].items).toFixed(1)} m²`);
+});
+
 test('furniture leaves each floor walkable in one piece, and walks across it never stick', () => {
   // Every spot a body can stand on is reachable from the rest of the floor, and
   // a player steering along a path round the furniture keeps moving.

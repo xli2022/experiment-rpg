@@ -112,7 +112,7 @@ Polygon collision uses the rendered wall planes rather than the enclosing rectan
 - **Side-core** layouts place it against the back wall when the footprint is under about 15 m across.
 - **Single** layouts are one-storey rooms without a core.
 
-Every wing shares a full side with the landing, so each unit opens straight onto it. Units divide into living rooms, bedrooms and bathrooms. Office floors stay open-plan apart from a meeting room. Ground floors become lobbies or shops wherever a street door opens. Street doors come from `buildingEntrances()`, which matches the glazed and roll-up entrances drawn on the facade. Rooms and units have stable IDs such as `<building>/12B:kitchen`, for attaching residents and evidence later. Furniture goes only where the floor round it stays in one piece for a body a little wider than the player, measured from each wall's real face: no nook behind a bed that the player can see but only reach through a gap too narrow to pass. Plans are cached, take about 2 ms each (under 5 ms for the largest), and are identical across streaming and reloads.
+Every wing shares a full side with the landing, so each unit opens straight onto it. Units divide into living rooms, bedrooms and bathrooms. Office floors stay open-plan apart from a meeting room. Ground floors become lobbies or shops wherever a street door opens. Street doors come from `buildingEntrances()`, which matches the glazed and roll-up entrances drawn on the facade. Rooms and units have stable IDs such as `<building>/12B:kitchen`, for attaching residents and evidence later. Rooms are furnished sparely: each gets its essentials (a bed and wardrobe, a sofa and kitchen counter, a bath's fittings, a lobby's reception and mailboxes) and only sometimes an extra shelf, plant, desk or bench. Office desks, shop display tables and warehouse racks stand in one block centred in the room, at most six with wide aisles between. Furniture goes only where the floor round it stays in one piece for a body a little wider than the player, measured from each wall's real face on a 10 cm grid: no nook behind a bed that the player can see but only reach through a gap too narrow to pass. No two pieces leave a gap a body only just fits through or only just doesn't. Plans are cached, take about 2 ms each (under 5 ms for the largest), and are identical across streaming and reloads.
 
 `interior-physics.js` keeps the city's exterior collision unchanged. When the player is inside a building's outline, or within 0.75 m of it, the engine switches to that building's interior context:
 
@@ -294,7 +294,7 @@ Interior suites generate plans for buildings across every district. They check:
 - reachability of every room from a street door or stair landing
 - stairs and lifts where required, and doors matching the drawn entrances
 - unique unit IDs, floors above the terrain, and furniture clear of doorways
-- furniture that leaves each floor walkable in one piece, and walks round it that never stick
+- sparely furnished rooms, and furniture that leaves each floor walkable in one piece, and walks round it that never stick
 
 Physics tests check:
 - that the hull matches the shell for collision and rays outside door gaps

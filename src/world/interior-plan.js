@@ -371,18 +371,25 @@ function placeWindows(plan, ctx, template, level) {
   template.perimeter = perimeter; template.windows = windows;
 }
 
+// Each room's furnishings: [item, width, depth, height, placement, chance].
+// Most stand against a wall, a 'free' piece in the middle, 'grid' pieces in
+// a block of rows. A room gets its essentials and only now and then an
+// extra (`chance` of 1 when omitted), so it never reads as crowded.
 const FURNITURE = {
-  living: [['sofa', 2, .9, .8], ['counter', 2.4, .62, .92], ['shelf', 1.2, .4, 1.8], ['table', 1.2, .8, .75, 'free'], ['plant', .5, .5, 1.1]],
-  bedroom: [['bed', 1.6, 2.05, .55], ['wardrobe', 1.2, .6, 2], ['desk', 1.2, .6, .75]],
+  living: [['sofa', 2, .9, .8], ['counter', 2.4, .62, .92], ['table', 1.2, .8, .75, 'free'], ['shelf', 1.2, .4, 1.8, 'wall', .4], ['plant', .5, .5, 1.1, 'wall', .3]],
+  bedroom: [['bed', 1.6, 2.05, .55], ['wardrobe', 1.2, .6, 2], ['desk', 1.2, .6, .75, 'wall', .35]],
   bath: [['tub', 1.7, .75, .55], ['sink', .6, .45, .85], ['toilet', .45, .7, .42]],
-  studio: [['bed', 1.4, 2, .55], ['counter', 1.8, .62, .92], ['sofa', 1.6, .85, .8], ['wardrobe', 1, .6, 2]],
-  office: [['shelf', 1.6, .45, 1.9], ['shelf', 1.6, .45, 1.9], ['desk', 1.6, .8, .75, 'grid']],
-  meeting: [['table', 2.4, 1.1, .75, 'free'], ['shelf', 1.2, .4, 1.5]],
-  lobby: [['reception', 2.4, .8, 1.1], ['mailboxes', 1.4, .3, 1.6], ['bench', 1.6, .5, .45], ['plant', .6, .6, 1.2], ['plant', .6, .6, 1.2]],
-  shop: [['counter', 2.4, .7, 1], ['shelf', 2, .5, 1.8], ['shelf', 2, .5, 1.8], ['shelf', 2, .5, 1.8], ['display', 1.4, .9, .8, 'grid']],
-  storage: [['shelf', 1.6, .5, 2], ['shelf', 1.6, .5, 2], ['crate', .9, .9, .9]],
-  hall: [['rack', 3.6, 1.1, 2.8, 'grid'], ['crate', 1.2, 1.2, 1.2], ['crate', 1.2, 1.2, 1.2], ['crate', 1.2, 1.2, 1.2]],
+  studio: [['bed', 1.4, 2, .55], ['counter', 1.8, .62, .92], ['sofa', 1.6, .85, .8, 'wall', .5], ['wardrobe', 1, .6, 2, 'wall', .5]],
+  office: [['shelf', 1.6, .45, 1.9], ['desk', 1.6, .8, .75, 'grid']],
+  meeting: [['table', 2.4, 1.1, .75, 'free'], ['shelf', 1.2, .4, 1.5, 'wall', .5]],
+  lobby: [['reception', 2.4, .8, 1.1], ['mailboxes', 1.4, .3, 1.6], ['bench', 1.6, .5, .45, 'wall', .6], ['plant', .6, .6, 1.2, 'wall', .6]],
+  shop: [['counter', 2.4, .7, 1], ['shelf', 2, .5, 1.8], ['shelf', 2, .5, 1.8, 'wall', .5], ['display', 1.4, .9, .8, 'grid']],
+  storage: [['shelf', 1.6, .5, 2], ['crate', .9, .9, .9, 'wall', .5]],
+  hall: [['rack', 3.6, 1.1, 2.8, 'grid'], ['crate', 1.2, 1.2, 1.2], ['crate', 1.2, 1.2, 1.2, 'wall', .5]],
 };
+// Grid pieces stand in one block centred in the room, this far apart, at
+// most this many, and this far from the walls.
+const GRID = { desk: { aisle: 2.6, most: 6 }, display: { aisle: 2.6, most: 6 }, rack: { aisle: 3, most: 6 }, margin: 1.4 };
 
 function rectCorners(f) {
   const c = Math.cos(f.yaw), s = Math.sin(f.yaw);
@@ -408,7 +415,7 @@ function rectsOverlap(a, b, gap) {
 // see but only reach through a gap too narrow to pass. Clearance is measured
 // from each edge's real wall face: the hull's lies on the zone's edge, a
 // partition's or core wall's half its thickness inside it.
-const WALK_RADIUS = .45;
+const WALK_RADIUS = .44;
 function wallFaces(zone, walls) {
   return polygonFaces(zone.polygon).map(f => ({ ...f, inset: walls.filter(w => w.zones.includes(zone.id) &&
     [w.a, w.b].every(p => Math.abs((p.x - f.x) * f.nx + (p.z - f.z) * f.nz) < 1e-3)).reduce((n, w) => Math.max(n, (w.kind === 'core' ? .2 : INTERIOR.partition) / 2), 0) }));
@@ -436,13 +443,23 @@ function flood(free, nx, nz, starts) {
 // The zone's walkable cells, and those of them standing just inside its
 // doorways. Only floor the doorways reach in the empty room counts.
 function floorGrid(zone, faces, doorways) {
-  const b = bounds(zone.polygon), cell = .2;
+  const b = bounds(zone.polygon), cell = .1;
   const nx = Math.ceil((b.maxX - b.minX) / cell), nz = Math.ceil((b.maxZ - b.minZ) / cell), inside = new Uint8Array(nx * nz);
-  for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) inside[i * nz + j] = +inZone(faces, b.minX + (i + .5) * cell, b.minZ + (j + .5) * cell, WALK_RADIUS);
+  // The room is convex: each column of cells is inside over one run of them.
+  for (let i = 0; i < nx; i++) {
+    const x = b.minX + (i + .5) * cell;
+    let lo = -Infinity, hi = Infinity;
+    for (const f of faces) {
+      const limit = -(WALK_RADIUS + f.inset) + 1e-9 - (x - f.x) * f.nx;
+      if (Math.abs(f.nz) < 1e-9) { if (limit < 0) hi = -Infinity; }
+      else if (f.nz > 0) hi = Math.min(hi, f.z + limit / f.nz); else lo = Math.max(lo, f.z + limit / f.nz);
+    }
+    for (let j = Math.max(0, Math.ceil((lo - b.minZ) / cell - .5)); j < nz && b.minZ + (j + .5) * cell <= hi; j++) inside[i * nz + j] = 1;
+  }
   const cellAt = p => {
     const i = Math.floor((p.x - b.minX) / cell), j = Math.floor((p.z - b.minZ) / cell);
-    let best = -1, distance = Infinity;
-    for (let a = i - 1; a <= i + 1; a++) for (let c = j - 1; c <= j + 1; c++) {
+    let best = -1, distance = Infinity, span = Math.ceil(.3 / cell);
+    for (let a = i - span; a <= i + span; a++) for (let c = j - span; c <= j + span; c++) {
       if (a < 0 || c < 0 || a >= nx || c >= nz || !inside[a * nz + c]) continue;
       const d = Math.hypot(b.minX + (a + .5) * cell - p.x, b.minZ + (c + .5) * cell - p.z);
       if (d < distance) { distance = d; best = a * nz + c; }
@@ -455,20 +472,32 @@ function floorGrid(zone, faces, doorways) {
   for (let k = 0; k < base.length; k++) base[k] = base[k] === 2 ? 1 : 0;
   return { minX: b.minX, minZ: b.minZ, cell, nx, nz, inside: base, seeds };
 }
+// One scratch buffer serves every check.
+let freeCells = new Uint8Array(4096);
 function walkable(faces, grid, placed, f) {
   // A piece a body's width clear of every other piece, and of the walls beside
-  // and in front of it, can't cut anything off. Only closer ones are checked.
+  // and in front of it, can't cut anything off. Only closer ones are checked,
+  // and those only just a body's width away too: the band a body's centre can
+  // pass through such a gap is narrower than the grid can see.
   // (A wall piece's back corners lie beyond its own wall.)
-  const reach = 2 * WALK_RADIUS;
+  const reach = 2 * WALK_RADIUS + .2;
   const nearWall = rectCorners({ ...f, w: f.w + 2 * reach, d: f.d + 2 * reach }).some((p, k) => !(f.mode === 'wall' && k < 2) && !inZone(faces, p.x, p.z, -1e-9));
   if (!nearWall && !placed.some(o => rectsOverlap(f, o, 2 * reach))) return true;
-  const { minX, minZ, cell, nx, nz, inside, seeds } = grid(), free = inside.slice();
+  const { minX, minZ, cell, nx, nz, inside, seeds } = grid();
+  if (freeCells.length < inside.length) freeCells = new Uint8Array(inside.length);
+  const free = freeCells.subarray(0, inside.length);
+  free.set(inside);
   // Stamp each piece, grown by the body's radius, over the cells it covers.
   for (const o of [...placed, f]) {
-    const r = Math.hypot(o.w, o.d) / 2 + WALK_RADIUS;
+    const r = Math.hypot(o.w, o.d) / 2 + WALK_RADIUS, c = Math.cos(o.yaw), s = Math.sin(o.yaw), hw = o.w / 2, hd = o.d / 2;
     for (let i = Math.max(0, Math.floor((o.x - r - minX) / cell)); i < Math.min(nx, Math.ceil((o.x + r - minX) / cell)); i++) {
+      const dx = minX + (i + .5) * cell - o.x;
       for (let j = Math.max(0, Math.floor((o.z - r - minZ) / cell)); j < Math.min(nz, Math.ceil((o.z + r - minZ) / cell)); j++) {
-        if (free[i * nz + j] && rectDistance(o, minX + (i + .5) * cell, minZ + (j + .5) * cell) < WALK_RADIUS) free[i * nz + j] = 0;
+        const k = i * nz + j;
+        if (!free[k]) continue;
+        // As rectDistance, unrolled: the cell centre in the piece's frame.
+        const dz = minZ + (j + .5) * cell - o.z, ex = Math.max(0, Math.abs(dx * c - dz * s) - hw), ez = Math.max(0, Math.abs(dx * s + dz * c) - hd);
+        if (ex * ex + ez * ez < WALK_RADIUS * WALK_RADIUS) free[k] = 0;
       }
     }
   }
@@ -479,6 +508,13 @@ function walkable(faces, grid, placed, f) {
   for (let k = 0; k < free.length; k++) count += free[k];
   if (count < 2) return true;
   return flood(free, nx, nz, [seeds.length ? seeds[0] : free.indexOf(1)]) === count;
+}
+
+// Two pieces with a gap between them a body only just fits through, or only
+// just doesn't: whether the floor beyond is reachable is too close to call.
+function nearMiss(f, o) {
+  const gap = Math.min(...rectCorners(f).map(p => rectDistance(o, p.x, p.z)), ...rectCorners(o).map(p => rectDistance(f, p.x, p.z)));
+  return gap > 2 * WALK_RADIUS - .1 && gap < 2 * WALK_RADIUS + .15;
 }
 
 // Block furniture against real walls, keeping every doorway and its approach
@@ -511,10 +547,11 @@ function furnish(plan, template, random) {
       .map(f => ({ x: p.x - f.nx * (f.inset + WALK_RADIUS + .05), z: p.z - f.nz * (f.inset + WALK_RADIUS + .05) })));
     const grid = () => cells ??= floorGrid(zone, faces, doorways);
     const ok = (f, gap = .08) => rectCorners(f).every(p => inZone(faces, p.x, p.z, .02)) &&
-      !placed.some(o => rectsOverlap(f, o, gap)) &&
+      !placed.some(o => rectsOverlap(f, o, gap) || nearMiss(f, o)) &&
       doorPoints.every(p => rectDistance(f, p.x, p.z) > INTERIOR.door.clearance + (f.mode === 'free' || f.mode === 'grid' ? .5 : 0)) &&
       walkable(faces, grid, placed, f);
-    for (const [item, w, d, h, mode = 'wall'] of list) {
+    for (const [item, w, d, h, mode = 'wall', chance = 1] of list) {
+      if (chance < 1 && random() >= chance) continue;
       if (mode === 'wall') {
         const order = segments.map((s, i) => ({ s, k: random() + i * 1e-3 })).sort((a, b) => a.k - b.k).map(o => o.s);
         let done = false;
@@ -531,11 +568,15 @@ function furnish(plan, template, random) {
           if (done) break;
         }
       } else {
-        const b = bounds(zone.polygon), aisle = mode === 'grid' ? (item === 'rack' ? 2 : 1.3) : 0;
-        const center = polygonCentroid(zone.polygon);
-        const candidates = mode === 'free' ? [center] : [];
-        if (mode === 'grid') for (let x = b.minX + 1.4 + w / 2; x <= b.maxX - 1.4 - w / 2; x += w + aisle) for (let z = b.minZ + 1.4 + d / 2; z <= b.maxZ - 1.4 - d / 2; z += d + aisle) candidates.push({ x, z });
-        for (const c of candidates.slice(0, 24)) {
+        const b = bounds(zone.polygon), center = polygonCentroid(zone.polygon), candidates = mode === 'free' ? [center] : [];
+        if (mode === 'grid') {
+          const { aisle, most } = GRID[item], fit = (span, size) => Math.max(0, Math.floor((span - 2 * GRID.margin + aisle) / (size + aisle)));
+          let nx = fit(b.maxX - b.minX, w), nz = fit(b.maxZ - b.minZ, d);
+          while (nx * nz > most) if (nx >= nz) nx--; else nz--;
+          const cx = (b.minX + b.maxX) / 2, cz = (b.minZ + b.maxZ) / 2;
+          for (let i = 0; i < nx; i++) for (let k = 0; k < nz; k++) candidates.push({ x: cx + (i - (nx - 1) / 2) * (w + aisle), z: cz + (k - (nz - 1) / 2) * (d + aisle) });
+        }
+        for (const c of candidates) {
           const f = { item, mode, w, d, h, zone: zone.id, x: c.x, z: c.z, yaw: 0 };
           if (rectCorners(f).every(p => inZone(faces, p.x, p.z, mode === 'grid' ? 1 : .9)) && ok(f, .9)) placed.push(f);
         }
