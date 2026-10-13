@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
-import { LAMP_COLORS, LAMP_GLOWS, createSignalProps, signalState } from '../src/traffic/signals.js';
-import { buildNetwork } from '../src/traffic/network.js';
+import { LAMP_COLORS, LAMP_GLOWS, createSignalProps, signalPoles, signalState } from '../src/traffic/signals.js';
+import { buildNetwork, rightOf } from '../src/traffic/network.js';
+import { createTraffic } from '../src/traffic/index.js';
 import { createMasterPlan } from '../src/world/master-plan.js';
+import { createVerticalCity } from '../src/world/vertical-city.js';
+import { WorldStream } from '../src/world/world-stream.js';
+import { AFTERLIGHT_LANDMARKS } from '../src/world/landmarks.js';
+import { moveWithCollisions, rayObstructionDistance } from '../src/core/physics.js';
+import { crowdAsset } from './helpers/street-grid.js';
 
 // The renderer's settings in engine/game.js: ACES filmic tone mapping at an
 // exposure of 1.18, and bloom for pixels brighter than a luminance of 1.03.
@@ -56,4 +62,44 @@ test('each lamp glows only while it is lit', () => {
   }
   assert.ok(lit.red > 10 && lit.green > 10 && lit.amber > 0 && dark > 30, `lit ${JSON.stringify(lit)}, ${dark} dark`);
   props.dispose();
+});
+
+test('walk lamps ride on the signal poles, facing across their crossings, with no posts of their own', () => {
+  const plan = createMasterPlan(), network = buildNetwork(plan), node = network.nodes.find(n => n.signalized && n.ground);
+  const props = createSignalProps(new THREE.Scene(), network, plan);
+  props.update(0, { x: node.x, y: node.y, z: node.z });
+  const poles = props.root.children.find(m => m.geometry.type === 'CylinderGeometry');
+  const arms = props.root.children.find(m => m.geometry.parameters?.width === 1 && m.geometry.parameters?.height === .09);
+  const walkers = props.root.children.find(m => m.geometry.parameters?.width === .22);
+  assert.equal(poles.count, arms.count, 'every post carries a signal arm');
+  assert.ok(walkers.count > poles.count, `${walkers.count} walk lamps on ${poles.count} poles`);
+  const at = (mesh, i) => new THREE.Vector3().setFromMatrixPosition(new THREE.Matrix4().fromArray(mesh.instanceMatrix.array, i * 16));
+  const bases = Array.from({ length: poles.count }, (_, i) => at(poles, i));
+  for (let i = 0; i < walkers.count; i++) {
+    const lamp = at(walkers, i), pole = bases.find(b => Math.hypot(b.x - lamp.x, b.z - lamp.z) < .3);
+    assert.ok(pole && lamp.y - pole.y > 1.8 && lamp.y - pole.y < 2.5, `walk lamp ${i} is mounted on a signal pole`);
+  }
+  // Each faces the people waiting at the far end of its crossing.
+  for (const n of network.nodes.filter(n => n.signalized && n.ground)) for (const p of signalPoles(n, plan)) for (const w of p.walks) {
+    const a = w.approach, across = a.width / 2 + .4, dx = n.x + a.dir.x * a.crosswalk + w.face.x * across - w.x, dz = n.z + a.dir.z * a.crosswalk + w.face.z * across - w.z;
+    assert.ok((dx * w.face.x + dz * w.face.z) / Math.hypot(dx, dz) > .8, `${n.id} walk lamp faces across its crossing`);
+  }
+  props.dispose();
+});
+
+test('signal poles are solid for anyone the world is asked about, while traffic is there', () => {
+  const scene = new THREE.Scene(), stream = new WorldStream(scene), city = createVerticalCity(scene, stream, AFTERLIGHT_LANDMARKS);
+  const traffic = createTraffic({ scene, world: city, assets: { citizen: crowdAsset() } });
+  const node = traffic.network.nodes.find(n => n.signalized && n.ground), pole = signalPoles(node, city.masterPlan)[0];
+  // From the street, straight at the post: the walker stops against it, and so does a shot.
+  const r = rightOf(pole.approach.dir), walker = { x: pole.x + r.x * 2, y: pole.ground, z: pole.z + r.z * 2 };
+  for (let i = 0; i < 20; i++) moveWithCollisions(walker, -r.x * .1, -r.z * .1, .43, city.spatial.near(walker.x, walker.z, 3));
+  const gap = Math.hypot(walker.x - pole.x, walker.z - pole.z);
+  assert.ok(gap > .55 && gap < .7, `stopped ${gap.toFixed(2)} m from the post`);
+  const shot = rayObstructionDistance({ x: pole.x + r.x * 5, y: pole.ground + 1.2, z: pole.z + r.z * 5 }, { x: -r.x, y: 0, z: -r.z }, 10, city.spatial);
+  assert.ok(shot > 4.8 && shot < 4.95, `a shot hits the post ${shot.toFixed(2)} m away`);
+  assert.ok(city.spatial.near(pole.x, pole.z, 1).some(b => b.kind === 'signal' && b.walkable === false));
+  traffic.dispose();
+  assert.ok(!city.spatial.near(pole.x, pole.z, 1).some(b => b.kind === 'signal'), 'gone with the traffic');
+  stream.dispose();
 });

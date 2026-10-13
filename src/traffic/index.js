@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { buildNetwork } from './network.js';
-import { createSignalProps, signalState, walkState } from './signals.js';
+import { createSignalProps, signalColliderSource, signalState, walkState } from './signals.js';
 import { createVehicles, VEHICLE_PROFILES, TAKEOVER_HITS } from './vehicles.js';
 import { createPedestrians } from './pedestrians.js';
 import { createOccupants } from './occupants.js';
@@ -31,6 +31,8 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
   // People inside buildings; the game updates them once the world's interior floors are up to date.
   const occupants = createOccupants({ scene, assets });
   const props = createSignalProps(root, network, plan);
+  // Signal poles are solid wherever the world is asked what is in the way.
+  const detachSignals = world.spatial?.attach(signalColliderSource(network, plan));
   scene.add(root);
   const frustum = new THREE.Frustum(), projection = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 4);
   let profile = VEHICLE_PROFILES[quality] ?? VEHICLE_PROFILES.high, level = quality, time = 0, scanTime = 0, first = true, target = 0, edges = [];
@@ -133,6 +135,6 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
         cars: cars.map(c => ({ id: c.id, x: c.x, y: c.y, z: c.z, speed: c.speed, accel: c.accel, yaw: c.yaw, pitch: c.pitch, roll: c.roll, piece: c.piece.id,
           turn: c.piece.turn ?? c.route[0]?.turn ?? null, brake: c.brake, signal: c.signal, cause: c.cause, waitingFor: c.denied, body: c.body.id, damageHits: c.hits, hitsRemaining: TAKEOVER_HITS - c.hits })) };
     },
-    dispose() { vehicles.dispose(); pedestrians.dispose(); occupants.dispose(); props.dispose(); scene.remove(root); },
+    dispose() { vehicles.dispose(); pedestrians.dispose(); occupants.dispose(); props.dispose(); detachSignals?.(); scene.remove(root); },
   };
 }

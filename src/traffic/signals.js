@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { rightOf } from './network.js';
+import { orientedBox } from '../core/physics.js';
 
 // Phased traffic signals: one phase per road direction, so streets that cross
 // never share a green. Every state is a pure function of the clock, so a
@@ -70,7 +71,7 @@ export function walkState(node, approach, time) {
 // soft ring of its own light instead of bloom.
 export const LAMP_COLORS = Object.freeze({ red: [1.2, 0, 0], amber: [1.1, .3, 0], green: [0, .5, .22], walk: [2.2, 2.4, 2.3], stop: [2.6, .7, .1] });
 export const LAMP_GLOWS = Object.freeze({ red: [.42, 0, 0], amber: [.42, .13, 0], green: [0, .26, .11] });
-const DIM = .1, PROP_RANGE = 170, REBUILD = 40, GLOW = .75;
+const DIM = .1, PROP_RANGE = 170, REBUILD = 40, GLOW = .75, WALK_REACH = 6;
 
 // A ring of light round a lens: clear over the lens itself (radius .105 of
 // the glow's .375), brightest at its rim and fading out to the edge.
@@ -85,6 +86,61 @@ function glowTexture(size = 64) {
   return texture;
 }
 
+/**
+ * The signal poles of a junction, one per approach with arriving traffic: on
+ * the drivers' kerb before the crossing, an arm out over their lane with a
+ * head facing them, and a second head on the pole. Each pole stands at a
+ * corner where two crossings end, and carries the walk lamps facing across
+ * them: its own approach's and the previous one's (when that ends here).
+ */
+export function signalPoles(node, plan) {
+  if (node.poles) return node.poles;
+  const poles = [], list = node.approaches;
+  if (node.kind === 'junction' && node.ground && node.signalized) for (const a of list) {
+    if (!a.arriving.length) continue;
+    const r = rightOf(a.dir), yaw = Math.atan2(a.dir.x, a.dir.z), kerb = a.width / 2 + .7;
+    const x = node.x + a.dir.x * (a.clear - .4) - r.x * kerb, z = node.z + a.dir.z * (a.clear - .4) - r.z * kerb;
+    const ground = plan.terrainHeight(x, z), reach = kerb - a.arriving[0].offset;
+    const heads = [{ x: x + r.x * reach, z: z + r.z * reach, y: ground + 4.62, height: 1 }, { x: x + a.dir.x * .2, z: z + a.dir.z * .2, y: ground + 2.9, height: .82 }];
+    const walks = [], previous = list[(a.index + list.length - 1) % list.length];
+    for (const [crossing, side] of [[a, 1], [previous, -1]]) {
+      // The lamp faces the people waiting at the crossing's far end.
+      const cr = rightOf(crossing.dir), face = { x: cr.x * side, z: cr.z * side }, across = crossing.width / 2 + .4;
+      const end = { x: node.x + crossing.dir.x * crossing.crosswalk - face.x * across, z: node.z + crossing.dir.z * crossing.crosswalk - face.z * across };
+      if (Math.hypot(end.x - x, end.z - z) > WALK_REACH) continue;
+      walks.push({ approach: crossing, x: x + face.x * .17, z: z + face.z * .17, y: ground + 2.2, yaw: Math.atan2(face.x, face.z), face });
+    }
+    poles.push({ node, approach: a, x, z, ground, yaw, reach, heads, walks });
+  }
+  node.poles = poles;
+  return poles;
+}
+
+/**
+ * The solid parts of a junction's signal poles within reach: each post, the
+ * head on it and its walk lamps. The arm and the head overhead are out of reach.
+ */
+export function signalColliders(node, plan) {
+  if (node.poleColliders) return node.poleColliders;
+  node.poleColliders = signalPoles(node, plan).flatMap(p => {
+    const id = `signal:${node.id}:${p.approach.index}`, solid = { kind: 'signal', walkable: false }, head = p.heads[1], half = .51 * head.height;
+    return [orientedBox(p.x, p.z, .26, .26, 0, p.ground + 5.4, p.ground, { id, ...solid }),
+      orientedBox(head.x, head.z, .36, .3, p.yaw, head.y + half, head.y - half, { id: `${id}:head`, ...solid }),
+      ...p.walks.map((w, k) => orientedBox(w.x, w.z, .3, .14, w.yaw, w.y + .15, w.y - .15, { id: `${id}:walk:${k}`, ...solid }))];
+  });
+  return node.poleColliders;
+}
+
+/** A spatial source of signal pole colliders: `query(minX, minZ, maxX, maxZ)` returns those overlapping. */
+export function signalColliderSource(network, plan) {
+  return (minX, minZ, maxX, maxZ) => {
+    // Kerbs clear a junction within 22 m, so its poles stand within 25 m of its centre.
+    const x = (minX + maxX) / 2, z = (minZ + maxZ) / 2, radius = Math.hypot(maxX - minX, maxZ - minZ) / 2 + 25;
+    return network.nodesNear(x, z, radius).flatMap(node => signalColliders(node, plan))
+      .filter(b => b.maxX >= minX && b.minX <= maxX && b.maxZ >= minZ && b.minZ <= maxZ);
+  };
+}
+
 // Poles, signal heads, zebra crossings and stop lines near the player, as a
 // handful of instanced meshes rebuilt when the player has moved far enough.
 export function createSignalProps(scene, network, plan) {
@@ -97,11 +153,12 @@ export function createSignalProps(scene, network, plan) {
     const m = new THREE.InstancedMesh(geometry, material, count); m.count = 0; m.frustumCulled = false;
     m.castShadow = false; m.receiveShadow = !material.isMeshBasicMaterial; root.add(m); return m;
   };
-  const poles = mesh(new THREE.CylinderGeometry(.08, .11, 1, 8).translate(0, .5, 0), metal, 480);
+  const poles = mesh(new THREE.CylinderGeometry(.08, .11, 1, 8).translate(0, .5, 0), metal, 160);
   const arms = mesh(new THREE.BoxGeometry(1, .09, .09).translate(.5, 0, 0), metal, 160);
   const heads = mesh(new THREE.BoxGeometry(.36, 1.02, .3), metal, 320);
   const lamps = mesh(new THREE.CircleGeometry(.105, 12), lamp, 960);
   const glows = mesh(new THREE.PlaneGeometry(GLOW, GLOW), glow, 960);
+  const housings = mesh(new THREE.BoxGeometry(.3, .3, .14), metal, 320);
   const walkers = mesh(new THREE.PlaneGeometry(.22, .22), lamp, 320);
   const stripes = mesh(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), paint, 2400);
   for (const target of [lamps, glows, walkers]) target.setColorAt(0, new THREE.Color());
@@ -128,36 +185,33 @@ export function createSignalProps(scene, network, plan) {
         // Stop line across the arriving half of the street (on its left of the outward heading).
         const sx = node.x + a.dir.x * (a.stop - .25) - r.x * half / 2, sz = node.z + a.dir.z * (a.stop - .25) - r.z * half / 2;
         if (stripe < 2400 && a.arriving.length) put(stripes, stripe++, sx, plan.surfaceHeight(sx, sz, node.y + 1.5) + .045, sz, yaw, half - .3, 1, .4);
-        if (!node.signalized || !a.arriving.length || arm >= 160) continue;
-        // Pole on the drivers' kerb before the crossing, arm out over their lane, head facing them.
-        const kerb = half + .7, px = node.x + a.dir.x * (a.clear - .4) - r.x * kerb, pz = node.z + a.dir.z * (a.clear - .4) - r.z * kerb;
-        const ground = plan.terrainHeight(px, pz), reach = kerb - a.arriving[0].offset;
-        put(poles, pole++, px, ground, pz, yaw, 1, 5.4, 1);
-        put(arms, arm++, px, ground + 5.25, pz, yaw - Math.PI, reach, 1, 1);
-        const hx = px + r.x * reach, hz = pz + r.z * reach;
-        for (const [x, z, y, height] of [[hx, hz, ground + 4.62, 1], [px + a.dir.x * .2, pz + a.dir.z * .2, ground + 2.9, .82]]) {
+      }
+      for (const p of signalPoles(node, plan)) {
+        if (arm >= 160) break;
+        put(poles, pole++, p.x, p.ground, p.z, p.yaw, 1, 5.4, 1);
+        put(arms, arm++, p.x, p.ground + 5.25, p.z, p.yaw - Math.PI, p.reach, 1, 1);
+        const dir = p.approach.dir;
+        for (const { x, z, y, height } of p.heads) {
           if (head >= 320) break;
-          put(heads, head++, x, y, z, yaw, 1, height, 1);
+          put(heads, head++, x, y, z, p.yaw, 1, height, 1);
           const lamps3 = [];
           for (const [k, name] of ['red', 'amber', 'green'].entries()) {
-            put(lamps, lampIndex, x + a.dir.x * .155, y + (1 - k) * .31 * height, z + a.dir.z * .155, yaw, height, height, 1);
-            put(glows, glowIndex, x + a.dir.x * .165, y + (1 - k) * .31 * height, z + a.dir.z * .165, yaw, height, height, 1);
+            put(lamps, lampIndex, x + dir.x * .155, y + (1 - k) * .31 * height, z + dir.z * .155, p.yaw, height, height, 1);
+            put(glows, glowIndex, x + dir.x * .165, y + (1 - k) * .31 * height, z + dir.z * .165, p.yaw, height, height, 1);
             lamps3.push([lampIndex++, name, glowIndex++]);
           }
-          faces.push({ node, approach: a, lamps: lamps3 });
+          faces.push({ node, approach: p.approach, lamps: lamps3 });
         }
-        // A pedestrian lamp facing each end of this approach's crossing.
-        for (const side of [1, -1]) if (walkIndex < 320) {
-          const wx = node.x + a.dir.x * (a.crosswalk + 1.6) + r.x * side * (half + .55), wz = node.z + a.dir.z * (a.crosswalk + 1.6) + r.z * side * (half + .55);
-          const base = plan.terrainHeight(wx, wz);
-          put(poles, pole++, wx, base, wz, 0, .6, 2.55, .6);
-          put(walkers, walkIndex, wx, base + 2.4, wz, Math.atan2(-r.x * side, -r.z * side), 1, 1, 1);
-          walks.push({ node, approach: a, index: walkIndex++ });
+        // The walk lamps sit on the pole itself, each in a small housing facing across its crossing.
+        for (const w of p.walks) if (walkIndex < 320) {
+          put(housings, walkIndex, w.x, w.y, w.z, w.yaw, 1, 1, 1);
+          put(walkers, walkIndex, w.x + w.face.x * .075, w.y, w.z + w.face.z * .075, w.yaw, 1, 1, 1);
+          walks.push({ node, approach: w.approach, index: walkIndex++ });
         }
       }
     }
-    poles.count = pole; arms.count = arm; heads.count = head; lamps.count = lampIndex; glows.count = glowIndex; walkers.count = walkIndex; stripes.count = stripe;
-    for (const target of [poles, arms, heads, lamps, glows, walkers, stripes]) target.instanceMatrix.needsUpdate = true;
+    poles.count = pole; arms.count = arm; heads.count = head; lamps.count = lampIndex; glows.count = glowIndex; housings.count = walkers.count = walkIndex; stripes.count = stripe;
+    for (const target of [poles, arms, heads, lamps, glows, housings, walkers, stripes]) target.instanceMatrix.needsUpdate = true;
   }
   return {
     root,

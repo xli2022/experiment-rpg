@@ -582,11 +582,17 @@ export function createVerticalCity(scene, stream, reservedWorldObjects = []) {
       { ...s, x: s.x, z: s.z, w: s.width ?? s.w, d: s.depth ?? s.d, yaw: 0, supportOnly: true, walkable: true, minY: s.y - .65, maxY: s.y };
     supportCache.set(s, box); return box;
   }
+  // Colliders other layers place in the city (traffic signal poles), as query functions.
+  const attached = new Set();
   const spatial = {
     query(minX, minZ, maxX, maxZ) {
       const supports = masterPlan.supportIndex?.query(minX, minZ, maxX, maxZ) ?? [];
-      return metropolis.collidersIn(minX, minZ, maxX, maxZ).concat(masterPlan.roadIndex.query(minX, minZ, maxX, maxZ).map(supportCollider), supports.map(supportCollider));
+      const boxes = metropolis.collidersIn(minX, minZ, maxX, maxZ).concat(masterPlan.roadIndex.query(minX, minZ, maxX, maxZ).map(supportCollider), supports.map(supportCollider));
+      for (const query of attached) boxes.push(...query(minX, minZ, maxX, maxZ));
+      return boxes;
     },
+    /** Add colliders from `query(minX, minZ, maxX, maxZ)` to every query; returns a function that removes them. */
+    attach(query) { attached.add(query); return () => attached.delete(query); },
     near(x, z, radius = 8) { return this.query(x - radius, z - radius, x + radius, z + radius); },
     along(origin, direction, distance) { const x = origin.x + direction.x * distance, z = origin.z + direction.z * distance; return this.query(Math.min(origin.x, x) - .5, Math.min(origin.z, z) - .5, Math.max(origin.x, x) + .5, Math.max(origin.z, z) + .5); },
   };
