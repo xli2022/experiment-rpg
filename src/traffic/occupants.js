@@ -25,6 +25,53 @@ export const OCCUPANTS = Object.freeze({
 const twist = new THREE.Quaternion(), euler = new THREE.Euler();
 const dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const mix = text => [...text].reduce((n, c) => Math.imul(n ^ c.charCodeAt(0), 16777619) >>> 0, 2166136261);
+const UP = new THREE.Vector3(0, 1, 0), axis = new THREE.Vector3(), side = new THREE.Vector3(), face = new THREE.Vector3(), headAt = new THREE.Vector3(), eyes = new THREE.Vector3();
+const chain = new THREE.Quaternion(), turnQ = new THREE.Quaternion(), rootAt = new THREE.Vector3();
+// A bone's rotation in its character's own space: everything between the root and it.
+function rotationUnder(bone, root, out = chain) {
+  out.identity();
+  for (let o = bone; o && o !== root; o = o.parent) out.premultiply(o.quaternion);
+  return out;
+}
+/**
+ * Turn `bone` by `yaw` about the character's own vertical, then bow it by
+ * `pitch` about the level axis across its face (its local +Z). Both are true
+ * to the character however the pose already tilts the bone, so a bowed head
+ * or leaning chest turns and nods without rolling sideways.
+ */
+export function turnBone(bone, root, yaw, pitch = 0) {
+  if (yaw) {
+    axis.copy(UP).applyQuaternion(rotationUnder(bone, root).invert());
+    bone.quaternion.multiply(turnQ.setFromAxisAngle(axis, yaw));
+  }
+  if (pitch) {
+    const q = rotationUnder(bone, root);
+    axis.crossVectors(UP, side.set(0, 0, 1).applyQuaternion(q));
+    if (axis.lengthSq() < 1e-6) return;
+    bone.quaternion.multiply(turnQ.setFromAxisAngle(axis.normalize().applyQuaternion(q.invert()), pitch));
+  }
+}
+/**
+ * Turn a head toward `eyes` (a world point) by `weight` from wherever it
+ * faces now: the chest takes a share of the turn, the neck the rest, as far
+ * as a neck reaches from the body's facing, and the head tips up or down to
+ * meet them. The rig's head faces along its local +Z, its character along -Z.
+ */
+export function glanceToward({ head, chest, root }, eyes, weight, { reach = 1.2, chestShare = .3 } = {}) {
+  if (!head || weight <= 0) return;
+  root.updateMatrixWorld(true);
+  face.set(0, 0, 1).applyQuaternion(rotationUnder(head, root));
+  rootAt.copy(eyes); root.worldToLocal(rootAt);
+  head.getWorldPosition(headAt); root.worldToLocal(headAt);
+  const facing = Math.atan2(face.x, face.z), wanted = Math.atan2(rootAt.x - headAt.x, rootAt.z - headAt.z);
+  // As far round as the neck reaches from straight ahead (-Z).
+  const ahead = Math.PI, offset = Math.atan2(Math.sin(wanted - ahead), Math.cos(wanted - ahead));
+  const target = ahead + THREE.MathUtils.clamp(offset, -reach, reach), turn = Math.atan2(Math.sin(target - facing), Math.cos(target - facing)) * weight;
+  const across = Math.hypot(rootAt.x - headAt.x, rootAt.z - headAt.z), bow = Math.asin(THREE.MathUtils.clamp(-face.y / face.length(), -1, 1));
+  const nod = THREE.MathUtils.clamp(Math.atan2(headAt.y - rootAt.y, across) - bow, -1, 1) * weight;
+  if (chest) turnBone(chest, root, turn * chestShare);
+  turnBone(head, root, turn * (chest ? 1 - chestShare : 1), nod);
+}
 
 export function createOccupants({ scene, assets, random = seededRandom(5150) }) {
   const avatars = createAvatarPool(assets, random, { start: 5, count: OCCUPANTS.pool }).map(person => ({ ...person, occupant: null }));
@@ -81,31 +128,38 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
   }
 
   // Poses layered on the clip: browsing a shelf, typing, talking, a phone,
-  // looking round, and a glance at the player passing close by.
+  // looking round, and a glance at the player passing close by. Head and
+  // chest turn about the character's true vertical, never about a bone the
+  // pose already tilts, which rolled the face over. While they look at the
+  // player, what they were doing with their head eases out: someone reading
+  // looks up from their lap.
   function gesture(person, time, player) {
     const bones = person.avatar.bones;
     if (!bones) return;
-    const o = person.occupant, t = time + person.id * 1.9;
+    const o = person.occupant, t = time + person.id * 1.9, root = person.root, head = bones.get('Head'), chest = bones.get('Chest');
     const rotate = (name, x, y, z) => { const bone = bones.get(name); if (bone) bone.quaternion.multiply(twist.setFromEuler(euler.set(x, y, z))); };
+    const dx = player.x - o.x, dz = player.z - o.z, near = Math.hypot(dx, dz) < OCCUPANTS.glance && Math.abs((player.y ?? 0) - o.y) < 1.5;
+    const toward = Math.atan2(-dx, -dz) - o.yaw, angle = Math.atan2(Math.sin(toward), Math.cos(toward));
+    person.glance = THREE.MathUtils.damp(person.glance, near && Math.abs(angle) < 1.9 ? 1 : 0, 4, person.step);
+    let nod = 0, turn = 0, lean = 0;
     switch (o.activity) {
-      case 'browse': rotate('Head', .22 + Math.sin(t * .4) * .06, Math.sin(t * .5) * .35, 0); break;
-      case 'cook': case 'look': rotate('Head', .35, Math.sin(t * .3) * .15, 0); rotate('Chest', .08, 0, 0); break;
-      case 'type': rotate('Head', .12, Math.sin(t * .23) * .1, 0); rotate('HandL', Math.sin(t * 9) * .05, 0, 0); rotate('HandR', Math.sin(t * 8 + 1) * .05, 0, 0); break;
+      case 'browse': nod = .22 + Math.sin(t * .4) * .06; turn = Math.sin(t * .5) * .35; break;
+      case 'cook': case 'look': nod = .35; turn = Math.sin(t * .3) * .15; lean = .08; break;
+      case 'type': nod = .12; turn = Math.sin(t * .23) * .1; rotate('HandL', Math.sin(t * 9) * .05, 0, 0); rotate('HandR', Math.sin(t * 8 + 1) * .05, 0, 0); break;
       case 'talk': {
         const speaking = Math.sin(t * .55) > 0;
-        rotate('Head', Math.sin(t * 3.1) * (speaking ? .07 : .02), Math.sin(t * .7) * .12, 0);
+        nod = Math.sin(t * 3.1) * (speaking ? .07 : .02); turn = Math.sin(t * .7) * .12;
         if (speaking) rotate('UpperArmR', 0, 0, (Math.sin(t * 2.2) * .5 + .5) * -.35);
         break;
       }
-      case 'read': rotate('Head', .5 + Math.sin(t * .25) * .05, Math.sin(t * .13) * .08, 0); rotate('Chest', .12, 0, 0); break;
-      case 'wait': rotate('Head', .38, 0, 0); rotate('UpperArmR', -.25, 0, -.55); rotate('ForearmR', 0, -1.35, 0); break;
-      default: rotate('Head', 0, Math.sin(t * .35) * .4, 0);
+      case 'read': nod = .5 + Math.sin(t * .25) * .05; turn = Math.sin(t * .13) * .08; lean = .12; break;
+      case 'wait': nod = .38; rotate('UpperArmR', -.25, 0, -.55); rotate('ForearmR', 0, -1.35, 0); break;
+      default: turn = Math.sin(t * .35) * .4;
     }
-    // Look up at the player passing close by, within the neck's reach.
-    const dx = player.x - o.x, dz = player.z - o.z, near = Math.hypot(dx, dz) < OCCUPANTS.glance && Math.abs((player.y ?? 0) - o.y) < 1.5;
-    const turn = Math.atan2(-dx, -dz) - o.yaw, angle = Math.atan2(Math.sin(turn), Math.cos(turn));
-    person.glance = THREE.MathUtils.damp(person.glance, near && Math.abs(angle) < 1.9 ? 1 : 0, 4, person.step);
-    if (person.glance > .01) rotate('Head', -.2 * person.glance, THREE.MathUtils.clamp(angle, -1.1, 1.1) * person.glance, 0);
+    const rest = 1 - person.glance;
+    if (chest && lean) turnBone(chest, root, 0, lean * rest);
+    if (head) turnBone(head, root, turn * rest, nod * rest);
+    if (person.glance > .01) glanceToward({ head, chest, root }, eyes.set(player.x, (player.y ?? 0) + 1.6, player.z), person.glance);
   }
 
   return {
