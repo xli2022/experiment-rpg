@@ -167,10 +167,11 @@ export function settingsNote({ status, progress, message }, touch = false) {
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
     case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
   }
-  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by Qwen3.5 0.8B on your graphics card. Turning this on downloads about ${RESIDENT_MODEL.download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
+  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by ${RESIDENT_MODEL.name} on your graphics card. Turning this on downloads about ${RESIDENT_MODEL.download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
 }
 function bindSettings(model, touch) {
   const toggle = $('resident-chat-toggle'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
+  $('resident-model-name').textContent = `${RESIDENT_MODEL.name} · ${RESIDENT_MODEL.download}`;
   toggle.addEventListener('change', () => model.setEnabled(toggle.checked));
   forget.addEventListener('click', () => model.forget());
   model.subscribe(state => {

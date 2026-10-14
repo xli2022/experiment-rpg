@@ -8,7 +8,7 @@ export const RESIDENT_CHAT_KEY = 'afterlight.resident-chat.v1';
 // Qwen3.5 0.8B in 4 bits, computing in 32-bit floats on every graphics card
 // (about 1.9 GB of graphics memory). It answers much sooner than 2B, whose
 // downloads, like those of 0.8B's f16 build, are removed on load.
-export const RESIDENT_MODEL = Object.freeze({ id: 'Qwen3.5-0.8B-q4f32_1-MLC', download: '450 MB' });
+export const RESIDENT_MODEL = Object.freeze({ id: 'Qwen3.5-0.8B-q4f32_1-MLC', name: 'Qwen3.5 0.8B', download: '450 MB' });
 export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC', 'Qwen3.5-2B-q4f32_1-MLC']);
 // Short, fairly focused replies: a person talking, not an essay.
 export const SAMPLING = Object.freeze({ max_tokens: 80, temperature: .7, top_p: .8, presence_penalty: 1.5, frequency_penalty: 0 });

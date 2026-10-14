@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
+import { RESIDENT_MODEL } from '../src/engine/residents/model.js';
 
 const root = new URL('../', import.meta.url);
 const html = readFileSync(new URL('index.html', root), 'utf8');
@@ -60,4 +61,9 @@ test('Android and Apple installation icons link to real PNGs at their advertised
   assert.ok(apple, 'Apple installation has its own touch icon link');
   assert.equal(pngDimensions(publicFile(apple.href)), '180x180');
   assert.match(html, /<meta\s+name="apple-mobile-web-app-capable"\s+content="yes"/);
+});
+
+test('the pause menu names the resident model actually loaded', () => {
+  const label = html.match(/<span id="resident-model-name">([^<]*)<\/span>/)?.[1];
+  assert.equal(label, `${RESIDENT_MODEL.name} · ${RESIDENT_MODEL.download}`);
 });
