@@ -154,7 +154,7 @@ export function residentPersona(resident, { time = 0 } = {}) {
     name: pick(species === 'human' ? NAMES[gender] ?? [...NAMES.woman, ...NAMES.man] : NAMES[species], 'name'),
     gender, age, voice: residentVoice({ key, species, gender, age }),
     mood: pick(MOODS[species], 'mood'), style: pick(STYLES[species], 'style'), concern: pick(CONCERNS[species], 'concern'),
-    doing: ({ follow: 'following the person you are talking to', wait: 'waiting where the person asked you to stay', move_aside: 'stepping out of the way',
+    doing: ({ follow: 'following the person you are talking to', wait: 'waiting where the person asked you to stay',
       dance: 'dancing at the passer-by’s request', sit_down: 'sitting down to rest', get_up: 'getting to your feet', guide: 'guiding the passer-by to a nearby place', go_to: 'going to a place the passer-by asked you to visit', resume_routine: 'returning to your usual activity' })[resident.behavior] ?? scene.doing,
     where: district.description ? `${district.name} (${lowerFirst(district.description).replace(/\.$/, '')})` : district.name,
     time: `${clock.text}, ${part}`,

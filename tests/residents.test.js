@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, HISTORY_TURNS } from '../src/engine/residents/persona.js';
-import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODEL } from '../src/engine/residents/model.js';
+import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODEL, RETIRED_MODELS } from '../src/engine/residents/model.js';
 import { ResidentConversation, facingResident, settingsNote, MAX_LINE } from '../src/engine/residents/conversation.js';
 import { createStorage } from '../src/engine/save.js';
 import { gameClock } from '../src/engine/clock.js';
@@ -167,7 +167,7 @@ test('resident chat stays off until the player turns it on, then remembers', asy
   assert.equal(engines.length, 0);
   assert.equal(await model.setEnabled(true), true);
   assert.equal(model.status, 'ready');
-  assert.equal(engines[0].model, RESIDENT_MODEL.id, '2B supports conversations and actions by default');
+  assert.equal(engines[0].model, 'Qwen3.5-0.8B-q4f32_1-MLC', '0.8B supports conversations and actions by default');
   assert.deepEqual(seen, ['off', 'checking', 'loading:Starting', 'loading:Downloading', 'loading:Preparing the graphics card', 'ready']);
   assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true });
   // The next visit loads it again when play starts.
@@ -199,7 +199,8 @@ test('without WebGPU, or when loading fails, the setting explains and the game p
   assert.match(settingsNote(failing.snapshot()), /stopped: Network error Turn it off and on/);
 });
 
-test('legacy model choices migrate to the only resident model, Qwen 2B', async () => {
+test('legacy model choices migrate to the only resident model, Qwen 0.8B, and retire 2B', async () => {
+  assert.ok(RETIRED_MODELS.includes('Qwen3.5-2B-q4f32_1-MLC'), '2B downloads are removed on load');
   for (const size of ['small', 'large', 'unknown']) {
     const storage = memoryStorage(), { backend, engines } = fakeBackend();
     storage.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled: true, downloaded: true, size }));
@@ -370,10 +371,10 @@ test('a failed or unusable reply becomes a fallback line in the resident’s voi
 });
 
 test('the setting note says what turning it on costs and what it is doing', () => {
-  assert.match(settingsNote({ status: 'off' }), /downloads about 1\.1 GB once\. Story contacts keep their own dialogue\./);
+  assert.match(settingsNote({ status: 'off' }), /written live by Qwen3\.5 0\.8B .*downloads about 450 MB once\. Story contacts keep their own dialogue\./);
   assert.doesNotMatch(settingsNote({ status: 'off' }), /phones/);
   assert.match(settingsNote({ status: 'off' }, true), /phones and tablets may run out of memory/);
   assert.equal(settingsNote({ status: 'loading', progress: .42, message: 'Downloading' }), 'Downloading… 42%. You can keep playing.');
-  assert.match(settingsNote({ status: 'ready' }), /press E to talk/);
+  assert.match(settingsNote({ status: 'ready' }), /press E to talk.*or chain them/);
   assert.match(settingsNote({ status: 'idle' }), /^On\. The resident model loads when you start playing\.$/);
 });

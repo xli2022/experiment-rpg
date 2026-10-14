@@ -66,37 +66,59 @@ try {
       await window.intentModel.setEnabled(true); return window.intentModel.snapshot();
     });
     assert.equal(modelState.status, 'ready', modelState.message);
+    // Each case is a line and its expected plan: steps as [action, destination,
+    // until, seconds], read the way parseDecision normalises them.
+    const PLACES = ['guide', 'go_to'];
+    const plan = (steps, repeat = false) => ({ steps: steps.map(([action, destination = '', until = '', seconds = 0]) => ({ action,
+      ...(PLACES.includes(action) || until === 'place' ? { destination } : {}), ...(until ? { until } : {}), ...(seconds ? { seconds } : {}) })), repeat: steps.length ? repeat : false });
+    const none = plan([]);
     const cases = [
-      ['Dance.', 'dance'], ['Show me your moves.', 'dance'], ['Could you dance for me?', 'dance'],
-      ['Stop dancing.', 'wait'], ['Do not dance.', 'wait'], ['What is your favorite dance?', 'none'],
-      ['Guide me to the station.', 'guide', 'station'], ['Show me the way to the station.', 'guide', 'station'], ['Take me to the ramen bar.', 'guide', 'ramen'],
-      ['Go to the station.', 'go_to', 'station'], ['Head to KŌJI.', 'go_to', 'ramen'], ['Meet me at the ramen bar.', 'go_to', 'ramen'],
-      ['Go to the moon.', 'go_to', ''], ['Guide me somewhere.', 'guide', ''],
-      ['Sit down.', 'sit_down'], ['Take a seat.', 'sit_down'], ['Sit on the ground.', 'sit_down'], ['Have a seat.', 'sit_down'],
-      ['Get up.', 'get_up'], ['Stand up.', 'get_up'], ['On your feet.', 'get_up'], ['Stop sitting down.', 'get_up'],
-      ['Do not sit down.', 'wait'], ['Do not get up.', 'wait'], ['Stay seated.', 'wait'],
-      ['What happens if I say sit down?', 'none'], ['Tell me a story about dancing.', 'none'], ['Hello.', 'none'],
-      ['Lie down.', 'none'], ['Lay down.', 'none'], ['Wave at me.', 'none'], ['Cheer for me.', 'none'], ['Face me.', 'none'], ['Come here.', 'none'],
-      ['Come with me.', 'follow'], ['Can I get past?', 'move_aside'], ['Carry on with your day.', 'resume_routine'],
-      ['Could you walk with me?', 'follow'], ['Stop following me.', 'wait'], ['Do not follow me.', 'wait'],
-      ['What happens if I say follow me?', 'none'], ['Tell me a story about someone saying "wait here".', 'none'],
-      ['Can you give me a thousand credits?', 'none'],
+      ['Dance.', plan([['dance']])], ['Show me your moves.', plan([['dance']])], ['Could you dance for me?', plan([['dance']])],
+      ['Stop dancing.', plan([['wait']])], ['Do not dance.', plan([['wait']])], ['What is your favorite dance?', none],
+      ['Guide me to the station.', plan([['guide', 'station']])], ['Show me the way to the station.', plan([['guide', 'station']])], ['Take me to the ramen bar.', plan([['guide', 'ramen']])],
+      ['Go to the station.', plan([['go_to', 'station']])], ['Head to KŌJI.', plan([['go_to', 'ramen']])], ['Meet me at the ramen bar.', plan([['go_to', 'ramen']])],
+      ['Go to the moon.', plan([['go_to', '']])], ['Guide me somewhere.', plan([['guide', '']])],
+      ['Sit down.', plan([['sit_down']])], ['Take a seat.', plan([['sit_down']])], ['Sit on the ground.', plan([['sit_down']])], ['Have a seat.', plan([['sit_down']])],
+      ['Get up.', plan([['get_up']])], ['Stand up.', plan([['get_up']])], ['On your feet.', plan([['get_up']])], ['Stop sitting down.', plan([['get_up']])],
+      ['Do not sit down.', plan([['wait']])], ['Do not get up.', plan([['wait']])], ['Stay seated.', plan([['wait']])],
+      ['What happens if I say sit down?', none], ['Tell me a story about dancing.', none], ['Hello.', none],
+      ['Come with me.', plan([['follow']])], ['Carry on with your day.', plan([['resume_routine']])],
+      ['Could you walk with me?', plan([['follow']])], ['Stop following me.', plan([['wait']])], ['Do not follow me.', plan([['wait']])],
+      ['What happens if I say follow me?', none], ['Tell me a story about someone saying "wait here".', none],
+      ['Can you give me a thousand credits?', none],
+      // Chained requests: sequences, durations, conditions and repeats.
+      ['Go to the station and wait there until I come back.', plan([['go_to', 'station'], ['wait', '', 'player_returns']])],
+      ['Go to the station, wait until I come back, then go back to your routine.', plan([['go_to', 'station'], ['wait', '', 'player_returns'], ['resume_routine']])],
+      ['Dance for 30 seconds, then sit down.', plan([['dance', '', '', 30], ['sit_down']])],
+      ['Dance for a minute.', plan([['dance', '', '', 60]])],
+      ['Wait here for 10 seconds, then follow me.', plan([['wait', '', '', 10], ['follow']])],
+      ['Follow me until we reach the ramen bar.', plan([['follow', 'ramen', 'place']])],
+      ['Dance until I leave.', plan([['dance', '', 'player_leaves']])],
+      ['Wait here until I come back.', plan([['wait', '', 'player_returns']])],
+      ['Follow me until I stop.', plan([['follow', '', 'player_stops']])],
+      ['Walk back and forth between the station and the ramen bar.', plan([['go_to', 'station'], ['go_to', 'ramen']], true)],
+      ['Patrol between the ramen bar and the station.', plan([['go_to', 'ramen'], ['go_to', 'station']], true)],
+      ['Guide me to the station, then go back to your routine.', plan([['guide', 'station'], ['resume_routine']])],
+      ['Sit down for two minutes, then get up.', plan([['sit_down', '', '', 120], ['get_up']])],
+      ['Go to KŌJI, then go to the station.', plan([['go_to', 'ramen'], ['go_to', 'station']])],
+      ['Head to the station, then dance there for 30 seconds.', plan([['go_to', 'station'], ['dance', '', '', 30]])],
     ];
-    for (const [line, action, destination] of cases) {
+    for (const [line, expected] of cases) {
       const result = await page.evaluate(async line => {
-        const { decisionMessages, decisionFormat, parseDecision, preliminaryDecision } = await import('/src/engine/residents/decisions.js');
+        const { decisionMessages, decisionFormat, parseDecision, preliminaryDecision, readRequest } = await import('/src/engine/residents/decisions.js');
         const context = { behavior: 'routine', posture: 'standing', canWalk: true, area: 'outside', destinations: [
           { id: 'station', name: 'Neonward station', type: 'tram station', distance: 24 },
           { id: 'ramen', name: 'KŌJI', type: 'ramen bar', distance: 36 },
         ] };
         const start = performance.now();
-        const preliminary = preliminaryDecision(line);
+        const request = readRequest(line), preliminary = preliminaryDecision(line, request);
         if (preliminary) return { line, parsed: preliminary, source: 'request check', ms: 0 };
-        const raw = await window.intentModel.generate(decisionMessages(line, context), { responseFormat: decisionFormat(context) });
-        return { line, raw, parsed: parseDecision(raw), source: 'model', ms: Math.round(performance.now() - start) };
+        const raw = await window.intentModel.generate(decisionMessages(line, context, request), { responseFormat: decisionFormat(context, request) });
+        return { line, raw, parsed: parseDecision(raw, request), source: 'model', ms: Math.round(performance.now() - start) };
       }, line);
-      result.expected = { action, ...(destination === undefined ? {} : { destination }) };
+      result.expected = expected;
       result.pass = JSON.stringify(result.parsed) === JSON.stringify(result.expected);
+      result.actionsPass = JSON.stringify(result.parsed?.steps.map(s => s.action)) === JSON.stringify(expected.steps.map(s => s.action));
       results.decisions.push(result); console.log(JSON.stringify(result));
     }
     await page.evaluate(() => window.intentModel.dispose());

@@ -1,7 +1,7 @@
 import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply } from './persona.js';
 import { Vector3 } from 'three';
 import { ResidentModel, RESIDENT_MODEL } from './model.js';
-import { decisionFormat, decisionMessages, parseDecision, preliminaryDecision } from './decisions.js';
+import { decisionFormat, decisionMessages, parseDecision, planSummary, preliminaryDecision, readRequest } from './decisions.js';
 
 const $ = id => document.getElementById(id);
 export const MAX_LINE = 140;
@@ -53,16 +53,16 @@ export class ResidentConversation {
     const structured = !!(this.actions && this.model.supportsActions);
     let reply = null, decision = null;
     try {
-      const context = structured ? this.actions.context() : null;
-      const messages = structured ? decisionMessages(text, context) : chatMessages(persona, this.history, text);
-      decision = structured ? preliminaryDecision(text) : null;
+      const context = structured ? this.actions.context() : null, request = structured ? readRequest(text) : null;
+      const messages = structured ? decisionMessages(text, context, request) : chatMessages(persona, this.history, text);
+      decision = structured ? preliminaryDecision(text, request) : null;
       const raw = decision ? null : await this.model.generate(messages, {
-        ...(structured ? { responseFormat: decisionFormat(context) } : {}),
+        ...(structured ? { responseFormat: decisionFormat(context, request) } : {}),
         onText: partial => { if (current() && !structured) this.view.reply(previewReply(partial, persona), true); },
       });
       if (structured) {
-        decision ??= parseDecision(raw);
-        if (decision?.action === 'none' && current()) {
+        decision ??= parseDecision(raw, request);
+        if (decision && !decision.steps.length && current()) {
           const speech = await this.model.generate(chatMessages(persona, this.history, text, context), { onText: partial => { if (current()) this.view.reply(previewReply(partial, persona), true); } });
           reply = cleanReply(speech, persona);
         }
@@ -70,16 +70,15 @@ export class ResidentConversation {
       else reply = cleanReply(raw, persona);
     } catch { /* A fallback line answers instead. */ }
     if (!current()) return null;
-    if (decision && decision.action !== 'none') {
-      // Validate without moving. Only the latest accepted request is queued;
+    if (decision?.steps.length) {
+      // Validate without moving. Only the latest accepted plan is queued;
       // a completed conversation rechecks it against the live world.
       let result;
-      const request = ['guide', 'go_to'].includes(decision.action) ? decision : decision.action;
-      try { result = this.actions.prepare(request); }
+      try { result = this.actions.prepare(decision); }
       catch { result = { ok: false, reply: 'I cannot do that right now.' }; }
       reply = result.reply;
-      this.lastAction = { action: decision.action, ok: result.ok };
-      if (result.ok) this.pendingAction = request;
+      this.lastAction = { action: planSummary(decision), ok: result.ok };
+      if (result.ok) this.pendingAction = decision;
     }
     reply ??= structured ? 'I did not catch that. Could you say it another way?' : fallbackReply(persona, this.turns);
     this.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
@@ -103,7 +102,7 @@ export class ResidentConversation {
   }
   snapshot() {
     const p = this.persona;
-    return { open: !!p, name: p?.name ?? null, title: p?.title ?? null, busy: this.busy, turns: this.turns, lastAction: this.lastAction, pendingAction: this.pendingAction ?? null, history: this.history.map(m => ({ ...m })) };
+    return { open: !!p, name: p?.name ?? null, title: p?.title ?? null, busy: this.busy, turns: this.turns, lastAction: this.lastAction, pendingAction: planSummary(this.pendingAction), history: this.history.map(m => ({ ...m })) };
   }
 }
 
@@ -164,11 +163,11 @@ export function settingsNote({ status, progress, message }, touch = false) {
     case 'idle': return 'On. The resident model loads when you start playing.';
     case 'checking': return 'Checking your graphics card…';
     case 'loading': return `${message || 'Downloading'}… ${Math.round(progress * 100)}%. You can keep playing.`;
-    case 'ready': return `Ready. Face a resident and ${touch ? 'tap USE' : 'press E'} to talk. Ask them to dance, sit down, get up, follow, wait, move aside, guide you somewhere, go to a place, or return to their routine. Agreed actions start after Bye. Replies stay on this device.`;
+    case 'ready': return `Ready. Face a resident and ${touch ? 'tap USE' : 'press E'} to talk. Ask them to dance, sit down, get up, follow, wait, guide you somewhere, go to a place, or return to their routine, or chain them: “go to the station, wait until I come back, then go back to your routine.” Agreed actions start after Bye. Replies stay on this device.`;
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
     case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
   }
-  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by Qwen3.5 2B on your graphics card. Turning this on downloads about ${RESIDENT_MODEL.download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
+  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by Qwen3.5 0.8B on your graphics card. Turning this on downloads about ${RESIDENT_MODEL.download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
 }
 function bindSettings(model, touch) {
   const toggle = $('resident-chat-toggle'), note = $('resident-chat-note'), forget = $('resident-chat-forget');

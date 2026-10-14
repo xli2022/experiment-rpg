@@ -1,14 +1,15 @@
 // A small language model for background residents, run in the player's own
 // browser on the graphics card (WebGPU). It stays off until the player turns
-// it on in the pause menu; the 2B weights (about 1.1 GB) then download once
+// it on in the pause menu; the 0.8B weights (about 450 MB) then download once
 // from Hugging Face into the browser's cache.
 // Story contacts never use it.
 
 export const RESIDENT_CHAT_KEY = 'afterlight.resident-chat.v1';
-// Qwen3.5 2B in 4 bits, computing in 32-bit floats on every graphics card
-// (about 2.6 GB of graphics memory). Old 0.8B downloads are removed on load.
-export const RESIDENT_MODEL = Object.freeze({ id: 'Qwen3.5-2B-q4f32_1-MLC', download: '1.1 GB' });
-export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC', 'Qwen3.5-0.8B-q4f32_1-MLC']);
+// Qwen3.5 0.8B in 4 bits, computing in 32-bit floats on every graphics card
+// (about 1.9 GB of graphics memory). It answers much sooner than 2B, whose
+// downloads, like those of 0.8B's f16 build, are removed on load.
+export const RESIDENT_MODEL = Object.freeze({ id: 'Qwen3.5-0.8B-q4f32_1-MLC', download: '450 MB' });
+export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC', 'Qwen3.5-2B-q4f32_1-MLC']);
 // Short, fairly focused replies: a person talking, not an essay.
 export const SAMPLING = Object.freeze({ max_tokens: 80, temperature: .7, top_p: .8, presence_penalty: 1.5, frequency_penalty: 0 });
 // Once loaded, the model must repeat a plain sentence. A model that computes
@@ -78,7 +79,8 @@ async function webLLM(model, onProgress, signal) {
   } catch (error) { worker.terminate(); throw error; }
   return {
     generate: (messages, onText, responseFormat) => worker.request('generate', { request: {
-      messages, ...SAMPLING, ...(responseFormat ? { response_format: responseFormat, max_tokens: 64, temperature: 0, presence_penalty: 0 } : {}),
+      // A decision plan of up to four steps fits in 160 tokens.
+      messages, ...SAMPLING, ...(responseFormat ? { response_format: responseFormat, max_tokens: 160, temperature: 0, presence_penalty: 0 } : {}),
       extra_body: { enable_thinking: false },
     } }, { onEvent: event => onText(event.text), stall: 60000 }),
     interrupt: () => worker.send('interrupt'),

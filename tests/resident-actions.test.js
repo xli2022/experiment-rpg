@@ -5,7 +5,8 @@ import { requestResidentAction, previewResidentAction, stepResidentAction, resid
 import { createTraffic } from '../src/traffic/index.js';
 import { createOccupants } from '../src/traffic/occupants.js';
 import { createResidentNavigation } from '../src/traffic/resident-navigation.js';
-import { DECISION_FORMAT, decisionFormat, decisionMessages, parseDecision, preliminaryDecision } from '../src/engine/residents/decisions.js';
+import { DECISION_FORMAT, decisionFormat, decisionMessages, parseDecision, planSummary, preliminaryDecision, readRequest } from '../src/engine/residents/decisions.js';
+import { residentPlan, describePlan } from '../src/traffic/resident-plans.js';
 import { ResidentConversation } from '../src/engine/residents/conversation.js';
 import { ResidentModel } from '../src/engine/residents/model.js';
 import { planResidentGuide, residentDestinations } from '../src/traffic/resident-guides.js';
@@ -22,11 +23,63 @@ const player = () => ({ x: 0, y: 0, z: -2, yaw: 0 });
 const navigation = (boxes = []) => ({ mobile: true, area: 'outside', sample: (from, p) => boxes.some(b => circleHitsBox(p.x, p.z, .32, b)) ? null : { ...p, y: 0 } });
 const advance = (body, at, nav, seconds = 2) => { for (let i = 0; i < seconds * 60; i++) stepResidentAction(body, 1 / 60, at, nav); };
 
-test('request checks exclude removed commands and ask for an unspecified destination without capturing discussion', () => {
-  for (const line of ['Come here.', 'Could you please face me?', 'Wave at me!', 'Please cheer for me.', 'Lie down.', 'Could you lay down?', 'Lie on the ground.', 'Stretch out here.']) assert.deepEqual(preliminaryDecision(line), { action: 'none' });
-  assert.deepEqual(preliminaryDecision('Guide me somewhere.'), { action: 'guide', destination: '' });
-  assert.deepEqual(preliminaryDecision('Go somewhere, please.'), { action: 'go_to', destination: '' });
-  for (const line of ['Come with me.', 'What happens if I say come here?', 'Tell me a story about waving.', 'Come here and dance.', 'Guide me to the station.']) assert.equal(preliminaryDecision(line), null);
+test('exact commands skip the model, trips without a place ask which, and everything else is the model\'s', () => {
+  const one = (action, extra = {}) => ({ steps: [{ action, ...extra }], repeat: false });
+  for (const [line, action] of [['Follow me.', 'follow'], ['Could you please come with me?', 'follow'], ['Wait here.', 'wait'], ["Don't follow me.", 'wait'],
+    ['Stay seated.', 'wait'], ['Dance!', 'dance'], ['Take a seat, please.', 'sit_down'], ['Stop sitting down.', 'get_up'], ['Carry on.', 'resume_routine']]) assert.deepEqual(preliminaryDecision(line), one(action), line);
+  assert.deepEqual(preliminaryDecision('Guide me somewhere.'), one('guide', { destination: '' }));
+  assert.deepEqual(preliminaryDecision('Go somewhere, please.'), one('go_to', { destination: '' }));
+  for (const line of ['Come here.', 'Wave at me!', 'Lie down.', 'What happens if I say follow me?', 'Tell me a story about waving.', 'Guide me to the station.', 'Follow me until we reach the station.']) assert.equal(preliminaryDecision(line), null, line);
+});
+
+test('the game reads parts, durations, conditions and repeats itself, so chained exact commands need no model', () => {
+  assert.deepEqual(preliminaryDecision('Wait here for 10 seconds, then follow me.'), { steps: [{ action: 'wait', seconds: 10 }, { action: 'follow' }], repeat: false });
+  assert.deepEqual(preliminaryDecision('Sit down for two minutes, and then get up.'), { steps: [{ action: 'sit_down', seconds: 120 }, { action: 'get_up' }], repeat: false });
+  assert.deepEqual(preliminaryDecision('Dance until I leave.'), { steps: [{ action: 'dance', until: 'player_leaves' }], repeat: false });
+  assert.deepEqual(preliminaryDecision("Please wait here till I'm back."), { steps: [{ action: 'wait', until: 'player_returns' }], repeat: false });
+  assert.deepEqual(preliminaryDecision('Dance for 45 seconds.'), { steps: [{ action: 'dance', seconds: 30 }], repeat: false }, 'the nearest duration on offer');
+  assert.deepEqual(preliminaryDecision('Stop following me and wait.'), { steps: [{ action: 'wait' }], repeat: false }, 'the same step twice is one');
+  const trip = readRequest('Go to the station and wait there until I come back.');
+  assert.deepEqual(trip.parts.map(({ text, action, until }) => [text, action, until]), [['Go to the station', null, ''], ['wait there until I come back', 'wait', 'player_returns']]);
+  assert.equal(JSON.parse(decisionFormat({}, trip).schema).properties.steps.minItems, 2, 'the model writes exactly one step per part');
+  assert.match(decisionMessages('Go to the station and wait there until I come back.', {}, trip)[0].content, /2 parts.*1\) "Go to the station"; 2\) "wait there until I come back"/);
+  // The model names the trip; the game keeps the second part's command and condition.
+  assert.deepEqual(parseDecision('{"steps":[{"action":"go_to","destination":"station"},{"action":"dance","until":"player_leaves","seconds":30}]}', trip),
+    { steps: [{ action: 'go_to', destination: 'station' }, { action: 'wait', until: 'player_returns' }], repeat: false });
+  const patrol = readRequest('Walk back and forth between the station and the bar.');
+  assert.equal(patrol.repeat, true); assert.equal(patrol.parts.length, 1);
+  assert.deepEqual(parseDecision('{"steps":[{"action":"go_to","destination":"station"},{"action":"go_to","destination":"bar"},{"action":"go_to","destination":"station"},{"action":"go_to","destination":"bar"}]}', patrol),
+    { steps: [{ action: 'go_to', destination: 'station' }, { action: 'go_to', destination: 'bar' }], repeat: true }, 'a pattern written out twice is one repeating pass');
+  assert.equal(readRequest('Back and forth: follow me.').repeat, true);
+  assert.equal(readRequest('Keep me company.').repeat, false);
+  assert.deepEqual(readRequest('Go to the station, wait until I come back, then carry on.').parts.map(p => p.action), [null, 'wait', 'resume_routine'], 'a comma before another activity starts a part');
+});
+
+test('plans parse into steps, drop none steps, and keep a place only where a step uses one', () => {
+  const step = (action, destination = '', until = '', seconds = 0) => ({ action, destination, until, seconds });
+  const parse = (steps, repeat = false) => parseDecision(JSON.stringify({ steps, repeat }));
+  assert.deepEqual(parse([step('go_to', 'shop'), step('wait', 'shop', 'player_returns'), step('none'), step('resume_routine')]),
+    { steps: [{ action: 'go_to', destination: 'shop' }, { action: 'wait', until: 'player_returns' }, { action: 'resume_routine' }], repeat: false });
+  assert.deepEqual(parse([step('follow', 'shop')]), { steps: [{ action: 'follow' }], repeat: false }, 'a small model\'s stray place is ignored');
+  assert.deepEqual(parse([step('follow', 'shop', 'place')]), { steps: [{ action: 'follow', destination: 'shop', until: 'place' }], repeat: false });
+  assert.deepEqual(parse([step('dance', '', 'place', 30)], true), { steps: [{ action: 'dance', seconds: 30 }], repeat: true });
+  assert.deepEqual(parse([step('none')], true), { steps: [], repeat: false }, 'no request');
+  for (const bad of [[], Array(5).fill(step('wait')), [step('wait', '', 'later')], [step('wait', '', '', 7)], [{ ...step('wait'), reply: 'Sure.' }], [step('wave')]]) assert.equal(parse(bad), null);
+  assert.deepEqual(parseDecision('{"steps":[{"action":"wait"}]}'), { steps: [{ action: 'wait' }], repeat: false }, 'a step names only what was asked for');
+  assert.equal(parseDecision('{"steps":[{"action":"go_to"}]}'), null, 'a trip always names its place, even if empty');
+  const schema = JSON.parse(decisionFormat({ destinations: [{ id: 'shop', name: 'KŌJI', type: 'ramen bar', distance: 15 }] }).schema);
+  assert.deepEqual(schema.properties.steps.items.properties.destination.enum, ['', 'shop']);
+  assert.equal(schema.properties.steps.maxItems, 4);
+  assert.equal(planSummary({ steps: [{ action: 'go_to' }, { action: 'go_to' }], repeat: true }), 'go_to, go_to (repeating)');
+});
+
+test('open-ended steps that are not last get an end, and plans are described step by step', () => {
+  const plan = residentPlan({ steps: [{ action: 'wait' }, { action: 'follow' }, { action: 'dance' }, { action: 'resume_routine' }] });
+  assert.deepEqual(plan.steps.map(({ until, seconds }) => ({ until, seconds })), [{ until: 'player_returns', seconds: 0 }, { until: 'player_stops', seconds: 0 }, { until: '', seconds: 30 }, { until: '', seconds: 0 }]);
+  assert.equal(describePlan(plan), 'Sure. I will wait here until you come back, follow you until you stop, dance for 30 seconds, then get back to what I was doing.');
+  assert.deepEqual(residentPlan({ steps: [{ action: 'dance' }], repeat: true }).steps[0].seconds, 30, 'a repeated step always ends');
+  assert.equal(residentPlan({ steps: [{ action: 'teleport' }] }), null);
+  assert.equal(residentPlan('dance').steps[0].seconds, 0, 'a last step may stay open-ended');
 });
 
 test('sit down and get up preserve position, stay put, and stand before other activities', () => {
@@ -139,19 +192,20 @@ test('go to walks independently, waits at the destination, and stops for a new o
 
 test('destination decisions bind IDs and reject coordinates, missing destinations and dropped actions', () => {
   const context = { destinations: [{ id: 'shop', name: 'KŌJI', type: 'ramen bar', distance: 15 }] };
-  assert.deepEqual(JSON.parse(decisionFormat(context).schema).properties.destination.enum, ['', 'shop']);
+  assert.deepEqual(JSON.parse(decisionFormat(context).schema).properties.steps.items.properties.destination.enum, ['', 'shop']);
+  const one = step => ({ steps: [step], repeat: false });
   for (const action of ['guide', 'go_to']) {
-    assert.deepEqual(parseDecision(JSON.stringify({ action, destination: 'shop' })), { action, destination: 'shop' });
+    assert.deepEqual(parseDecision(JSON.stringify({ action, destination: 'shop' })), one({ action, destination: 'shop' }));
     assert.equal(parseDecision(JSON.stringify({ action })), null);
     assert.equal(parseDecision(JSON.stringify({ action, destination: { x: 0, z: 0 } })), null);
     assert.equal(parseDecision(JSON.stringify({ action, destination: 'shop', x: 5 })), null);
   }
-  for (const action of ['wave', 'cheer', 'come_here', 'face_me', 'lie_down']) assert.equal(parseDecision(JSON.stringify({ action })), null);
-  assert.deepEqual(parseDecision('{"action":"sit_down","destination":""}'), { action: 'sit_down' });
-  assert.deepEqual(parseDecision('{"action":"dance"}'), { action: 'dance' });
+  for (const action of ['wave', 'move_aside', 'teleport']) assert.equal(parseDecision(JSON.stringify({ action })), null, 'not an action residents have');
+  assert.deepEqual(parseDecision('{"action":"sit_down","destination":""}'), one({ action: 'sit_down' }));
+  assert.deepEqual(parseDecision('{"action":"dance"}'), one({ action: 'dance' }));
 });
 
-test('follow, wait, move aside and resume are physical, interruptible behaviors', () => {
+test('follow, wait and resume are physical, interruptible behaviors', () => {
   const body = person(), at = player(), nav = navigation();
   assert.equal(requestResidentAction(body, 'follow', at, nav).ok, true);
   at.z = -8; advance(body, at, nav, 5);
@@ -160,17 +214,135 @@ test('follow, wait, move aside and resume are physical, interruptible behaviors'
   const waiting = { x: body.x, z: body.z };
   at.z = -18; advance(body, at, nav, 10);
   assert.deepEqual({ x: body.x, z: body.z }, waiting, 'wait means stay until another request');
-  at.z = body.z - 1.5;
-  assert.equal(requestResidentAction(body, 'move_aside', at, nav).ok, true);
-  const before = { x: body.x, z: body.z };
-  advance(body, at, nav, 3);
-  assert.ok(Math.abs(body.x - before.x) > .7, 'steps sideways');
-  assert.equal(body.residentAction.kind, 'wait');
   at.x = body.x; at.z = body.z - 1.5;
   assert.equal(requestResidentAction(body, 'resume_routine', at, nav).ok, true);
   at.x = 20; advance(body, at, nav, 15);
   assert.equal(body.residentAction, null, 'returns all the way to the original routine');
   assert.ok(Math.hypot(body.x, body.z) < .06);
+});
+
+// Open ground with a station to the east and a ramen bar to the west.
+function placesNearby() {
+  const nav = navigation(), station = { id: 'station', name: 'Local station', type: 'tram station', x: 8, y: 0, z: 0 }, bar = { id: 'bar', name: 'KŌJI', type: 'ramen bar', x: -8, y: 0, z: 0 };
+  let closed = null;
+  nav.destinations = () => [station, bar];
+  nav.guide = (start, place) => {
+    const destination = typeof place === 'object' ? place : [station, bar].find(p => p.id === place);
+    return destination && destination.id !== closed ? { destination, route: planResidentGuide(start, destination, nav) } : null;
+  };
+  return { nav, station, bar, close: id => { closed = id; } };
+}
+
+test('a plan runs its steps in order: go there, wait until the player comes back, then go home', () => {
+  const { nav } = placesNearby(), body = person(), at = player();
+  const plan = { steps: [{ action: 'go_to', destination: 'station' }, { action: 'wait', until: 'player_returns' }, { action: 'resume_routine' }], repeat: false };
+  assert.equal(requestResidentAction(body, plan, at, nav).reply, 'Sure. I will go to Local station, wait there until you come back, then get back to what I was doing.');
+  Object.assign(at, { x: -20, z: 10 }); advance(body, at, nav, 10);
+  assert.equal(body.residentAction.kind, 'wait'); assert.ok(Math.abs(body.x - 8) < .4, 'arrived, then waits there');
+  advance(body, at, nav, 20); assert.equal(body.residentAction.kind, 'wait', 'waits for as long as the player is away');
+  Object.assign(at, { x: 8, z: 2.5 }); advance(body, at, nav, .2);
+  assert.equal(body.residentAction.kind, 'resume_routine', 'goes home once the player is back');
+  Object.assign(at, { x: 30, z: 30 }); advance(body, at, nav, 15);
+  assert.equal(body.residentAction, null); assert.ok(Math.hypot(body.x, body.z) < .06);
+});
+
+test('timed steps end on time, and a last step with an end leaves the resident waiting', () => {
+  const body = person(), at = player(), nav = navigation();
+  assert.equal(requestResidentAction(body, { steps: [{ action: 'dance', seconds: 10 }, { action: 'sit_down' }], repeat: false }, at, nav).reply, 'Sure. I will dance for 10 seconds, then sit down.');
+  advance(body, at, nav, 9.5); assert.equal(body.residentAction.kind, 'dance');
+  advance(body, at, nav, 3); assert.equal(body.residentAction.kind, 'sit_down'); assert.equal(body.residentAction.sitProgress, 1);
+  assert.equal(body.residentAction.plan, null, 'sitting down was the last step; they stay seated');
+  const dancer = person();
+  requestResidentAction(dancer, { steps: [{ action: 'dance', until: 'player_leaves' }], repeat: false }, at, nav);
+  advance(dancer, at, nav, 5); assert.equal(dancer.residentAction.kind, 'dance', 'dances while the player is near');
+  advance(dancer, { ...at, z: -12 }, nav, .1);
+  assert.equal(dancer.residentAction.kind, 'wait'); assert.equal(dancer.residentAction.status, 'Waiting here');
+});
+
+test('following ends on reaching a place, or once the player has walked off and stopped', () => {
+  const { nav } = placesNearby(), body = person(), at = player();
+  nav.destinations = () => [{ id: 'kiosk', name: 'Kiosk', type: 'kiosk', x: 0, y: 0, z: -12 }];
+  assert.equal(requestResidentAction(body, { steps: [{ action: 'follow', destination: 'kiosk', until: 'place' }], repeat: false }, at, nav).reply, 'Sure. I will follow you until we reach Kiosk.');
+  for (let i = 0; i < 9 * 60; i++) { at.z = Math.max(-20, at.z - 2.4 / 60); stepResidentAction(body, 1 / 60, at, nav); }
+  assert.equal(body.residentAction.kind, 'wait'); assert.ok(body.z < -7.5 && body.z > -9, `stops within reach of the place (${body.z.toFixed(2)})`);
+  const follower = person(), walker = player();
+  requestResidentAction(follower, { steps: [{ action: 'follow', until: 'player_stops' }], repeat: false }, walker, navigation());
+  advance(follower, walker, navigation(), 4); assert.equal(follower.residentAction.kind, 'follow', 'standing still before walking off does not count');
+  for (let i = 0; i < 3 * 60; i++) { walker.z -= 2.4 / 60; stepResidentAction(follower, 1 / 60, walker, navigation()); }
+  advance(follower, walker, navigation(), 2); assert.equal(follower.residentAction.kind, 'follow');
+  advance(follower, walker, navigation(), 2); assert.equal(follower.residentAction.kind, 'wait', 'the player stopped for three seconds');
+});
+
+test('patrols repeat until a new request, keep the way home short, and never loop in zero time', () => {
+  const { nav } = placesNearby(), body = person(), at = player();
+  const patrol = { steps: [{ action: 'go_to', destination: 'station' }, { action: 'go_to', destination: 'bar' }], repeat: true };
+  assert.equal(requestResidentAction(body, patrol, at, nav).reply, 'Sure. I will go to Local station, then go to KŌJI, and keep doing that until you ask me to stop.');
+  Object.assign(at, { x: 0, z: 40 });
+  const visits = [];
+  for (let i = 0; i < 60 * 60; i++) {
+    stepResidentAction(body, 1 / 60, at, nav);
+    const id = body.residentAction.destination?.id;
+    if (id && id !== visits.at(-1)) visits.push(id);
+  }
+  assert.deepEqual(visits.slice(0, 5), ['station', 'bar', 'station', 'bar', 'station']);
+  assert.ok(body.residentAction.trail.length < 60, `the way home stays a simple path (${body.residentAction.trail.length} footsteps)`);
+  Object.assign(at, { x: body.x, z: body.z - 1.5 });
+  assert.equal(requestResidentAction(body, 'resume_routine', at, nav).ok, true);
+  at.z = 40; advance(body, at, nav, 15);
+  assert.equal(body.residentAction, null, 'a new request replaces the patrol, and the way home still works');
+  const stander = person();
+  requestResidentAction(stander, { steps: [{ action: 'get_up' }], repeat: true }, player(), navigation());
+  advance(stander, player(), navigation(), .1);
+  assert.equal(stander.residentAction.plan, null, 'a pass that takes no time stops the loop');
+});
+
+test('a later step that cannot start leaves the resident waiting where they are', () => {
+  const { nav, close } = placesNearby(), body = person(), at = player();
+  requestResidentAction(body, { steps: [{ action: 'go_to', destination: 'station' }, { action: 'go_to', destination: 'bar' }], repeat: false }, at, nav);
+  close('bar'); at.z = 40; advance(body, at, nav, 10);
+  assert.equal(body.residentAction.kind, 'wait'); assert.equal(body.residentAction.plan, null);
+  assert.match(body.residentAction.status, /cannot find a clear walking route/);
+  assert.ok(Math.abs(body.x - 8) < .4);
+});
+
+test('steps pause while the resident listens, and a new request replaces the rest of a plan', () => {
+  const body = person(), at = player(), nav = navigation();
+  requestResidentAction(body, { steps: [{ action: 'dance', seconds: 10 }, { action: 'follow' }], repeat: false }, at, nav);
+  advance(body, at, nav, 6); body.talking = { yaw: 0 }; advance(body, at, nav, 10);
+  body.talking = null; advance(body, at, nav, 3); assert.equal(body.residentAction.kind, 'dance', 'talking time does not count');
+  advance(body, at, nav, 1.5); assert.equal(body.residentAction.kind, 'follow');
+  const other = person();
+  requestResidentAction(other, { steps: [{ action: 'dance', seconds: 10 }, { action: 'follow' }], repeat: false }, at, nav);
+  advance(other, at, nav, 2); requestResidentAction(other, 'wait', at, nav); advance(other, at, nav, 20);
+  assert.equal(other.residentAction.kind, 'wait'); assert.equal(other.residentAction.plan.steps.length, 1);
+});
+
+test('footsteps that close a loop are cut from the way home', () => {
+  const body = person(), at = player(), nav = navigation();
+  requestResidentAction(body, 'follow', at, nav);
+  // The player walks a 6 m square and back to where the follower started.
+  for (const [x, z] of [[0, -8], [6, -8], [6, -2], [0, -2], [0, -8]]) {
+    const from = { ...at };
+    for (let i = 1; i <= 150; i++) { at.x = from.x + (x - from.x) * i / 150; at.z = from.z + (z - from.z) * i / 150; stepResidentAction(body, 1 / 60, at, nav); }
+  }
+  advance(body, at, nav, 3);
+  const trail = body.residentAction.trail;
+  assert.ok(trail.length < 45, `the loop round the square is dropped (${trail.length} footsteps)`);
+  assert.ok(trail.every((p, i) => !i || Math.hypot(p.x - trail[i - 1].x, p.z - trail[i - 1].z) < .5), 'what remains is still a continuous path');
+});
+
+test('a chained request queues as one plan and starts after Bye', async () => {
+  const { nav } = placesNearby(), body = person(), at = player();
+  const decision = { steps: [{ action: 'go_to', destination: 'station', until: '', seconds: 0 }, { action: 'wait', destination: '', until: 'player_returns', seconds: 0 }], repeat: false };
+  const h = conversationHarness(async () => JSON.stringify(decision));
+  h.actions.context = () => residentActionContext(body, nav);
+  h.actions.prepare = plan => previewResidentAction(body, plan, at, nav);
+  h.actions.execute = plan => requestResidentAction(body, plan, at, nav);
+  h.conversation.open(persona, h.actions);
+  assert.equal(await h.conversation.say('Go to the station and wait there until I come back.'), 'Sure. I will go to Local station, then wait there until you come back.');
+  assert.equal(h.conversation.snapshot().pendingAction, 'go_to, wait'); assert.equal(body.residentAction, undefined);
+  assert.equal(h.conversation.finish().ok, true); assert.equal(body.residentAction.kind, 'go_to');
+  assert.deepEqual(residentActionContext(body, nav).next, ['wait'], 'the model can see what is queued next');
 });
 
 test('requests respect solid obstacles, unsupported ground, scope, and distance', () => {
@@ -183,7 +355,7 @@ test('requests respect solid obstacles, unsupported ground, scope, and distance'
   const b = person(); requestResidentAction(b, 'follow', player(), ledge); advance(b, at, ledge, 5);
   assert.ok(b.z >= -3 && b.y === 0, 'does not walk off a ledge');
   const trapped = navigation([orientedBox(0, 0, 3, 3, 0, 3, 0)]);
-  assert.equal(requestResidentAction(person(), 'move_aside', player(), trapped).ok, false);
+  assert.equal(requestResidentAction(person(), 'sit_down', player(), trapped).ok, false);
   assert.equal(requestResidentAction(person(), 'follow', player(), { ...navigation(), mobile: false }).ok, false);
   assert.equal(requestResidentAction(person(), 'wait', { ...at, z: -30 }, nav).ok, false);
   assert.equal(requestResidentAction(person(), 'wait', player(), { ...nav, crossing: true }).ok, false);
@@ -318,13 +490,14 @@ test('indoor movement moves the resident and pinned residents survive a floor un
   assert.ok(plan);
   const spot = floorOccupants(plan, 0).find(o => o.pose === 'stand'), pos = toWorld(plan, spot.x, spot.z);
   const at = { ...pos, y: spot.y, yaw: 0, z: pos.z - 1.5 };
-  const nav = { ...navigation(), area: 'this floor', sample: (from, p) => ({ ...p, y: spot.y }) };
+  const place = { id: 'lift', name: 'Elevator', type: 'elevator', x: pos.x + 2, y: spot.y, z: pos.z };
+  const nav = { ...navigation(), area: 'this floor', sample: (from, p) => ({ ...p, y: spot.y }), destinations: () => [place], guide: start => ({ destination: place, route: [{ ...start }, place] }) };
   const occupants = createOccupants({ scene: new THREE.Scene(), assets: { citizen: crowdAsset(['Idle', 'Walk', 'WalkFormal', 'Driving']) }, residentNavigation: () => nav });
   const floors = [{ plan, level: 0 }];
   occupants.update(0, { player: at, floors });
   const p = occupants.avatars.find(p => p.occupant?.id === spot.id), o = p.occupant;
   const before = { x: o.x };
-  assert.equal(occupants.command(p, 'move_aside', at).ok, true);
+  assert.equal(occupants.command(p, { action: 'go_to', destination: 'lift' }, at).ok, true);
   for (let i = 0; i < 180; i++) occupants.update(1 / 60, { player: at, floors });
   assert.ok(Math.abs(o.x - before.x) > .7);
   occupants.update(1, { player: at, floors: [] });
@@ -352,11 +525,14 @@ test('indoor commands use the real floor geometry and the production navigation 
     const p = traffic.occupants.avatars.find(p => p.occupant?.id === spot.id);
     if (!p) continue;
     const handle = occupantResident(p).handle, before = { ...pos };
-    const result = traffic.commandResident(handle, 'move_aside', at);
+    // Walk to the floor's own exit or elevator, found by the production adapter.
+    const place = traffic.residentContext(handle).destinations[0];
+    if (!place) continue;
+    const result = traffic.commandResident(handle, { action: 'go_to', destination: place.id }, at);
     if (!result.ok) continue;
     for (let i = 0; i < 240; i++) traffic.occupants.update(1 / 60, { player: at, floors });
     assert.ok(Math.hypot(p.occupant.x - before.x, p.occupant.z - before.z) > .6, JSON.stringify(p.occupant.residentAction));
-    assert.equal(p.occupant.residentAction.kind, 'wait');
+    assert.match(p.occupant.residentAction.kind, /go_to|wait/);
     assert.equal(traffic.commandResident({ ...handle, life: handle.life - 1 }, 'follow', at).ok, false);
     checked = true; break;
   }
@@ -367,12 +543,12 @@ test('indoor commands use the real floor geometry and the production navigation 
 const persona = residentPersona(walkerResident({ id: 1, model: 'resident-1', mode: 'walk', species: 'human' }));
 test('structured decisions reject malformed, extra and unknown actions', () => {
   const good = { action: 'follow' };
-  assert.deepEqual(parseDecision(JSON.stringify(good), persona), good);
-  for (const raw of ['{"action":"follow"', '```json\n{}\n```', 'null', '[]', '{"action":"follow","reply":""}', '{"action":"eval","reply":"Done."}', '{"action":"follow","reply":"Sure.","target":"someone_else"}']) assert.equal(parseDecision(raw, persona), null, raw);
+  assert.deepEqual(parseDecision(JSON.stringify(good)), { steps: [good], repeat: false });
+  for (const raw of ['{"action":"follow"', '```json\n{}\n```', 'null', '[]', '{"action":"follow","reply":""}', '{"action":"eval","reply":"Done."}', '{"action":"follow","reply":"Sure.","target":"someone_else"}']) assert.equal(parseDecision(raw), null, raw);
   const messages = decisionMessages('Follow me.', { behavior: 'wait' });
-  assert.match(messages[0].content, /quoted commands/);
+  assert.match(messages[0].content, /questions about an action/);
   assert.equal(messages.at(-1).content, 'Follow me.');
-  assert.deepEqual(parseDecision('<think>\n\n</think>\n{"action":"wait"}'), { action: 'wait' });
+  assert.deepEqual(parseDecision('<think>\n\n</think>\n{"action":"wait"}'), { steps: [{ action: 'wait' }], repeat: false });
   assert.equal(parseDecision('<think>unfinished {"action":"follow"}'), null);
 });
 
@@ -384,9 +560,10 @@ function conversationHarness(generate, execute = () => ({ ok: true, reply: 'I wi
   return { conversation, actions, shown, spoken, calls };
 }
 
+const followPlan = { steps: [{ action: 'follow' }], repeat: false };
 test('valid decisions queue until the conversation finishes, and speech reflects validation', async () => {
   const h = conversationHarness(async (messages, options) => {
-    assert.equal(messages.at(-1).content, 'Follow me.');
+    assert.equal(messages.at(-1).content, 'Would you keep me company?');
     assert.deepEqual(options.responseFormat, DECISION_FORMAT);
     options.onText('{"action":"follow"');
     return '{"action":"follow"}';
@@ -394,17 +571,17 @@ test('valid decisions queue until the conversation finishes, and speech reflects
   h.conversation.open(persona, h.actions);
   assert.equal(h.conversation.snapshot().pendingAction, null, 'opening chat cannot queue an action');
   assert.deepEqual(h.spoken, [], 'residents wait for the player to speak');
-  await h.conversation.say('Follow me.');
+  await h.conversation.say('Would you keep me company?');
   assert.deepEqual(h.calls, [], 'no action starts while talking');
   assert.equal(h.conversation.snapshot().pendingAction, 'follow');
   assert.equal(h.conversation.finish().ok, true);
-  assert.deepEqual(h.calls, ['follow']);
-  h.conversation.finish(); assert.deepEqual(h.calls, ['follow'], 'finishing twice cannot repeat the action');
+  assert.deepEqual(h.calls, [followPlan]);
+  h.conversation.finish(); assert.deepEqual(h.calls, [followPlan], 'finishing twice cannot repeat the action');
   assert.deepEqual(h.spoken, ['I will follow you.']);
   assert.ok(h.shown.every(({ text }) => !text.includes('"action"')), 'JSON is never displayed or spoken');
-  const rejected = conversationHarness(async () => '{"action":"move_aside"}', () => ({ ok: false, reply: 'There is no room here.' }));
+  const rejected = conversationHarness(async () => '{"action":"sit_down"}', () => ({ ok: false, reply: 'There is no room here.' }));
   rejected.conversation.open(persona, rejected.actions);
-  assert.equal(await rejected.conversation.say('Please move aside.'), 'There is no room here.');
+  assert.equal(await rejected.conversation.say('Could you sit over there?'), 'There is no room here.');
   assert.equal(rejected.conversation.snapshot().lastAction.ok, false);
 });
 
@@ -429,38 +606,39 @@ test('sit down queues through dialogue, starts after Bye, and get up restores st
 
 test('destination arguments survive conversation queuing and are revalidated on finish', async () => {
   for (const action of ['guide', 'go_to']) {
-    const request = { action, destination: 'station' }, checked = [];
+    const request = { steps: [{ action, destination: 'station' }], repeat: false }, checked = [];
     const h = conversationHarness(async (messages, options) => {
-      assert.deepEqual(JSON.parse(options.responseFormat.schema).properties.destination.enum, ['', 'station']);
-      return JSON.stringify(request);
+      assert.deepEqual(JSON.parse(options.responseFormat.schema).properties.steps.items.properties.destination.enum, ['', 'station']);
+      return JSON.stringify({ action, destination: 'station' });
     }, command => { checked.push(command); return { ok: true, reply: 'Sure.', status: 'Going to the station' }; });
     h.actions.context = () => ({ destinations: [{ id: 'station', name: 'Station', type: 'station', distance: 20 }] });
     h.conversation.open(persona, h.actions); await h.conversation.say('To the station, please.');
-    assert.deepEqual(h.calls, []); assert.deepEqual(h.conversation.snapshot().pendingAction, request);
+    assert.deepEqual(h.calls, []); assert.equal(h.conversation.snapshot().pendingAction, action);
     assert.deepEqual(checked, [request]);
     h.conversation.finish(); assert.deepEqual(h.calls, [request]); assert.deepEqual(checked, [request, request]);
   }
 });
 
-test('removed commands and missing destinations cannot replace a queued activity', async () => {
-  const formats = [];
+test('missing destinations cannot replace a queued activity, and any other request reaches the model', async () => {
+  const formats = [], dance = { steps: [{ action: 'dance' }], repeat: false };
   const h = conversationHarness(async (messages, options) => {
     formats.push(!!options.responseFormat);
     return options.responseFormat ? '{"action":"dance","destination":""}' : 'Evening.';
-  }, command => typeof command === 'object' && !command.destination ? { ok: false, reply: 'Which place?' } : { ok: true, reply: 'Sure.' });
+  }, command => PLACE_TRIP(command) && !command.steps[0].destination ? { ok: false, reply: 'Which place?' } : { ok: true, reply: 'Sure.' });
   h.conversation.open(persona, h.actions);
-  await h.conversation.say('Dance.'); await h.conversation.say('Come here.');
-  assert.deepEqual(formats, [true, false], 'removed requests become dialogue without asking the model to select an activity');
+  await h.conversation.say('Dance.'); assert.deepEqual(formats, [], 'an exact command needs no model');
+  await h.conversation.say('Come here.'); assert.deepEqual(formats, [true], 'nothing is blocked: the model decides');
   assert.equal(await h.conversation.say('Guide me somewhere.'), 'Which place?');
   assert.equal(h.conversation.snapshot().pendingAction, 'dance');
-  assert.deepEqual(h.calls, []); h.conversation.finish(); assert.deepEqual(h.calls, ['dance']);
+  assert.deepEqual(h.calls, []); h.conversation.finish(); assert.deepEqual(h.calls, [dance]);
 });
+const PLACE_TRIP = command => ['guide', 'go_to'].includes(command.steps?.[0]?.action);
 
 test('late, interrupted, malformed, no-action and failed generations never change the simulation', async () => {
   let finish;
   const h = conversationHarness(() => new Promise(resolve => { finish = resolve; }));
   h.conversation.open(persona, h.actions);
-  const pending = h.conversation.say('Follow me.');
+  const pending = h.conversation.say('Would you keep me company?');
   h.conversation.close(); finish('{"action":"follow"}');
   assert.equal(await pending, null); assert.deepEqual(h.calls, []);
   for (const response of ['{"action":"follow"', '{"action":"none"}', new Error('Device lost')]) {
@@ -516,29 +694,30 @@ test('talking holds one resident while the city advances, and ending releases th
 test('latest accepted action replaces the queue, small talk preserves it, and resets cancel it', async () => {
   let action = 'follow';
   const h = conversationHarness(async (messages, options) => options.responseFormat ? JSON.stringify({ action }) : 'Evening.');
+  const wait = { steps: [{ action: 'wait' }], repeat: false };
   h.conversation.open(persona, h.actions);
-  await h.conversation.say('Follow me.');
-  action = 'wait'; await h.conversation.say('Wait here instead.');
+  await h.conversation.say('Would you keep me company?');
+  action = 'wait'; await h.conversation.say('Hang about here instead.');
   action = 'none'; await h.conversation.say('Thanks.');
   assert.equal(h.conversation.snapshot().pendingAction, 'wait');
   assert.deepEqual(h.calls, []);
-  h.conversation.finish(); assert.deepEqual(h.calls, ['wait']);
+  h.conversation.finish(); assert.deepEqual(h.calls, [wait]);
   action = 'follow'; h.conversation.open(persona, h.actions);
-  await h.conversation.say('Follow me.');
+  await h.conversation.say('Would you keep me company?');
   h.conversation.close(); h.conversation.finish();
-  assert.deepEqual(h.calls, ['wait'], 'reset cancels the queued action');
+  assert.deepEqual(h.calls, [wait], 'reset cancels the queued action');
 });
 
 test('finishing revalidates a queued request against the world and cancels in-flight JSON', async () => {
   let release;
   const h = conversationHarness(async () => '{"action":"follow"}');
   h.conversation.open(persona, h.actions);
-  await h.conversation.say('Follow me.');
+  await h.conversation.say('Would you keep me company?');
   h.actions.execute = () => ({ ok: false, reply: 'That resident has moved on.' });
   assert.equal(h.conversation.finish().ok, false);
   h.conversation.model.generate = () => new Promise(resolve => { release = resolve; });
   h.conversation.open(persona, h.actions);
-  const pending = h.conversation.say('Wait here.');
+  const pending = h.conversation.say('Hang about here instead.');
   h.conversation.finish(); release('{"action":"wait"}');
   assert.equal(await pending, null); assert.deepEqual(h.calls, []);
 });

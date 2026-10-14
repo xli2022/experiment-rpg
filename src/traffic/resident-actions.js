@@ -1,11 +1,12 @@
 import { traceResidentPath as trace } from './resident-path.js';
 import { angleDelta, clamp } from '../core/physics.js';
-import { RESIDENT_BEHAVIORS, RESIDENT_SIT } from '../core/resident-behaviors.js';
+import { RESIDENT_SIT } from '../core/resident-behaviors.js';
+import { residentPlan, placePlan, compositePlan, describePlan, PLACE_ACTIONS } from './resident-plans.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const point = p => ({ x: p.x, y: p.y, z: p.z });
 const reached = (a, b, radius = .03) => distance(a, b) < radius && Math.abs(a.y - b.y) < .12;
-const STANDING_ACTIONS = ['follow', 'move_aside', 'dance', 'guide', 'go_to', 'get_up'];
+const STANDING_ACTIONS = ['follow', 'dance', 'guide', 'go_to', 'get_up'];
 const FOLLOW_GAP = 1.65, TRAIL_LIMIT = 2048;
 // Followers walk, and jog to catch up once the player gets ahead: the further
 // behind along the player's footsteps, the faster, up to a little more than
@@ -19,6 +20,16 @@ const FOLLOW_WALK = 2.6, FOLLOW_JOG = 6.2, JOG_FROM = 3.2, WALK_FROM = 2.8;
 const DETOURS = [Math.PI / 6, Math.PI / 3, Math.PI / 2], LOOKAHEAD = .6, DETOUR_PATIENCE = 1;
 
 const reverseRoute = trail => [...trail].reverse().map(node => node.kind === 'lift' ? { ...node, from: point(node.to), to: point(node.from) } : point(node));
+// Where a new footstep closes a loop in the route back: an earlier footstep
+// right beside it, on the same floor and in reach. Cutting the loop there
+// keeps the way home a simple path, so walking back and forth never fills it.
+function loopBack(trail, next, navigation) {
+  for (let i = 0; i < trail.length - 10; i++) {
+    const node = trail[i];
+    if (!node.kind && Math.abs(node.y - next.y) < .1 && distance(node, next) < .25 && trace(next, node, navigation.withoutPeople ?? navigation)) return i;
+  }
+  return -1;
+}
 function breadcrumb(trail, next) {
   const last = trail.at(-1), previous = trail.at(-2);
   if (!last || last.kind === 'lift') return true;
@@ -27,7 +38,9 @@ function breadcrumb(trail, next) {
 }
 
 export function residentActionContext(body, navigation) {
+  const plan = body.residentAction?.plan;
   return { behavior: body.residentAction?.kind ?? 'routine', status: body.residentAction?.status ?? 'Going about my day',
+    ...(plan && (plan.index + 1 < plan.steps.length || plan.repeat) ? { next: plan.steps.slice(plan.index + 1).map(step => step.action), repeat: plan.repeat } : {}),
     posture: body.residentAction?.sitProgress > 0 || body.pose === 'sit' ? 'seated' : 'standing',
     canWalk: navigation.mobile !== false, area: navigation.area,
     destinations: (navigation.destinations?.() ?? []).map(({ id, name, type, distance }) => ({ id, name, type, distance })) };
@@ -51,55 +64,55 @@ export function previewResidentAction(body, action, player, navigation) {
   return requestResidentAction({ ...body }, action, player, navigation);
 }
 
+/**
+ * Accept a request: an action name, `{ action, destination }`, or a plan
+ * `{ steps, repeat }`. The first step is checked fully and starts now; later
+ * steps are checked when they start, from wherever the resident is then.
+ */
 export function requestResidentAction(body, request, player, navigation) {
-  const action = typeof request === 'string' ? request : request?.action;
   const denied = reply => ({ ok: false, reply });
-  if (!RESIDENT_BEHAVIORS.includes(action)) return denied('I cannot do that.');
+  const plan = residentPlan(request);
+  if (!plan) return denied('I cannot do that.');
   // A conversation can finish as the player walks away (at 4.5 m).
   if (!player || distance(body, player) > 6 || Math.abs(body.y - player.y) > 1.3) return denied('Come a little closer first.');
-  if (navigation.mobile === false && STANDING_ACTIONS.includes(action)) return denied('I need to stay seated here for now.');
   if (navigation.crossing && !body.residentAction) return denied('Let me finish crossing the street first.');
+  const placed = placePlan(plan, navigation.destinations?.() ?? []);
+  if (placed.reply) return denied(placed.reply);
+  const result = beginStep(body, plan, 0, player, navigation);
+  return result.ok && compositePlan(plan) ? { ...result, reply: describePlan(plan) } : result;
+}
+
+function beginStep(body, plan, index, player, navigation) {
+  const step = plan.steps[index], action = step.action;
+  const denied = reply => ({ ok: false, reply });
+  if (navigation.mobile === false && STANDING_ACTIONS.includes(action)) return denied('I need to stay seated here for now.');
   const gettingUp = body.pose === 'sit' && STANDING_ACTIONS.includes(action);
   const seat = gettingUp ? navigation.seatExit?.() : null;
   if (gettingUp && !seat) return denied('I need a little room to stand up first.');
   const start = seat?.path.at(-1) ?? body;
   if (action === 'sit_down' && body.pose !== 'sit' && !body.residentAction?.sitProgress && !roomToSitDown(start, body.yaw, player, navigation)) return denied('I need a clear, level space to sit down.');
-  let destination = null;
   let guide = null;
-  if (action === 'guide' || action === 'go_to') {
-    const places = navigation.destinations?.() ?? [];
-    if (!places.some(place => place.id === request.destination)) {
-      return denied(places.length ? `I can try to show you ${places.slice(0, 3).map(p => p.name).join(', ')}. Which one?` : 'I do not know a nearby place I can guide you to from here.');
-    }
-    guide = navigation.guide?.(start, request.destination);
+  if (PLACE_ACTIONS.includes(action)) {
+    guide = navigation.guide?.(start, step.place);
     if (!guide?.route?.length) return denied('I cannot find a clear walking route there from here.');
-    destination = point(guide.route.at(-1));
-  }
-  if (action === 'move_aside') {
-    // Prefer a step perpendicular to the player's facing, away from their
-    // walking line. Try both sides and diagonals, never through an obstacle.
-    const right = { x: Math.cos(player.yaw), z: -Math.sin(player.yaw) };
-    const preferred = (body.x - player.x) * right.x + (body.z - player.z) * right.z >= 0 ? 1 : -1;
-    for (const length of [1.4, 1, .75]) for (const side of [preferred, -preferred]) for (const back of [0, .55, -.55]) {
-      if (destination) break;
-      const candidate = { x: start.x + right.x * side * length - Math.sin(player.yaw) * back,
-        y: start.y, z: start.z + right.z * side * length - Math.cos(player.yaw) * back };
-      if (distance(candidate, player) > 1 && trace(start, candidate, navigation)) destination = candidate;
-    }
-    if (!destination) return denied('There is no room for me to step aside here.');
   }
   const prior = body.residentAction;
-  if (action === 'resume_routine' && !prior) return { ok: true, reply: 'All right. I will carry on.', status: 'Going about my day' };
+  if (action === 'resume_routine' && !prior) {
+    if (index + 1 < plan.steps.length) return beginStep(body, plan, index + 1, player, navigation);
+    return { ok: true, reply: 'All right. I will carry on.', status: 'Going about my day' };
+  }
+  plan.index = index;
   const state = body.residentAction = {
     kind: action, home: seat ? { ...point(start), yaw: body.yaw } : prior?.home ?? { ...point(body), yaw: body.yaw },
     // When interrupted on the way home, retain only the untraversed return
     // route. Reusing the old outbound endpoint could cross a wall or floor.
     trail: seat ? [point(start)] : prior?.kind === 'resume_routine' ? reverseRoute(prior.route) : prior?.trail ?? [point(body)],
-    route: guide?.route.map(point) ?? [], target: destination, repath: 0, status: '', followAt: point(player), elapsed: 0,
+    route: guide?.route.map(point) ?? [], target: guide ? point(guide.route.at(-1)) : null, repath: 0, status: '', followAt: point(player), elapsed: 0,
     destination: guide ? { id: guide.destination.id, name: guide.destination.name } : null,
     seat: seat ?? prior?.seat ?? null,
     transition: seat ? 'rise' : prior?.transition ?? null,
     sitProgress: prior?.sitProgress ?? 0,
+    plan, time: 0, from: point(player),
   };
   if (state.transition === 'sit' && action !== 'resume_routine') state.transition = 'rise';
   if (body.pose === 'sit' && (action === 'wait' || action === 'sit_down')) state.transition = null;
@@ -108,14 +121,14 @@ export function requestResidentAction(body, request, player, navigation) {
   body.speed = 0;
   const replies = {
     follow: 'Sure. I will follow you.',
-    wait: 'All right. I will wait here.', move_aside: 'Of course. I will step aside.',
+    wait: 'All right. I will wait here.',
     dance: 'Sure. I will dance until you ask me to stop.',
     sit_down: body.pose === 'sit' ? 'All right. I will stay seated here.' : 'All right. I will sit down here.', get_up: 'All right. I will stand here.',
     guide: guide && `Follow me to ${guide.destination.name}. I will wait if you fall behind.`,
     go_to: guide && `Sure. I will go to ${guide.destination.name} and wait there.`,
     resume_routine: 'All right. I will get back to what I was doing.',
   };
-  state.status = { follow: 'Following you', wait: 'Waiting here', move_aside: 'Moving aside',
+  state.status = { follow: 'Following you', wait: 'Waiting here',
     dance: 'Dancing', sit_down: body.pose === 'sit' ? 'Seated here' : 'Sitting down', get_up: 'Getting up', guide: guide && `Guiding you to ${guide.destination.name}`, go_to: guide && `Going to ${guide.destination.name}`, resume_routine: 'Returning to my routine' }[action];
   return { ok: true, reply: replies[action], status: state.status };
 }
@@ -206,12 +219,71 @@ export function queueResidentLift(body, from, to, navigation) {
   return true;
 }
 
+// When a plan's step is over: its own end (arriving, sitting down, standing,
+// getting home), its duration, or its condition. Waiting until the player
+// comes back counts only after they have been away; following until they
+// stop, only after they have walked off.
+function stepEnded(body, state, step, dt, player, navigation) {
+  if (body.residentAction !== state) return true;
+  if (step.seconds && state.time >= step.seconds) return true;
+  const gap = distance(body, player), level = Math.abs(player.y - body.y) < 1.3, away = navigation.onFoot === false || !level;
+  switch (step.until) {
+    case 'player_returns':
+      if (away || gap >= 8) state.armed = true;
+      return !!state.armed && !away && gap < 3;
+    case 'player_leaves': return away || gap >= 10;
+    case 'player_stops': {
+      const moved = state.lastPlayer ? distance(state.lastPlayer, player) : Infinity;
+      state.lastPlayer = point(player);
+      state.still = moved < .5 * dt ? (state.still ?? 0) + dt : 0;
+      if (distance(state.from, player) > 3) state.armed = true;
+      return !!state.armed && state.still >= 3 && level && gap < FOLLOW_GAP + 1.5;
+    }
+    case 'place': return distance(body, step.place) < 4 && Math.abs(body.y - step.place.y) < 1.3;
+  }
+  return !!state.arrived || !!state.stood || step.action === 'sit_down' && (body.pose === 'sit' || state.sitProgress === 1);
+}
+
+// Start the step after one that has ended, from the top again for a repeating
+// plan, at most one a frame. A step that cannot start leaves the resident
+// waiting where they are.
+function continuePlan(body, state, dt, player, navigation) {
+  const plan = state.plan, step = plan.steps[plan.index];
+  plan.time = (plan.time ?? 0) + dt;
+  if (!stepEnded(body, state, step, dt, player, navigation)) return;
+  let index = plan.index + 1;
+  if (index === plan.steps.length) {
+    // A pass that took no time would run every step at once, forever.
+    if (!plan.repeat || plan.time < 1) return finishPlan(body, state, step);
+    index = 0; plan.time = 0;
+  }
+  const next = beginStep(body, plan, index, player, navigation);
+  if (!next.ok) finishPlan(body, state, step, next.reply);
+}
+
+// A last step with its own end leaves the resident waiting where they are,
+// seated if they sat down, until asked to go back to their routine.
+function finishPlan(body, state, step, status = null) {
+  state.plan = null;
+  if (body.residentAction !== state || !status && !step.until && !step.seconds) return;
+  state.kind = 'wait'; state.route = [];
+  state.status = status ?? (state.sitProgress || body.pose === 'sit' ? 'Seated here' : 'Waiting here');
+}
+
 /** Advance a resident's accepted intention using ordinary game time, never an LLM call. */
 export function stepResidentAction(body, dt, player, navigation) {
   const state = body.residentAction;
   if (!state || dt <= 0) return 0;
   body.speed = 0;
   if (body.talking) return 0;
+  state.time = (state.time ?? 0) + dt;
+  const moved = stepActivity(body, dt, player, navigation);
+  if (state.plan) continuePlan(body, state, dt, player, navigation);
+  return moved;
+}
+
+function stepActivity(body, dt, player, navigation) {
+  const state = body.residentAction;
   if (!state.transition && state.kind === 'sit_down') {
     if (body.pose === 'sit') { state.status = 'Seated here'; return 0; }
     if (state.sitProgress === 0 && !roomToSitDown(body, body.yaw, player, navigation)) { state.status = 'Waiting for space to sit down'; return 0; }
@@ -249,16 +321,13 @@ export function stepResidentAction(body, dt, player, navigation) {
     }
   }
   if (state.transition) return stepSeat(body, dt, player, navigation);
-  if (state.kind === 'get_up') { state.kind = 'wait'; state.status = 'Standing here'; return 0; }
+  if (state.kind === 'get_up') { state.kind = 'wait'; state.stood = true; state.status = 'Standing here'; return 0; }
   if (state.kind === 'wait') return 0;
   if (state.kind === 'dance') { state.elapsed += dt; state.status = 'Dancing'; return 0; }
   if (traveling && reached(body, state.target, .35)) {
-    state.kind = 'wait'; state.status = `Arrived at ${state.destination.name}`; state.route = []; return 0;
+    state.kind = 'wait'; state.arrived = true; state.status = `Arrived at ${state.destination.name}`; state.route = []; return 0;
   }
   if (state.kind === 'resume_routine' && body.pose === 'sit') { body.residentAction = null; return 0; }
-  if (state.kind === 'move_aside' && distance(body, state.target) < .06) {
-    state.kind = 'wait'; state.status = 'Waiting out of your way'; return 0;
-  }
   if (state.kind === 'resume_routine' && distance(body, state.home) < .06 && Math.abs(body.y - state.home.y) < .1) {
     const home = trace(body, state.home, navigation);
     if (home) {
@@ -305,7 +374,7 @@ export function stepResidentAction(body, dt, player, navigation) {
     }
   }
   const routeIndex = state.routeIndex ?? 0;
-  const target = state.kind === 'move_aside' ? state.target : state.route[routeIndex] ?? (following ? player : traveling ? state.target : state.home);
+  const target = state.route[routeIndex] ?? (following ? player : traveling ? state.target : state.home);
   const gap = following && routeIndex >= state.route.length - 1 && Math.abs(body.y - target.y) < .3 ? FOLLOW_GAP : 0;
   const remaining = Math.max(0, distance(body, target) - gap);
   if (!remaining) return 0;
@@ -328,12 +397,14 @@ export function stepResidentAction(body, dt, player, navigation) {
     // Record the actual safe route back, including turns. Never evict its
     // beginning: reaching the bound stops movement instead of losing home.
     if (breadcrumb(state.trail, before)) {
-      if (state.trail.length >= TRAIL_LIMIT) { state.status = 'Waiting here; too far from my routine'; return 0; }
-      state.trail.push(before);
+      const loop = loopBack(state.trail, before, navigation);
+      if (loop >= 0) state.trail.length = loop + 1;
+      else if (state.trail.length >= TRAIL_LIMIT) { state.status = 'Waiting here; too far from my routine'; return 0; }
+      else state.trail.push(before);
     }
   }
   Object.assign(body, next); body.speed = distance(before, body) / dt;
   if (state.route.length && reached(body, target)) { state.route.splice(0, routeIndex + 1); state.routeIndex = 0; state.shortcutBlocked = false; state.repath = 0; }
-  state.status = following ? 'Following you' : traveling ? `${guiding ? 'Guiding you to' : 'Going to'} ${state.destination.name}` : state.kind === 'move_aside' ? 'Moving aside' : 'Returning to my routine';
+  state.status = following ? 'Following you' : traveling ? `${guiding ? 'Guiding you to' : 'Going to'} ${state.destination.name}` : 'Returning to my routine';
   return distance(before, body);
 }

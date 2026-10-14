@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { mkdir, writeFile } from 'node:fs/promises';
 
-// RESIDENT_REAL=1 exercises the actual Qwen 2B worker, including its download,
+// RESIDENT_REAL=1 exercises the actual Qwen 0.8B worker, including its download,
 // WebGPU self-check and constrained decoding. Otherwise use a stand-in model
 // to verify the real city, action dispatch, UI and mobile layout quickly.
 const require = createRequire(import.meta.url);
@@ -43,9 +43,11 @@ try {
     if (!real) {
       model.gpu = { requestAdapter: async () => ({ info: {} }) };
       model.backend = async () => ({ async generate(messages, onText, format) {
+        // Exact commands never reach the model; this stands in for the rest.
         const line = messages.at(-1).content.toLowerCase();
-        const action = line === 'follow me.' ? 'follow' : line === 'wait here.' ? 'wait' : line === 'please move aside.' ? 'move_aside' : line === 'go back to your routine.' ? 'resume_routine' : 'none';
-        onText(format ? JSON.stringify({ action }) : 'Evening. Rain again.');
+        const step = (action, seconds = 0) => ({ action, destination: '', until: '', seconds });
+        const steps = line === 'dance for ten seconds, then wait here.' ? [step('dance', 10), step('wait')] : [step('none')];
+        onText(format ? JSON.stringify({ steps, repeat: false }) : 'Evening. Rain again.');
       }, interrupt() {}, async unload() {} });
     }
     window.residentLoad = model.setEnabled(true);
@@ -59,7 +61,7 @@ try {
     const cases = [
       ['Follow me.', 'follow'], ['Come with me.', 'follow'], ['Could you walk with me?', 'follow'], ['Keep me company while I walk.', 'follow'],
       ['Wait here.', 'wait'], ['Stay put until I come back.', 'wait'], ['Stop following me and wait.', 'wait'], ['Do not follow me.', 'wait'],
-      ['Please move aside.', 'move_aside'], ['Excuse me, can I get past?', 'move_aside'], ['You are blocking the way. Could you step aside?', 'move_aside'],
+      ['Go to the station and wait there until I come back.', 'go_to, wait'], ['Dance for 30 seconds, then sit down.', 'dance, sit_down'],
       ['Go back to your routine.', 'resume_routine'], ['Carry on with what you were doing.', 'resume_routine'], ['You can get back to work now.', 'resume_routine'],
       ['Hello.', 'none'], ['What do you do?', 'none'], ['Is it always raining here?', 'none'],
       ['What happens if I say follow me?', 'none'], ['Tell me a story about someone saying "wait here".', 'none'],
@@ -67,10 +69,11 @@ try {
     ];
     for (const [line, expected] of cases) {
       const result = await page.evaluate(async ({ line, expected }) => {
-        const { DECISION_FORMAT, decisionMessages, parseDecision } = await import('/src/engine/residents/decisions.js');
+        const { DECISION_FORMAT, decisionMessages, parseDecision, planSummary } = await import('/src/engine/residents/decisions.js');
         const start = performance.now();
         const raw = await window.__AFTERLIGHT__.residents.model.generate(decisionMessages(line, { behavior: 'routine', status: 'Going about my day', canWalk: true, area: 'outside' }), { responseFormat: DECISION_FORMAT });
-        return { line, expected, raw, parsed: parseDecision(raw), ms: Math.round(performance.now() - start) };
+        const parsed = parseDecision(raw);
+        return { line, expected, raw, parsed, pass: (planSummary(parsed) || 'none') === expected, ms: Math.round(performance.now() - start) };
       }, { line, expected });
       results.decisions.push(result); console.log(JSON.stringify(result));
     }
@@ -105,7 +108,7 @@ try {
   }
   await awaitingPlayer();
   assert.equal(await page.locator('#resident-chat').getAttribute('aria-modal'), null);
-  assert.equal(await page.locator('#resident-chat-model').count(), 0, 'no 0.8B selector');
+  assert.equal(await page.locator('#resident-chat-model').count(), 0, 'no model selector');
   const liveStart = await page.evaluate(() => window.__AFTERLIGHT__.snapshot());
   assert.equal(liveStart.paused, false); assert.equal(liveStart.modal, null);
   await page.waitForTimeout(1000);
@@ -192,10 +195,11 @@ try {
   await page.waitForTimeout(1200);
   const afterWait = await page.evaluate(() => window.__AFTERLIGHT__.snapshot().population.interactions[0]);
   assert.equal(afterWait.x, waiting.x); assert.equal(afterWait.z, waiting.z);
-  await reopen(); await request('Please move aside.', 'move_aside');
+  await reopen(); await request('Dance for ten seconds, then wait here.', 'dance, wait');
   await page.keyboard.press('Escape');
   assert.equal((await page.evaluate(() => window.__AFTERLIGHT__.snapshot())).paused, false, 'Escape says bye before opening pause');
-  await page.waitForFunction(() => window.__AFTERLIGHT__.snapshot().population.interactions.some(p => p.action === 'wait'), null, { timeout: 10000 });
+  await page.waitForFunction(() => window.__AFTERLIGHT__.snapshot().population.interactions.some(p => p.action === 'dance'), null, { timeout: 10000 });
+  await page.waitForFunction(() => window.__AFTERLIGHT__.snapshot().population.interactions.some(p => p.action === 'wait'), null, { timeout: 15000 });
   await reopen(); await request('Go back to your routine.', 'resume_routine');
   // Check the actual conversation panel at narrow and short touch sizes.
   for (const [width, height] of [[390, 844], [844, 390], [320, 568], [568, 320]]) {

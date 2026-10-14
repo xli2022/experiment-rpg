@@ -21,8 +21,9 @@ export function createResidentNavigation({ world, people = () => [], cars = () =
       mobile: true, area: contextAt(body)?.inside ? 'inside the building' : 'outside',
       crossing: body.edge?.kind === 'crossing', onFoot: onFoot(), liftValid,
       destinations: () => residentDestinations(world, body),
+      // A place by ID, among those nearby now, or a place a plan bound earlier.
       guide(start, id) {
-        const destination = navigation.destinations().find(place => place.id === id);
+        const destination = typeof id === 'object' ? id : navigation.destinations().find(place => place.id === id);
         if (!destination) return null;
         const route = planResidentGuide(start, destination, navigation);
         return route && { destination, route };
