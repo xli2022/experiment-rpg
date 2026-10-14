@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, opener, TOPICS, HISTORY_TURNS } from '../src/engine/residents/persona.js';
-import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODELS } from '../src/engine/residents/model.js';
+import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, opener, HISTORY_TURNS } from '../src/engine/residents/persona.js';
+import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODEL } from '../src/engine/residents/model.js';
 import { ResidentConversation, facingResident, settingsNote, MAX_LINE } from '../src/engine/residents/conversation.js';
 import { createStorage } from '../src/engine/save.js';
 import { gameClock } from '../src/engine/clock.js';
@@ -109,7 +109,6 @@ test('the brief is short, concrete and keeps the model in the city', () => {
   assert.equal(messages[1].content, 'line 4', 'only the latest exchanges');
   assert.equal(messages.at(-1).content, 'What do you do?');
   assert.ok(['Hey there.', 'Hi.', 'Hello.', 'Got a minute?'].includes(opener(person)));
-  assert.equal(TOPICS.length, 3);
 });
 
 test('replies are cleaned into a few spoken sentences, or rejected', () => {
@@ -169,9 +168,9 @@ test('resident chat stays off until the player turns it on, then remembers', asy
   assert.equal(engines.length, 0);
   assert.equal(await model.setEnabled(true), true);
   assert.equal(model.status, 'ready');
-  assert.equal(engines[0].model, RESIDENT_MODELS.small.id, 'the lighter model unless the player picks the other');
+  assert.equal(engines[0].model, RESIDENT_MODEL.id, '2B supports conversations and actions by default');
   assert.deepEqual(seen, ['off', 'checking', 'loading:Starting', 'loading:Downloading', 'loading:Preparing the graphics card', 'ready']);
-  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true, size: 'small' });
+  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true });
   // The next visit loads it again when play starts.
   const later = new ResidentModel({ storage, gpu: gpu(), backend });
   assert.equal(later.status, 'idle');
@@ -201,41 +200,19 @@ test('without WebGPU, or when loading fails, the setting explains and the game p
   assert.match(settingsNote(failing.snapshot()), /stopped: Network error Turn it off and on/);
 });
 
-test('the player picks the model size, and a loaded or loading model gives way to the other', async () => {
-  const storage = memoryStorage(), { backend, engines } = fakeBackend();
-  const model = new ResidentModel({ storage, gpu: gpu(), backend });
-  assert.equal(model.snapshot().size, 'small');
-  assert.equal(await model.setSize('large'), false, 'while off the choice is only remembered');
-  assert.equal(engines.length, 0);
-  assert.equal(new ResidentModel({ storage }).size, 'large', 'and kept for the next visit');
-  assert.equal(await model.setEnabled(true), true);
-  assert.equal(engines[0].model, RESIDENT_MODELS.large.id);
-  assert.equal(await model.setSize('small'), true);
-  assert.equal(engines[0].unloads, 1, 'the other size is released');
-  assert.deepEqual([engines[1].model, model.status, model.snapshot().size], [RESIDENT_MODELS.small.id, 'ready', 'small']);
-  assert.equal(await model.setSize('huge'), true, 'an unknown size changes nothing');
-  assert.deepEqual([model.size, engines.length], ['small', 2]);
-  storage.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled: true, size: 'huge' }));
-  assert.equal(new ResidentModel({ storage }).size, 'small');
-  // Picking again mid-download stops that download and fetches the new pick.
-  const loads = [], idle = new ResidentModel({ storage: memoryStorage(), gpu: gpu(), backend: (id, progress, signal) => new Promise((resolve, reject) => {
-    // As WebLLM's worker does, an aborted download ends in an error.
-    signal.addEventListener('abort', () => reject(new Error('the model was unloaded.')));
-    loads.push({ id, signal, done: () => resolve({ async unload() {} }) });
-  }) });
-  const first = idle.setEnabled(true);
-  await tick(); await tick();
-  const second = idle.setSize('large');
-  await tick(); await tick();
-  assert.deepEqual(loads.map(l => [l.id, l.signal.aborted]), [[RESIDENT_MODELS.small.id, true], [RESIDENT_MODELS.large.id, false]]);
-  loads[1].done();
-  assert.deepEqual([await first, await second, idle.status, idle.model], [false, true, 'ready', RESIDENT_MODELS.large.id]);
-  // After a failed load, picking the other size tries again with it.
-  const failing = new ResidentModel({ storage: memoryStorage(), gpu: gpu(), backend: fakeBackend({ fail: 'Out of memory' }).backend });
-  await failing.setEnabled(true);
-  assert.equal(failing.status, 'error');
-  failing.backend = backend;
-  assert.equal(await failing.setSize('large'), true);
+test('legacy model choices migrate to the only resident model, Qwen 2B', async () => {
+  for (const size of ['small', 'large', 'unknown']) {
+    const storage = memoryStorage(), { backend, engines } = fakeBackend();
+    storage.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled: true, downloaded: true, size }));
+    const model = new ResidentModel({ storage, gpu: gpu(), backend });
+    assert.equal(model.status, 'idle');
+    assert.equal(model.downloaded, true, 'old downloads can still be deleted');
+    assert.equal(await model.load(), true);
+    assert.equal(engines[0].model, RESIDENT_MODEL.id);
+    assert.equal(model.supportsActions, true);
+    assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true });
+    model.dispose();
+  }
 });
 
 test('a loaded model must repeat a plain sentence before residents use it', () => {
@@ -280,7 +257,7 @@ test('deleting the download turns the setting off', async () => {
   await model.setEnabled(true);
   await model.forget();
   assert.deepEqual([deleted.length, model.enabled, model.downloaded, model.status], [1, false, false, 'off']);
-  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: false, downloaded: false, size: 'small' });
+  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: false, downloaded: false });
   assert.match(settingsNote(model.snapshot()), /^The downloaded model was deleted\. Chat with people/);
 });
 
@@ -306,7 +283,7 @@ test('residents speak each finished reply and fall silent when interrupted or le
   const voice = { speak: (text, profile) => spoken.push([text, profile.id]), stop: () => stops.push(true) };
   let release;
   const model = { generate: (messages, { onText }) => new Promise(resolve => { release = text => { onText(text); resolve(text); }; }), interrupt() {} };
-  const conversation = new ResidentConversation({ model, view: { show() {}, said() {}, reply() {} }, voice });
+  const conversation = new ResidentConversation({ model, view: { show() {}, reply() {} }, voice });
   const persona = residentPersona(walker(8, 'resident-8'));
   const greeting = conversation.open(persona);
   release('Evening. Rain again.'); await greeting;
@@ -317,14 +294,14 @@ test('residents speak each finished reply and fall silent when interrupted or le
   assert.equal(stops.length, before + 2, 'leaving stops it too');
   release('I fix trams.'); await next;
   assert.equal(spoken.length, 1, 'nothing is spoken after leaving');
-  const failing = new ResidentConversation({ model: { generate: async () => { throw new Error('Device was lost.'); }, interrupt() {} }, view: { show() {}, said() {}, reply() {} }, voice });
+  const failing = new ResidentConversation({ model: { generate: async () => { throw new Error('Device was lost.'); }, interrupt() {} }, view: { show() {}, reply() {} }, voice });
   await failing.open(persona);
   assert.deepEqual(spoken.at(-1), [fallbackReply(persona, 0), persona.key], 'fallback lines are spoken as well');
 });
 
 function harness(generate) {
   const calls = [], interrupts = [];
-  const view = { show: (p, topics) => calls.push(['show', p.name, topics.length]), said: line => calls.push(['said', line]), reply: (line, pending) => calls.push(['reply', line, pending]) };
+  const view = { show: p => calls.push(['show', p.name]), reply: (line, pending) => calls.push(['reply', line, pending]) };
   const model = { generate, interrupt: () => interrupts.push(true) };
   return { conversation: new ResidentConversation({ model, view }), calls, interrupts };
 }
@@ -338,7 +315,7 @@ test('a conversation greets, streams each reply and remembers the last few lines
   });
   const persona = residentPersona(walker(5, 'resident-5'));
   assert.equal(await conversation.open(persona), 'Hey. Rain again.');
-  assert.deepEqual(calls, [['show', persona.name, 3], ['said', opener(persona)], ['reply', '', true], ['reply', 'Hey', true], ['reply', 'Hey. Rain again.', true], ['reply', 'Hey. Rain again.', false]]);
+  assert.deepEqual(calls, [['show', persona.name], ['reply', '', true], ['reply', 'Hey', true], ['reply', 'Hey. Rain again.', true], ['reply', 'Hey. Rain again.', false]]);
   assert.deepEqual(sent[0].map(m => m.role), ['system', 'user']);
   assert.equal(await conversation.say('What do you do?'), 'Hey. Rain again. I fix trams.');
   assert.deepEqual(sent[1].map(m => m.role), ['system', 'user', 'assistant', 'user'], 'the greeting is remembered');
@@ -374,8 +351,7 @@ test('a failed or unusable reply becomes a fallback line in the resident’s voi
 });
 
 test('the setting note says what turning it on costs and what it is doing', () => {
-  assert.match(settingsNote({ status: 'off' }), /downloads about 450 MB once\. Story contacts keep their own dialogue\./);
-  assert.match(settingsNote({ status: 'off', size: 'large' }), /downloads about 1\.1 GB once\./, 'the size the player picked');
+  assert.match(settingsNote({ status: 'off' }), /downloads about 1\.1 GB once\. Story contacts keep their own dialogue\./);
   assert.doesNotMatch(settingsNote({ status: 'off' }), /phones/);
   assert.match(settingsNote({ status: 'off' }, true), /phones and tablets may run out of memory/);
   assert.equal(settingsNote({ status: 'loading', progress: .42, message: 'Downloading' }), 'Downloading… 42%. You can keep playing.');

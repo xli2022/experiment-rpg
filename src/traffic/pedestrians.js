@@ -4,6 +4,7 @@ import { CROWD_PROFILES } from '../actors/npc-profiles.js';
 import { createVisitor, VISITOR_PROFILES } from '../actors/npc-visitors.js';
 import { samplePath, projectOnPath } from './network.js';
 import { walkState } from './signals.js';
+import { requestResidentAction, stepResidentAction, residentActionContext } from './resident-actions.js';
 import { angleDelta, circleHitsBox, clamp, overlapsHeight, seededRandom } from '../core/physics.js';
 
 // Walkers on the sidewalk graph: they follow sidewalks around corners, wait
@@ -53,7 +54,7 @@ export function rosterBases(people) {
   }, {});
 }
 
-export function createPedestrians({ scene, network, plan, spatial = null, assets, random = seededRandom(707) }) {
+export function createPedestrians({ scene, network, plan, spatial = null, assets, residentNavigation = null, random = seededRandom(707) }) {
   const graph = network.walk, junctions = new Map(network.nodes.map(n => [n.id, n]));
   const people = createAvatarPool(assets, random);
   const frustum = new THREE.Frustum(), matrix = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 2);
@@ -169,7 +170,7 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
   function retire(person) {
     if (person.follower) retire(person.follower);
     if (person.group) for (const member of person.group.members) if (member !== person) { member.group = null; member.mode = member.mode === 'chat' ? 'walk' : member.mode; }
-    person.mode = null; person.leader = person.follower = person.group = null;
+    person.mode = null; person.leader = person.follower = person.group = null; person.residentAction = null; person.talking = null;
     person.root.visible = false; if (person.root.parent) scene.remove(person.root);
     if (person.jog) { person.avatar.setGait?.(person.gait); person.jog = false; }
   }
@@ -338,6 +339,22 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
 
   return {
     people, count: people.length,
+    actionContext(person) { return residentNavigation ? residentActionContext(person, residentNavigation(person)) : null; },
+    command(person, action, player) {
+      if (!residentNavigation || !person?.mode) return { ok: false, reply: 'I cannot do that here.' };
+      const result = requestResidentAction(person, action, player, residentNavigation(person));
+      if (result.ok && person.residentAction) {
+        // Leave a pair or group without dragging the other people along.
+        if (person.leader) person.leader.follower = null;
+        if (person.follower) { person.follower.leader = null; person.follower.mode = 'walk'; }
+        if (person.group) person.group.members = person.group.members.filter(p => p !== person);
+        person.leader = person.follower = person.group = null;
+        if (person.jog) person.avatar.setGait?.(person.gait);
+        person.jog = false; person.pace = person.basePace;
+        person.mode = 'resident'; person.claim = person.holding = false; person.gesture = null;
+      }
+      return result;
+    },
     archetypes: new Set(people.map(p => p.model)).size,
     drawCalls: people.reduce((sum, p) => { let n = 0; p.root.traverse(o => { if (o.isMesh) n++; }); return sum + n; }, 0),
     get active() { return visibleCount; },
@@ -367,11 +384,11 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
         target = Math.min(people.length, population.pedestrians, Math.floor(length / spacing));
       }
       const safe = p => !camera || !inView(p) || dist(p, player) > radius + SHOW_MARGIN;
-      for (const person of walkers()) if (!person.leader && dist(person, player) > reach + 40 && safe(person)) retire(person);
+      for (const person of walkers()) if (!person.residentAction && !person.talking && !person.leader && dist(person, player) > reach + 40 && safe(person)) retire(person);
       let count = walkers().length;
       for (const person of walkers().sort((a, b) => dist(b, player) - dist(a, player))) {
         if (count <= target) break;
-        if (!person.leader && !person.group && safe(person)) { count -= person.follower ? 2 : 1; retire(person); }
+        if (!person.residentAction && !person.talking && !person.leader && !person.group && safe(person)) { count -= person.follower ? 2 : 1; retire(person); }
       }
       // A first placement fills at once; later arrivals trickle in out of sight.
       if (spawnTime <= 0) {
@@ -389,14 +406,20 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
       visibleCount = 0; list = walkers();
       for (const person of list) {
         let moved = 0;
-        if (person.mode === 'follow') moved = person.leader?.mode ? follow(person, dt) : (person.mode = 'walk', 0);
+        if (person.talking && person.edge?.kind !== 'crossing') {
+          person.speed = 0;
+          person.yaw += clamp(angleDelta(person.yaw, Math.atan2(-(player.x - person.x), -(player.z - person.z))), -2.6 * dt, 2.6 * dt);
+        } else if (person.residentAction) {
+          moved = stepResidentAction(person, dt, player, residentNavigation(person));
+          if (!person.residentAction) { person.mode = 'walk'; person.pauseIn = 15 + random() * 30; }
+        } else if (person.mode === 'follow') moved = person.leader?.mode ? follow(person, dt) : (person.mode = 'walk', 0);
         else if (person.mode === 'chat') {
           person.timer -= dt;
           if (person.timer <= 0) { person.mode = 'walk'; person.group = null; person.wantOffset = person.offset = .5; }
         } else moved = steer(person, dt, time, cars, onFoot ? player : null);
         person.root.position.set(person.x, person.y, person.z); person.root.rotation.y = person.yaw;
         person.elapsed += dt; person.travelled += moved;
-        const d = dist(person, player), show = d < radius + (person.shown ? SHOW_MARGIN : 0) && (!camera || inView(person));
+        const d = dist(person, player), show = d < radius + (person.shown ? SHOW_MARGIN : 0) && (!camera || inView(person)) && (residentNavigation?.(person).visible?.() ?? true);
         person.shown = show; person.root.visible = show;
         if (!show) { if (person.root.parent) scene.remove(person.root); continue; }
         if (!person.root.parent) scene.add(person.root);
@@ -414,7 +437,8 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
         if (p.jog) behaviors.jogging++;
       }
       return { capacity: people.length, target, assigned: assigned.length, active: visibleCount, species, behaviors,
-        humanBases: rosterBases(assigned), rosterHumanBases: rosterBases(people), spacing, district, quality, edges: nearby.length };
+        humanBases: rosterBases(assigned), rosterHumanBases: rosterBases(people), spacing, district, quality, edges: nearby.length,
+        interactions: assigned.filter(p => p.residentAction).map(p => ({ id: p.id, action: p.residentAction.kind, status: p.residentAction.status, x: p.x, y: p.y, z: p.z })) };
     },
     dispose() { for (const person of people) { retire(person); person.avatar.dispose?.(); } },
   };

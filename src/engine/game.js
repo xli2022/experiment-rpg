@@ -54,7 +54,7 @@ export async function createGame({ canvas, modes }) {
   const vector = new THREE.Vector3(), cameraRig = createCameraRig(), cutawayFader = createCutawayFader();
   let cutawaySurfaces = [];
   let renderer, composer, bloom, world, character, hud, input, scene, camera, traffic, shadows, contactShadows, parachute, effects, weapon, ui, assets, residents;
-  let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0, lastDrawn = 0;
+  let driving = null, nearestCar = null, quality = 'high', animationId, cameraYaw = 0, cameraPitch = .12, fps = 60, lastFrame = performance.now(), lastUI = 0, lastSavedAt = 0;
   let definition = null, mode = null, host = null, contactSourcesRef = new Set(), owned = [];
 
   // --- Modes ---------------------------------------------------------------
@@ -103,6 +103,7 @@ export async function createGame({ canvas, modes }) {
   }
   function deactivate({ toPicker = true } = {}) {
     if (!mode) return;
+    residents.finish({ commit: false, focus: false });
     save();
     if (driving) { driving.speed = 0; driving = null; }
     for (const car of [...owned]) removeDrivableCar(car);
@@ -274,6 +275,7 @@ export async function createGame({ canvas, modes }) {
   }
   /** Move the player (and camera) to a spot. By default a cut, so traffic and shadows reset too. */
   function placeAt(spot, { cameraYaw: yaw, cameraPitch: pitch, playerYaw, cut = true } = {}) {
+    if (cut) residents?.finish({ commit: false, focus: state.started && !state.paused });
     if (driving) { driving.speed = 0; driving = null; }
     resetTraversal();
     player.x = spot.x; player.z = spot.z; player.y = Math.max(spot.y ?? terrainHeight(spot.x, spot.z), terrainHeight(spot.x, spot.z));
@@ -303,6 +305,7 @@ export async function createGame({ canvas, modes }) {
     const y = levelY(context.plan, level), target = world.interiorContextAt(player.x, y, player.z), spatial = world.spatialFor(target);
     const floor = supportHeight(player.x, player.z, spatial.near(player.x, player.z, 2), y + .3, terrainHeight(player.x, player.z));
     if (Math.abs(floor - y) > .05 || nearbyColliders(player.x, player.z, 2, null, spatial).some(box => !box.supportOnly && overlapsHeight(box, y) && circleHitsBox(player.x, player.z, .43, box))) return false;
+    traffic.residentLift(player, { x: player.x, y, z: player.z });
     resetTraversal(); player.y = player.groundY = y; player.interior = target;
     player.vx = player.vz = player.speed = player.velocityY = 0; player.jumpPhase = '';
     updateCharacter(.016); updateCamera(.016, true); input.clear();
@@ -359,15 +362,16 @@ export async function createGame({ canvas, modes }) {
     const distance = sightDirection.length();
     return rayObstructionDistance(sightFrom, sightDirection.divideScalar(distance), distance, scenery()) > distance - .3;
   }
-  // People on this floor when indoors, otherwise the passers-by in view.
+  // Identity stays with the original population as residents cross entrances
+  // and floors. Use their current position and sight line to offer a chat.
   function residentCandidates() {
-    const inside = player.interior?.inside ? player.interior : null;
-    return inside
-      ? traffic.occupants.visible.filter(p => p.occupant.plan.id === inside.id && p.occupant.level === inside.level).map(p => ({ x: p.occupant.x, y: p.occupant.y, z: p.occupant.z, seated: p.occupant.pose === 'sit', indoors: true, person: p }))
-      : traffic.pedestrians.walkers.filter(p => p.shown).map(p => ({ x: p.x, y: p.y, z: p.z, person: p }));
+    return [
+      ...traffic.occupants.visible.map(p => ({ x: p.occupant.x, y: p.occupant.y, z: p.occupant.z, seated: p.occupant.pose === 'sit', indoors: true, person: p })),
+      ...traffic.pedestrians.walkers.filter(p => p.shown).map(p => ({ x: p.x, y: p.y, z: p.z, person: p })),
+    ];
   }
   function residentAhead() {
-    if (!residents.ready || driving || player.climb || player.vault || player.parachute) return null;
+    if (!residents.ready || residents.active || driving || player.climb || player.vault || player.parachute) return null;
     const near = facingResident(player, residentCandidates(), inSight);
     if (!near) return null;
     const district = world.districtAt(near.x, near.z);
@@ -378,6 +382,7 @@ export async function createGame({ canvas, modes }) {
   // --- Player actions ----------------------------------------------------------
   function interact() {
     if (!state.started || state.paused) return;
+    if (residents.active) { residents.finish(); return; }
     if (player.vault || player.parachute) return;
     if (player.climb) { dropClimb(player); return; }
     if (driving) {
@@ -584,9 +589,10 @@ export async function createGame({ canvas, modes }) {
       updateCamera(dt); weapon.update(dt); effects.update(dt, state.time);
       if (mode) mode.update?.(dt, { now: now / 1000, time: state.time, player, driving, camera });
     }
-    world.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused, driving: !!driving });
+    world.update({ camera, focus: player, interior: player.interior, now: now / 1000, dt, paused: state.paused, driving: !!driving, residents: traffic.residentTravelers() });
     // People inside stand only on the floors standing after this update.
     traffic.occupants.update(state.paused ? 0 : dt, { player, camera, floors: world.interiors.floors(), time: state.time });
+    residents.update(player, camera);
     // Retire distant abandoned takeovers only after they are outside the visible
     // car range. Nearby cars and the vehicle being driven never disappear.
     if (owned.length > 8) for (const car of [...owned]) {
@@ -615,10 +621,6 @@ export async function createGame({ canvas, modes }) {
     if (!state.paused && document.hasFocus() && !world.stream.stats.queued && resolution.sample(rawDt, RENDER_PROFILES[quality].minScale)) applyResolution();
     renderer.info.reset();
     frameCosts.updateMs = damp(frameCosts.updateMs, performance.now() - updateStart, 3, dt);
-    // A resident conversation pauses the world: redraw the still scene a few
-    // times a second and leave the graphics card to the language model.
-    if (state.modal === 'resident-chat' && now - lastDrawn < 250) return;
-    lastDrawn = now;
     const renderStart = performance.now();
     if (quality === 'high') composer.render(); else renderer.render(scene, camera);
     frameCosts.renderMs = damp(frameCosts.renderMs, performance.now() - renderStart, 3, dt);
@@ -636,7 +638,8 @@ export async function createGame({ canvas, modes }) {
       rendering: { triangles: renderer.info.render.triangles, geometries: renderer.info.memory.geometries, textures: renderer.info.memory.textures, pixelRatio: renderer.getPixelRatio() },
       performance: { ...frameCosts, scale: resolution.scale, activeCrowd: traffic.pedestrians.active, streaming: { ...world.stream.stats }, blueprints: world.metropolis.blocks.size }, population: traffic.pedestrians.snapshot(),
       shadows: { ...shadows.snapshot(), contacts: contactShadows.snapshot() }, traffic: traffic.snapshot(), occupants: traffic.occupants.snapshot(),
-      voice: voice.snapshot(), residents: { ...residents.snapshot(), nearby: residentCandidates().map(c => ({ x: c.x, y: c.y, z: c.z, distance: Math.hypot(c.x - player.x, c.z - player.z), c })).sort((a, b) => a.distance - b.distance).slice(0, 5).map(({ c, ...near }) => ({ ...near, inSight: inSight(c) })), ahead: !!residentAhead() },
+      voice: voice.snapshot(), residents: { ...residents.snapshot(), nearby: residentCandidates().map(c => ({ x: c.x, y: c.y, z: c.z, distance: Math.hypot(c.x - player.x, c.z - player.z), c })).sort((a, b) => a.distance - b.distance).slice(0, 5).map(({ c, ...near }) => ({ ...near, inSight: inSight(c), yaw: c.person.occupant?.yaw ?? c.person.yaw,
+        resident: c.indoors ? occupantResident(c.person, world.districtAt(c.x, c.z)) : walkerResident(c.person, world.districtAt(c.x, c.z)) })), ahead: !!residentAhead() },
       city: { span: world.limit * 2, areaKm2: (world.limit * 2 / 1000) ** 2, districts: world.districts.length, roads: world.plan.roads.length, vertical: true },
       character: { bones: character.bones.size, animations: Object.keys(character.clips), activeAnimation: character.animation, jumpPhase: player.jumpPhase, speed: player.speed, combatWeight: character.combatWeight, crowdCount: traffic.pedestrians.count, crowdDrawCalls: traffic.pedestrians.drawCalls, muzzle: character.muzzle.getWorldPosition(new THREE.Vector3()).toArray() },
       camera: { x: camera.position.x, y: camera.position.y, z: camera.position.z, fov: camera.fov, aspect: camera.aspect },
@@ -671,16 +674,22 @@ export async function createGame({ canvas, modes }) {
     effects = createEffects(scene);
     hud = new HUD(world);
     input = new Input(canvas, {
-      interact, jump, map: toggleMap, pause: () => ui.togglePause(),
+      interact, jump, map: toggleMap, pause: () => { if (residents?.active) residents.finish(); else ui.togglePause(); },
       reload: () => weapon.reload(), fire: () => weapon.fire(),
       journal: () => mode?.onAction?.('journal'), medkit: () => mode?.onAction?.('medkit'),
       blur: () => { mode?.onMenu?.(); voice.stop(); if (state.started && !state.paused) ui.setPause(true); }, audio: () => audio.init(),
     });
     ui = createUI({ state, input, audio, onMenu: id => { mode?.onMenu?.(id); residents?.onMenu(id); if (id && state.started) save(); } });
-    residents = createResidentChat({ ui, hud, storage, voice, touch: input.touch, playing: () => state.started });
+    residents = createResidentChat({ hud, storage, voice, touch: input.touch, playing: () => state.started && !state.paused,
+      controls: { engage: (active, focus) => input.setConversation(active, focus), focus: () => input.clear() },
+      actions: {
+        position: resident => traffic.residentPosition(resident.handle), talk: (resident, active) => traffic.talkToResident(resident.handle, active),
+        context: resident => traffic.residentContext(resident.handle), prepare: (resident, action) => traffic.previewResident(resident.handle, action, player),
+        execute: (resident, action) => traffic.commandResident(resident.handle, action, player),
+      } });
     owned = traffic.owned;
     weapon = createWeapon({ camera, character, audio, effects, hud, input, traffic }, {
-      canAct: () => state.started && !state.paused && !driving && !player.climb && !player.vault && !player.parachute,
+      canAct: () => state.started && !state.paused && !residents.active && !driving && !player.climb && !player.vault && !player.parachute,
       scenery, ownedCars: () => owned, allCars, shot: () => characterShot(character), breakWindow,
     });
     attachMapControls({ view: world.mapView, canvas: $('full-map'), position: () => player, onPick: (x, y) => mode?.mapPick?.(x, y) });
@@ -694,7 +703,7 @@ export async function createGame({ canvas, modes }) {
     $('loading').style.opacity = '0'; setTimeout(() => $('loading').classList.add('hidden'), 500);
     lastFrame = performance.now(); frame(lastFrame);
     document.addEventListener('visibilitychange', () => { if (document.hidden) { mode?.onMenu?.(); voice.stop(); } });
-    window.addEventListener('pagehide', () => { mode?.onMenu?.(); voice.stop(); save(); if (animationId) cancelAnimationFrame(animationId); });
+    window.addEventListener('pagehide', () => { residents.finish({ commit: false, focus: false }); mode?.onMenu?.(); voice.stop(); save(); if (animationId) cancelAnimationFrame(animationId); });
     window.addEventListener('pageshow', event => { if (event.persisted) { lastFrame = performance.now(); frame(lastFrame); } });
   }
 

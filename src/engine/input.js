@@ -31,6 +31,7 @@ export class Input {
     canvas.addEventListener('pointerdown', e => {
       if (!this.enabled || e.pointerType === 'touch') return;
       callbacks.audio();
+      canvas.focus({ preventScroll: true });
       this.dragging = true; this.lastX = e.clientX; this.lastY = e.clientY;
       if (!document.pointerLockElement) this.lock();
     });
@@ -66,6 +67,7 @@ export class Input {
       el.addEventListener('pointerdown', e => {
         if (!this.enabled || owner !== null) return;
         e.preventDefault(); e.stopPropagation(); owner = e.pointerId;
+        if (this.chatting) canvas.focus({ preventScroll: true });
         el.setPointerCapture(e.pointerId); active(true); callbacks.audio(); onDown(e);
       });
       el.addEventListener('pointermove', e => { if (this.enabled && e.pointerId === owner) onMove(e); });
@@ -99,12 +101,18 @@ export class Input {
     this.resetTouch = () => { for (const reset of resets) reset(); };
   }
   lock() {
-    if (this.touch || !this.enabled || document.pointerLockElement === this.canvas || !this.canvas.requestPointerLock) return;
+    if (this.touch || this.chatting || !this.enabled || document.pointerLockElement === this.canvas || !this.canvas.requestPointerLock) return;
     try { const pending = this.canvas.requestPointerLock(); pending?.catch(() => {}); } catch { /* Drag-look remains available when pointer lock is blocked. */ }
   }
   clear() {
     this.keys.clear(); this.firing = this.aiming = this.dragging = false; this.joyX = this.joyY = this.lookX = this.lookY = 0;
     this.resetTouch();
+  }
+  /** Free the cursor for live conversation controls without disabling play. */
+  setConversation(active, focus = true) {
+    this.chatting = active;
+    if (active) { this.clear(); if (document.pointerLockElement) document.exitPointerLock(); }
+    else if (focus && this.enabled) { this.canvas.focus({ preventScroll: true }); this.lock(); }
   }
   setEnabled(enabled) {
     this.enabled = enabled; this.clear();

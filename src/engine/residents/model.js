@@ -1,20 +1,14 @@
 // A small language model for background residents, run in the player's own
 // browser on the graphics card (WebGPU). It stays off until the player turns
-// it on in the pause menu; the weights of the size they pick (about 450 MB or
-// 1.1 GB) then download once from Hugging Face into the browser's cache.
+// it on in the pause menu; the 2B weights (about 1.1 GB) then download once
+// from Hugging Face into the browser's cache.
 // Story contacts never use it.
 
 export const RESIDENT_CHAT_KEY = 'afterlight.resident-chat.v1';
-// Qwen3.5 in 4 bits, computing in 32-bit floats on every graphics card, in
-// two sizes the player picks between: 0.8B is lighter (1.9 GB of graphics
-// memory), 2B keeps to the topic and in character far better (2.6 GB).
-// 0.8B's f16 build, used where the GPU had shader-f16, wrote broken tokens on
-// Mac and Windows; downloads of it are deleted when a model next loads.
-export const RESIDENT_MODELS = Object.freeze({
-  small: Object.freeze({ id: 'Qwen3.5-0.8B-q4f32_1-MLC', download: '450 MB' }),
-  large: Object.freeze({ id: 'Qwen3.5-2B-q4f32_1-MLC', download: '1.1 GB' }),
-});
-export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC']);
+// Qwen3.5 2B in 4 bits, computing in 32-bit floats on every graphics card
+// (about 2.6 GB of graphics memory). Old 0.8B downloads are removed on load.
+export const RESIDENT_MODEL = Object.freeze({ id: 'Qwen3.5-2B-q4f32_1-MLC', download: '1.1 GB' });
+export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC', 'Qwen3.5-0.8B-q4f32_1-MLC']);
 // Short, fairly focused replies: a person talking, not an essay.
 export const SAMPLING = Object.freeze({ max_tokens: 80, temperature: .7, top_p: .8, presence_penalty: 1.5, frequency_penalty: 0 });
 // Once loaded, the model must repeat a plain sentence. A model that computes
@@ -35,12 +29,11 @@ export async function detectGPU(gpu, { allowSoftware = false } = {}) {
   return { supported: true };
 }
 
-const knownSize = size => Object.hasOwn(RESIDENT_MODELS, size ?? '');
 function readSettings(storage) {
   try {
     const saved = JSON.parse(storage?.getItem(RESIDENT_CHAT_KEY) ?? 'null');
-    return { enabled: saved?.enabled === true, downloaded: saved?.downloaded === true, size: knownSize(saved?.size) ? saved.size : 'small', allowSoftwareGpu: saved?.allowSoftwareGpu === true };
-  } catch { return { enabled: false, downloaded: false, size: 'small', allowSoftwareGpu: false }; }
+    return { enabled: saved?.enabled === true, downloaded: saved?.downloaded === true, allowSoftwareGpu: saved?.allowSoftwareGpu === true };
+  } catch { return { enabled: false, downloaded: false, allowSoftwareGpu: false }; }
 }
 
 // What WebLLM is doing, from its progress text.
@@ -84,14 +77,17 @@ async function webLLM(model, onProgress, signal) {
     if (!passesSelfCheck(text)) throw new Error(UNREADABLE);
   } catch (error) { worker.terminate(); throw error; }
   return {
-    generate: (messages, onText) => worker.request('generate', { request: { messages, ...SAMPLING, extra_body: { enable_thinking: false } } }, { onEvent: event => onText(event.text), stall: 60000 }),
+    generate: (messages, onText, responseFormat) => worker.request('generate', { request: {
+      messages, ...SAMPLING, ...(responseFormat ? { response_format: responseFormat, max_tokens: 64, temperature: 0, presence_penalty: 0 } : {}),
+      extra_body: { enable_thinking: false },
+    } }, { onEvent: event => onText(event.text), stall: 60000 }),
     interrupt: () => worker.send('interrupt'),
     unload: async () => worker.terminate(),
   };
 }
 async function forgetWebLLM() {
   const worker = modelWorker();
-  try { await worker.request('forget', { models: [...Object.values(RESIDENT_MODELS).map(m => m.id), ...RETIRED_MODELS] }); } finally { worker.terminate(); }
+  try { await worker.request('forget', { models: [RESIDENT_MODEL.id, ...RETIRED_MODELS] }); } finally { worker.terminate(); }
 }
 
 /**
@@ -108,27 +104,19 @@ export class ResidentModel {
     this.status = this.enabled ? 'idle' : 'off'; this.progress = 0; this.message = ''; this.model = null;
   }
   get ready() { return this.status === 'ready'; }
-  snapshot() { const { enabled, downloaded, size, status, progress, message, model } = this; return { enabled, downloaded, size, status, progress, message, model }; }
+  get supportsActions() { return true; }
+  snapshot() { const { enabled, downloaded, status, progress, message, model } = this; return { enabled, downloaded, status, progress, message, model }; }
   subscribe(listener) { this.listeners.add(listener); listener(this.snapshot()); return () => this.listeners.delete(listener); }
   update(changes) { Object.assign(this, changes); for (const listener of this.listeners) listener(this.snapshot()); }
   save() {
-    const { enabled, downloaded, size, allowSoftwareGpu } = this;
-    try { this.storage?.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled, downloaded, size, ...(allowSoftwareGpu ? { allowSoftwareGpu } : {}) })); }
+    const { enabled, downloaded, allowSoftwareGpu } = this;
+    try { this.storage?.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled, downloaded, ...(allowSoftwareGpu ? { allowSoftwareGpu } : {}) })); }
     catch { /* The choice lasts for this session. */ }
   }
   setEnabled(enabled) {
     this.enabled = !!enabled; this.save();
     if (this.enabled) return this.load();
     this.unload(); return Promise.resolve(false);
-  }
-  /** Pick the model size (`small` or `large`). A model loaded, loading or failed gives way to the new one. */
-  setSize(size) {
-    if (!knownSize(size) || size === this.size) return Promise.resolve(this.ready);
-    const active = !!(this.engine || this.loading) || this.status === 'error';
-    this.size = size; this.save();
-    if (!active) { this.update({}); return Promise.resolve(false); }
-    this.unload();
-    return this.load();
   }
   /** Load the model if the player turned it on. Safe to call again while loading or loaded. */
   load() {
@@ -143,7 +131,7 @@ export class ResidentModel {
     const gpu = await detectGPU(this.gpu, { allowSoftware: this.allowSoftwareGpu });
     if (!current()) return false;
     if (!gpu.supported) { this.enabled = false; this.save(); this.update({ status: 'unsupported', message: gpu.reason }); return false; }
-    const model = RESIDENT_MODELS[this.size].id;
+    const model = RESIDENT_MODEL.id;
     this.update({ status: 'loading', model, message: 'Starting' });
     const cancel = this.cancel = new AbortController();
     try {
@@ -165,12 +153,12 @@ export class ResidentModel {
     return engine?.unload().catch(() => {}) ?? Promise.resolve();
   }
   /** Stream a reply to `messages`; `onText` sees the text so far. Generations run one at a time. */
-  generate(messages, { onText = () => {} } = {}) {
+  generate(messages, { onText = () => {}, responseFormat } = {}) {
     const run = async () => {
       const engine = this.engine;
       if (!engine) throw new Error('The resident model is not loaded.');
       let text = '';
-      try { await engine.generate(messages, delta => { text += delta; onText(text); }); }
+      try { await engine.generate(messages, delta => { text += delta; onText(text); }, responseFormat); }
       catch (error) {
         if (deviceLost(error) && this.engine === engine) { this.engine = null; engine.unload().catch(() => {}); this.update({ status: 'error', message: reason(error) }); }
         throw error;

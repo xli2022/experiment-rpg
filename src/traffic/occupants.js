@@ -3,6 +3,7 @@ import { createAvatarPool } from './pedestrians.js';
 import { floorOccupants } from '../world/interior-plan.js';
 import { toWorld } from '../world/interior-physics.js';
 import { orientedBox, seededRandom } from '../core/physics.js';
+import { requestResidentAction, stepResidentAction, residentActionContext } from './resident-actions.js';
 
 // People inside buildings. Each floor's plan says who is where (see
 // floorOccupants): someone on the sofa or at the counter in a lit flat, a
@@ -73,7 +74,7 @@ export function glanceToward({ head, chest, root }, eyes, weight, { reach = 1.2,
   turnBone(head, root, turn * (chest ? 1 - chestShare : 1), nod);
 }
 
-export function createOccupants({ scene, assets, random = seededRandom(5150) }) {
+export function createOccupants({ scene, assets, residentNavigation = null, random = seededRandom(5150) }) {
   const avatars = createAvatarPool(assets, random, { start: 5, count: OCCUPANTS.pool }).map(person => ({ ...person, occupant: null }));
   const frustum = new THREE.Frustum(), matrix = new THREE.Matrix4(), sphere = new THREE.Sphere(new THREE.Vector3(), 1.2);
   const floorsSeen = new Map();
@@ -86,9 +87,10 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
       const p = toWorld(plan, o.x, o.z), body = toWorld(plan, o.body.x, o.body.z), yaw = plan.origin.yaw + o.yaw;
       // Half the people on sofas look down at a phone in their lap; the rest sit back.
       const activity = o.activity === 'rest' && mix(o.id) % 2 ? 'read' : o.activity;
-      return { ...o, activity, x: p.x, z: p.z, yaw, level, plan,
-        // What a body takes up, for the player to walk round; a chair stands in for a seated worker.
-        collider: o.chair ? null : orientedBox(body.x, body.z, o.body.w, o.body.d, plan.origin.yaw + o.body.yaw, o.y + (o.pose === 'sit' ? .7 : 1.8), o.y, { id: `occupant:${o.id}`, occupant: true, climbable: false }) };
+      // A chair stands in for a seated worker. Keep that original collision
+      // shape separately while their standing body walks around the city.
+      const collider = o.chair ? null : orientedBox(body.x, body.z, o.body.w, o.body.d, plan.origin.yaw + o.body.yaw, o.y + (o.pose === 'sit' ? .7 : 1.8), o.y, { id: `occupant:${o.id}`, occupant: true, climbable: false });
+      return { ...o, activity, x: p.x, z: p.z, yaw, level, plan, collider, seatCollider: o.pose === 'sit' ? collider : null };
     }));
     return floorsSeen.get(key);
   }
@@ -100,6 +102,7 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
   }
   function assign(person, occupant, time) {
     person.occupant = occupant; occupant.avatar = person;
+    person.life = (person.life ?? 0) + 1;
     const seated = occupant.pose === 'sit' && person.avatar.setRest?.(occupant.chair ? 'Driving' : 'Seated');
     if (!seated) person.avatar.setRest?.('Idle');
     person.avatar.setAnimation(seated ? person.avatar.rest : 'Idle');
@@ -115,7 +118,8 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
     const candidates = floors.flatMap(peopleOn), y = player.y ?? 0;
     planned = candidates.length;
     const score = o => dist(o, player) + Math.abs(o.y - y) / 3.6 * OCCUPANTS.storey;
-    const wanted = candidates.filter(o => dist(o, player) < profile.range && Math.abs(o.y - y) < 9).sort((a, b) => score(a) - score(b)).slice(0, profile.count);
+    const pinned = avatars.filter(p => p.occupant?.residentAction || p.occupant?.talking).map(p => p.occupant);
+    const wanted = [...pinned, ...candidates.filter(o => !pinned.includes(o) && dist(o, player) < profile.range && Math.abs(o.y - y) < 9).sort((a, b) => score(a) - score(b)).slice(0, Math.max(0, profile.count - pinned.length))];
     const keep = new Set(wanted);
     for (const person of avatars) if (person.occupant && (!keep.has(person.occupant) || !floorsSeen.has(`${person.occupant.plan.id}#${person.occupant.level}`))) release(person);
     for (const occupant of wanted) {
@@ -137,6 +141,7 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
     const bones = person.avatar.bones;
     if (!bones) return;
     const o = person.occupant, t = time + person.id * 1.9, root = person.root, head = bones.get('Head'), chest = bones.get('Chest');
+    if (o.residentAction && o.pose !== 'sit') return;
     const rotate = (name, x, y, z) => { const bone = bones.get(name); if (bone) bone.quaternion.multiply(twist.setFromEuler(euler.set(x, y, z))); };
     const dx = player.x - o.x, dz = player.z - o.z, near = Math.hypot(dx, dz) < OCCUPANTS.glance && Math.abs((player.y ?? 0) - o.y) < 1.5;
     const toward = Math.atan2(-dx, -dz) - o.yaw, angle = Math.atan2(Math.sin(toward), Math.cos(toward));
@@ -165,6 +170,11 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
   return {
     avatars,
     get visible() { return shown.filter(p => p.root.visible); },
+    actionContext(person) { return residentNavigation && person.occupant ? residentActionContext(person.occupant, residentNavigation(person.occupant)) : null; },
+    command(person, action, player) {
+      if (!residentNavigation || !person?.occupant) return { ok: false, reply: 'I cannot do that here.' };
+      return requestResidentAction(person.occupant, action, player, residentNavigation(person.occupant));
+    },
     setQuality(value) { profile = OCCUPANTS[value] ?? OCCUPANTS.high; scan = 0; },
     /** `floors` are the interior floors standing now ({ plan, level }); call after the world updates them. */
     update(dt, { player, camera, floors, time = 0 }) {
@@ -172,7 +182,7 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
       if (key !== floorKey) {
         // Forget floors that are gone; their people go with them.
         const live = new Set(floors.map(f => `${f.plan.id}#${f.level}`));
-        for (const k of [...floorsSeen.keys()]) if (!live.has(k)) floorsSeen.delete(k);
+        for (const [k, people] of floorsSeen) if (!live.has(k) && !people.some(o => o.residentAction || o.talking)) floorsSeen.delete(k);
         floorKey = key; scan = 0;
       }
       scan -= dt;
@@ -180,8 +190,23 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
       if (camera) { camera.updateMatrixWorld(); matrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(matrix); }
       for (const person of shown) {
         const o = person.occupant;
+        if (o.residentAction) {
+          const before = { x: o.x, y: o.y, z: o.z, pose: o.pose };
+          stepResidentAction(o, dt, player, residentNavigation(o));
+          if (before.pose !== o.pose) {
+            o.collider = o.pose === 'sit' ? o.seatCollider : orientedBox(o.x, o.z, .56, .56, o.yaw, o.y + 1.8, o.y, { id: `occupant:${o.id}`, occupant: true, climbable: false });
+            person.avatar.setRest?.(o.pose === 'sit' ? o.chair ? 'Driving' : 'Seated' : 'Idle', .4);
+          } else if (o.collider) {
+            const dx = o.x - before.x, dy = o.y - before.y, dz = o.z - before.z;
+            for (const key of ['x', 'minX', 'maxX']) o.collider[key] += dx;
+            for (const key of ['z', 'minZ', 'maxZ']) o.collider[key] += dz;
+            for (const key of ['minY', 'maxY']) o.collider[key] += dy;
+          }
+          person.root.position.set(o.x, o.y, o.z); person.root.rotation.y = o.yaw;
+        }
         sphere.center.set(o.x, o.y + .9, o.z);
-        const show = !camera || frustum.intersectsSphere(sphere);
+        const floorVisible = residentNavigation?.(o).visible?.() ?? floors.some(f => f.plan.id === o.plan.id && f.level === o.level);
+        const show = floorVisible && dist(o, player) < profile.range && (!camera || frustum.intersectsSphere(sphere));
         person.root.visible = show;
         if (!show) { if (person.root.parent) scene.remove(person.root); continue; }
         if (!person.root.parent) scene.add(person.root);
@@ -189,7 +214,7 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
         person.elapsed += dt;
         if (dist(o, player) > 14 && person.elapsed < .12) continue;
         person.step = person.elapsed; person.elapsed = 0;
-        person.avatar.update(person.step, 0);
+        person.avatar.update(person.step, o.residentAction ? o.speed ?? 0 : 0);
         gesture(person, time, player);
       }
     },
@@ -202,7 +227,8 @@ export function createOccupants({ scene, assets, random = seededRandom(5150) }) 
       const activities = {};
       for (const p of shown) activities[p.occupant.activity] = (activities[p.occupant.activity] ?? 0) + 1;
       return { capacity: profile.count, pool: avatars.length, planned, assigned: shown.length, visible: shown.filter(p => p.root.visible).length, activities,
-        people: shown.map(p => ({ id: p.occupant.id, kind: p.occupant.kind, pose: p.occupant.pose, activity: p.occupant.activity, species: p.species, x: p.occupant.x, y: p.occupant.y, z: p.occupant.z })) };
+        people: shown.map(p => ({ id: p.occupant.id, kind: p.occupant.kind, pose: p.occupant.pose, activity: p.occupant.activity, species: p.species, x: p.occupant.x, y: p.occupant.y, z: p.occupant.z,
+          action: p.occupant.residentAction?.kind ?? null, status: p.occupant.residentAction?.status ?? null })) };
     },
     dispose() { for (const person of avatars) { if (person.occupant) release(person); person.avatar.dispose?.(); } },
   };

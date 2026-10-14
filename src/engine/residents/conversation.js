@@ -1,8 +1,9 @@
-import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply, opener, TOPICS } from './persona.js';
-import { ResidentModel, RESIDENT_MODELS } from './model.js';
+import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply, opener } from './persona.js';
+import { Vector3 } from 'three';
+import { ResidentModel, RESIDENT_MODEL } from './model.js';
+import { DECISION_FORMAT, decisionMessages, parseDecision } from './decisions.js';
 
 const $ = id => document.getElementById(id);
-const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 export const MAX_LINE = 140;
 
 /** Talking distance: close, on the player's level and roughly in front of them. */
@@ -37,9 +38,10 @@ export class ResidentConversation {
     Object.assign(this, { model, view, voice });
     this.persona = null; this.history = []; this.turns = 0; this.serial = 0; this.busy = false;
   }
-  open(persona) {
+  open(persona, actions = null) {
     this.close();
-    this.persona = persona; this.view.show(persona, TOPICS);
+    this.persona = persona; this.actions = actions; this.lastAction = null; this.pendingAction = null;
+    this.view.show(persona);
     return this.say(opener(persona));
   }
   async say(line) {
@@ -47,14 +49,36 @@ export class ResidentConversation {
     if (!persona || this.busy || !text) return null;
     const serial = ++this.serial, current = () => serial === this.serial;
     this.voice?.stop();
-    this.busy = true; this.view.said(text); this.view.reply('', true);
-    let reply = null;
+    this.busy = true; this.view.reply('', true);
+    const structured = !!(this.actions && this.model.supportsActions);
+    let reply = null, decision = null;
     try {
-      const raw = await this.model.generate(chatMessages(persona, this.history, text), { onText: partial => { if (current()) this.view.reply(previewReply(partial, persona), true); } });
-      reply = cleanReply(raw, persona);
+      const messages = structured ? decisionMessages(text, this.actions.context()) : chatMessages(persona, this.history, text);
+      const raw = await this.model.generate(messages, {
+        ...(structured ? { responseFormat: DECISION_FORMAT } : {}),
+        onText: partial => { if (current() && !structured) this.view.reply(previewReply(partial, persona), true); },
+      });
+      if (structured) {
+        decision = parseDecision(raw);
+        if (decision?.action === 'none' && current()) {
+          const speech = await this.model.generate(chatMessages(persona, this.history, text), { onText: partial => { if (current()) this.view.reply(previewReply(partial, persona), true); } });
+          reply = cleanReply(speech, persona);
+        }
+      }
+      else reply = cleanReply(raw, persona);
     } catch { /* A fallback line answers instead. */ }
     if (!current()) return null;
-    reply ??= fallbackReply(persona, this.turns);
+    if (decision && decision.action !== 'none') {
+      // Validate without moving. Only the latest accepted request is queued;
+      // a completed conversation rechecks it against the live world.
+      let result;
+      try { result = this.actions.prepare(decision.action); }
+      catch { result = { ok: false, reply: 'I cannot do that right now.' }; }
+      reply = result.reply;
+      this.lastAction = { action: decision.action, ok: result.ok };
+      if (result.ok) this.pendingAction = decision.action;
+    }
+    reply ??= structured ? 'I did not catch that. Could you say it another way?' : fallbackReply(persona, this.turns);
     this.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
     this.turns++; this.busy = false;
     this.view.reply(reply, false);
@@ -64,85 +88,90 @@ export class ResidentConversation {
   close() {
     if (this.busy) this.model.interrupt();
     if (this.persona) this.voice?.stop();
-    this.serial++; this.busy = false; this.persona = null; this.history = []; this.turns = 0;
+    this.serial++; this.busy = false; this.persona = null; this.actions = null; this.lastAction = null; this.pendingAction = null; this.history = []; this.turns = 0;
+    this.view.hide?.();
+  }
+  finish() {
+    const action = this.pendingAction, actions = this.actions;
+    this.close();
+    if (!action) return null;
+    try { return actions.execute(action); }
+    catch { return { ok: false, reply: 'I cannot do that right now.' }; }
   }
   snapshot() {
     const p = this.persona;
-    return { open: !!p, name: p?.name ?? null, title: p?.title ?? null, busy: this.busy, turns: this.turns, history: this.history.map(m => ({ ...m })) };
+    return { open: !!p, name: p?.name ?? null, title: p?.title ?? null, busy: this.busy, turns: this.turns, lastAction: this.lastAction, pendingAction: this.pendingAction ?? null, history: this.history.map(m => ({ ...m })) };
   }
 }
 
-const SPECIES_COLORS = { human: '#7ee6e3', robot: '#e8cd95', alien: '#c5a3ff' };
-// The panel in index.html (#resident-chat), reusing the story's dialogue styles.
-function createView({ touch, onSay, onClose, onReplay, onVoice }) {
-  const root = $('resident-chat'), text = $('resident-text'), said = $('resident-said'), topics = $('resident-topics');
-  const form = $('resident-form'), field = $('resident-input'), send = $('resident-send'), status = $('resident-status');
-  let lines = [];
-  root.addEventListener('click', event => {
-    const target = event.target.closest('[data-resident]');
-    if (!target || target.disabled) return;
-    const [kind, index] = target.dataset.resident.split(':');
-    if (kind === 'close') onClose();
-    if (kind === 'topic') onSay(lines[Number(index)]);
-    if (kind === 'replay') onReplay();
-    if (kind === 'voice') onVoice();
-  });
+// World-anchored speech and a separate, non-modal composer.
+function createView({ touch, onSay, onClose, onFocus }) {
+  const root = $('resident-chat'), bubble = $('resident-bubble'), text = $('resident-text');
+  const form = $('resident-form'), field = $('resident-input'), send = $('resident-send'), composer = root.querySelector('.resident-composer');
+  root.querySelector('[data-resident="close"]').addEventListener('click', onClose);
   form.addEventListener('submit', event => { event.preventDefault(); if (onSay(field.value)) field.value = ''; });
+  root.addEventListener('focusin', onFocus);
+  const viewport = globalThis.visualViewport;
+  function fitKeyboard() {
+    const keyboard = touch && viewport && innerHeight - viewport.height > 120;
+    root.classList.toggle('resident-keyboard', !!keyboard);
+    if (keyboard) {
+      root.style.setProperty('--keyboard-bottom', `${Math.max(0, innerHeight - viewport.height - viewport.offsetTop) + 8}px`);
+      root.style.setProperty('--keyboard-height', `${Math.max(120, viewport.height - 16)}px`);
+    }
+  }
+  viewport?.addEventListener('resize', fitKeyboard);
+  viewport?.addEventListener('scroll', fitKeyboard);
   return {
-    show(persona, topicLines) {
-      lines = topicLines;
-      const monogram = $('resident-monogram');
-      monogram.textContent = persona.name.replace(/[^\p{L}\p{N}]/gu, '').slice(0, 2).toUpperCase();
-      monogram.style.setProperty('--contact', SPECIES_COLORS[persona.species] ?? SPECIES_COLORS.human);
-      $('resident-role').textContent = `${persona.title} / ${persona.where.split(' (')[0]}`.toUpperCase();
-      $('resident-name').textContent = persona.name;
-      $('resident-mood').textContent = `Seems ${persona.mood}`;
-      topics.innerHTML = [...lines, 'Take care.'].map((line, i) => `<button class="dialogue-choice" data-resident="${i < lines.length ? `topic:${i}` : 'close'}"><span class="choice-index">${String(i + 1).padStart(2, '0')}</span><span>${esc(line)}</span><b>↗</b></button>`).join('');
-      said.textContent = ''; text.textContent = ''; field.value = '';
-      // Typing starts at once, but only once the E key that opened the panel is
-      // done, or it types an "e". On touch screens the keyboard would cover the panel.
-      if (!touch) setTimeout(() => field.focus({ preventScroll: true }));
+    show(persona) {
+      root.classList.remove('hidden'); document.body.classList.add('resident-chatting');
+      fitKeyboard();
+      $('resident-bubble-name').textContent = persona.name;
+      text.textContent = ''; field.value = '';
+      // Let the opening E key finish before typing; touch keeps its keyboard closed.
+      if (!touch) setTimeout(() => { if (!root.classList.contains('hidden')) field.focus({ preventScroll: true }); });
     },
-    said(line) { said.textContent = line; },
+    hide() { root.classList.add('hidden'); document.body.classList.remove('resident-chatting'); bubble.style.visibility = 'hidden'; },
+    focused: () => root.contains(document.activeElement),
+    anchor(x, y, visible) {
+      bubble.style.visibility = visible ? 'visible' : 'hidden';
+      if (!visible) return;
+      const half = bubble.offsetWidth / 2, left = Math.max(half + 12, Math.min(innerWidth - half - 12, x));
+      const panel = composer.getBoundingClientRect();
+      // Keep the reply readable on a short screen. Its tail still points to
+      // the actor when the composer would otherwise cover the speech.
+      const overlap = left + half > panel.left && left - half < panel.right;
+      const bottom = Math.max(bubble.offsetHeight + 14, overlap ? Math.min(y, panel.top - 16) : y);
+      bubble.style.left = `${left}px`; bubble.style.top = `${bottom}px`;
+      bubble.style.setProperty('--tail-height', `${Math.max(11, y - bottom + 11)}px`);
+      bubble.style.setProperty('--tail-x', `${Math.max(20, Math.min(bubble.offsetWidth - 20, x - left + half))}px`);
+    },
     reply(line, pending) {
       // Screen readers announce the finished reply, not every word as it arrives.
-      text.textContent = line; text.classList.toggle('pending', pending); text.setAttribute('aria-busy', String(pending));
+      text.textContent = line || (pending ? 'Thinking…' : ''); text.classList.toggle('pending', pending); text.setAttribute('aria-busy', String(pending));
       send.disabled = pending;
-      for (const button of topics.querySelectorAll('[data-resident^="topic"]')) button.disabled = pending;
-    },
-    status({ status: state, message }) {
-      status.textContent = state === 'error' ? `The resident model stopped (${message}). Turn it off and on in the pause menu.` : 'Replies are written by an AI model on this device';
-    },
-    // The shared voice's state, as the story's dialogue card shows it.
-    voice({ message, supported, enabled, volume, status: speech }) {
-      $('resident-voice-status').textContent = message;
-      $('resident-voice-replay').disabled = !supported || !enabled || !volume;
-      const toggle = $('resident-voice-toggle');
-      toggle.disabled = !supported; toggle.textContent = enabled ? 'Voice on' : 'Voice off'; toggle.setAttribute('aria-pressed', String(enabled));
-      $('resident-monogram').classList.toggle('speaking', speech === 'speaking');
     },
   };
 }
 
 /** The pause-menu note for the resident-chat setting. */
-export function settingsNote({ status, progress, message, size }, touch = false) {
+export function settingsNote({ status, progress, message }, touch = false) {
   switch (status) {
     case 'idle': return 'On. The resident model loads when you start playing.';
     case 'checking': return 'Checking your graphics card…';
     case 'loading': return `${message || 'Downloading'}… ${Math.round(progress * 100)}%. You can keep playing.`;
-    case 'ready': return 'Ready. Face someone on the street or indoors and press E to talk. Replies are written on this device; nothing you type is sent anywhere.';
+    case 'ready': return 'Ready. Face someone on the street or indoors and press E to talk. Ask them to follow, wait, move aside or return to their routine. The city keeps moving; agreed actions start after Bye. Replies stay on this device.';
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
     case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
   }
-  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by a small AI model on your graphics card. Turning this on downloads about ${(RESIDENT_MODELS[size] ?? RESIDENT_MODELS.small).download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
+  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by Qwen3.5 2B on your graphics card. Turning this on downloads about ${RESIDENT_MODEL.download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
 }
 function bindSettings(model, touch) {
-  const toggle = $('resident-chat-toggle'), size = $('resident-chat-model'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
+  const toggle = $('resident-chat-toggle'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
   toggle.addEventListener('change', () => model.setEnabled(toggle.checked));
-  size.addEventListener('change', () => model.setSize(size.value));
   forget.addEventListener('click', () => model.forget());
   model.subscribe(state => {
-    toggle.checked = state.enabled; size.value = state.size; note.textContent = settingsNote(state, touch);
+    toggle.checked = state.enabled; note.textContent = settingsNote(state, touch);
     forget.classList.toggle('hidden', !state.downloaded || ['checking', 'loading'].includes(state.status));
   });
 }
@@ -152,32 +181,59 @@ function bindSettings(model, touch) {
  * conversation panel. The engine asks `prompt()` for the E prompt and calls
  * `open()`; a mode's own characters come first and never reach this.
  */
-export function createResidentChat({ ui, hud, storage, voice = null, touch = false, playing = () => true, model = new ResidentModel({ storage }) }) {
-  ui.register('resident-chat');
-  let conversation = null, wasReady = model.ready;
+export function createResidentChat({ hud, storage, voice = null, touch = false, playing = () => true, controls = {}, actions = null, model = new ResidentModel({ storage }) }) {
+  let conversation = null, resident = null, wasReady = model.ready;
+  const projected = new Vector3();
+  function finish({ commit = true, focus = true } = {}) {
+    if (!conversation.persona) return;
+    const name = conversation.persona.name;
+    actions?.talk(resident, false);
+    resident = null;
+    const result = commit ? conversation.finish() : (conversation.close(), null);
+    controls.engage?.(false, focus);
+    if (result) hud.notify(`${name} // ${result.ok ? result.status : result.reply}`, 4);
+  }
   const view = createView({ touch,
     onSay: line => { if (conversation.busy || !String(line ?? '').trim()) return false; conversation.say(line); return true; },
-    onClose: () => ui.close(),
-    onReplay: () => voice?.replay(),
-    onVoice: () => { if (!voice) return; voice.setEnabled(!voice.enabled); if (voice.enabled) voice.replay(); } });
+    onClose: () => finish(),
+    onFocus: () => controls.focus?.() });
   conversation = new ResidentConversation({ model, view, voice });
-  voice?.subscribe(state => view.voice(state));
   bindSettings(model, touch);
   model.subscribe(state => {
     if (state.status === 'ready' && !wasReady && playing()) hud.notify('RESIDENTS // Conversations ready. Face someone and press E to talk.', 5);
     wasReady = state.status === 'ready';
-    view.status(state);
   });
   return {
     model, conversation,
     get ready() { return model.ready; },
-    get open() { return !!conversation.persona; },
+    get active() { return !!conversation.persona; },
     /** Load the model when play starts, if the player turned it on. */
     wake() { model.load(); },
     prompt: (resident, time) => ({ caption: residentPersona(resident, { time }).title.toUpperCase(), label: 'Talk' }),
-    open(resident, time) { ui.open('resident-chat'); conversation.open(residentPersona(resident, { time })); },
-    /** A menu opened or closed: anything but this panel ends the conversation. */
-    onMenu(id) { if (id !== 'resident-chat') conversation.close(); },
+    open(resident, time) {
+      return start(resident, time);
+    },
+    finish,
+    /** Menus finish chat; a scene reset instead cancels the queued request. */
+    onMenu(id) { if (id) finish({ focus: false }); },
+    update(player, camera) {
+      if (!resident) return;
+      const at = actions?.position(resident);
+      if (!at) { finish({ commit: false, focus: view.focused() }); return; }
+      if (Math.hypot(at.x - player.x, at.z - player.z) > 4.5 || Math.abs(at.y - player.y) > 1.3) { finish({ focus: view.focused() }); return; }
+      projected.set(at.x, at.y + at.head, at.z).project(camera);
+      view.anchor((projected.x + 1) * innerWidth / 2, (1 - projected.y) * innerHeight / 2, at.visible && projected.z >= -1 && projected.z <= 1 && Math.abs(projected.x) < 1.1 && Math.abs(projected.y) < 1.1);
+    },
     snapshot: () => ({ ...model.snapshot(), conversation: conversation.snapshot() }),
   };
+  function start(next, time) {
+    finish({ focus: false });
+    if (!model.ready || !playing() || actions && !actions.talk(next, true)) return null;
+    resident = next;
+    controls.engage?.(true);
+    return conversation.open(residentPersona(next, { time }), actions ? {
+      context: () => ({ ...actions.context(next), queued: conversation.pendingAction }),
+      prepare: action => actions.prepare(next, action), execute: action => actions.execute(next, action),
+    } : null);
+  }
 }

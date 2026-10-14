@@ -91,6 +91,25 @@ test('holding Escape opens or closes a menu only once', t => {
   assert.equal(pauses, 1);
 });
 
+test('live chat frees the cursor, keeps movement enabled, and typing does not move the player', t => {
+  const { input, canvas, document, window, element, lockRequests } = harness(t);
+  input.setEnabled(true); input.keys.add('KeyW'); input.firing = true;
+  input.setConversation(true);
+  assert.equal(input.enabled, true); assert.equal(document.pointerLockElement, null);
+  assert.deepEqual(input.axes(), { x: 0, y: 0 }); assert.equal(input.firing, false);
+  const field = element('INPUT'); field.focus();
+  window.dispatch('keydown', { target: field, code: 'KeyW' });
+  assert.deepEqual(input.axes(), { x: 0, y: 0 });
+  canvas.dispatch('pointerdown', { pointerType: 'mouse', clientX: 10, clientY: 20 });
+  assert.equal(document.activeElement, canvas); assert.equal(lockRequests(), 1, 'chat retains a free cursor');
+  window.dispatch('keydown', { target: canvas, code: 'KeyW' });
+  assert.equal(input.axes().y, 1);
+  input.setConversation(false, false);
+  assert.equal(input.axes().y, 1, 'walking away can end a conversation without stopping the held movement');
+  input.setConversation(false);
+  assert.equal(document.pointerLockElement, canvas);
+});
+
 test('E is the one key for using things and for grabbing or releasing walls', t => {
   let interacts = 0;
   const { input, window } = harness(t, { callbacks: { interact() { interacts++; } } });

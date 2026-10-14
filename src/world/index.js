@@ -38,8 +38,8 @@ export function createWorld({ scene, renderer = null, quality = 'high', landmark
     /** Break the facade window at a world point on a building wall; returns where it broke, or null. */
     breakWindowAt: point => city.windows.breakAt(point),
     /** Per frame: weather and interiors follow `focus` (no interiors are built while `driving`); streaming follows the camera view. */
-    update({ camera, focus, interior = null, now, dt = 0, paused = false, force = false, driving = false }) {
-      if (!paused) { atmosphere.update({ camera, focus, interior, dt }); interiors.update(focus, interior, now, dt, { build: !driving }); city.windows.update(focus); }
+    update({ camera, focus, interior = null, now, dt = 0, paused = false, force = false, driving = false, residents = [] }) {
+      if (!paused) { atmosphere.update({ camera, focus, interior, dt }); interiors.update(focus, interior, now, dt, { build: !driving, residents }); city.windows.update(focus); }
       else atmosphere.sky.position.copy(camera.position);
       stream.update(camera, focus, now, force);
     },

@@ -5,6 +5,8 @@ import { createVehicles, VEHICLE_PROFILES, TAKEOVER_HITS } from './vehicles.js';
 import { createPedestrians } from './pedestrians.js';
 import { createOccupants } from './occupants.js';
 import { populationFor } from './population.js';
+import { previewResidentAction, queueResidentLift } from './resident-actions.js';
+import { createResidentNavigation } from './resident-navigation.js';
 import { carCollider, clamp, seededRandom } from '../core/physics.js';
 
 export { buildNetwork } from './network.js';
@@ -27,9 +29,12 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
   const network = networks.get(plan), random = seededRandom(49123);
   const root = new THREE.Group(); root.name = 'Traffic';
   const vehicles = createVehicles({ scene: root, network, plan, random });
-  const pedestrians = createPedestrians({ scene, network, plan, spatial: world.spatial, assets, random: seededRandom(707) });
+  let onFoot = true;
+  const residentBodies = () => [...pedestrians.walkers, ...occupants.avatars.filter(p => p.occupant).map(p => p.occupant)];
+  const residentNavigation = createResidentNavigation({ world, people: residentBodies, cars: () => [...vehicles.cars, ...vehicles.owned], onFoot: () => onFoot });
+  const pedestrians = createPedestrians({ scene, network, plan, spatial: world.spatial, assets, residentNavigation, random: seededRandom(707) });
   // People inside buildings; the game updates them once the world's interior floors are up to date.
-  const occupants = createOccupants({ scene, assets });
+  const occupants = createOccupants({ scene, assets, residentNavigation });
   const props = createSignalProps(root, network, plan);
   // Signal poles are solid wherever the world is asked what is in the way.
   const detachSignals = world.spatial?.attach(signalColliderSource(network, plan));
@@ -39,6 +44,17 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
   let population = populationFor(world, { x: 0, z: 0 }, quality);
   const visible = (p, camera) => { if (!camera) return false; sphere.center.set(p.x, p.y + 1, p.z); return frustum.intersectsSphere(sphere); };
   const { cars, owned } = vehicles;
+  function residentTarget(handle) {
+    if (handle?.kind === 'walker') {
+      const person = pedestrians.people.find(p => p.id === handle.id && p.life === handle.life && p.mode);
+      return person ? { person, body: person, population: pedestrians } : null;
+    }
+    if (handle?.kind === 'occupant') {
+      const person = occupants.avatars.find(p => p.id === handle.avatar && p.life === handle.life && p.occupant?.id === handle.id);
+      return person ? { person, body: person.occupant, population: occupants } : null;
+    }
+    return null;
+  }
 
   function populate(player, camera) {
     population = populationFor(world, player, level);
@@ -93,10 +109,38 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
 
   return {
     root, network, cars, vehicles: cars, owned, pedestrians, occupants,
+    residentTravelers() { return residentBodies().filter(p => p.residentAction || p.talking); },
+    residentLift(from, to) {
+      for (const body of residentBodies()) queueResidentLift(body, from, to, residentNavigation(body));
+    },
+    residentPosition(handle) {
+      const target = residentTarget(handle);
+      if (!target) return null;
+      const { x, y, z, pose } = target.body;
+      return { x, y, z, head: pose === 'sit' ? 1.35 : 1.95, visible: target.person.root.visible };
+    },
+    talkToResident(handle, talking) {
+      const target = residentTarget(handle);
+      if (!target) return false;
+      const body = target.body;
+      if (talking) { body.talking ??= { yaw: body.yaw }; body.speed = 0; }
+      else if (body.talking) { body.yaw = body.talking.yaw; body.talking = null; target.person.root.rotation.y = body.yaw; }
+      return true;
+    },
+    residentContext(handle) { const target = residentTarget(handle); return target ? target.population.actionContext(target.person) : null; },
+    previewResident(handle, action, player) {
+      const target = residentTarget(handle);
+      return target ? previewResidentAction(target.body, action, player, residentNavigation(target.body)) : { ok: false, reply: 'That resident has moved on.' };
+    },
+    commandResident(handle, action, player) {
+      const target = residentTarget(handle);
+      return target ? target.population.command(target.person, action, player) : { ok: false, reply: 'That resident has moved on. Talk to them again.' };
+    },
     get time() { return time; },
     signals: { state: (node, approach) => signalState(node, approach, time), walk: (node, approach) => walkState(node, approach, time) },
     /** Advance traffic. `vehicle` is the car the player drives (if any); `range` is the visible actor range. */
     update(dt, { player, vehicle = null, camera = null, range = 65 }) {
+      onFoot = !vehicle;
       dt = clamp(dt, 0, .1); time += dt;
       if (camera) { camera.updateMatrixWorld(); projection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse); frustum.setFromProjectionMatrix(projection); }
       scanTime -= dt;

@@ -314,10 +314,11 @@ export function createInteriors(scene, city) {
   }
 
   const matrix = new THREE.Matrix4(), quaternion = new THREE.Quaternion(), scale = new THREE.Vector3(), position = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0);
-  function animateDoors(entry, player, dt, force = false) {
+  function animateDoors(entry, player, dt, force = false, residents = []) {
     const touched = new Set();
     for (const leaf of entry.leaves) {
-      const near = player && Math.abs(player.y - leaf.y) < 2 && Math.hypot(player.x - leaf.world.x, player.z - leaf.world.z) < (leaf.kind === 'entrance' ? 3 : 1.9);
+      const withinReach = p => p && Math.abs(p.y - leaf.y) < 2 && Math.hypot(p.x - leaf.world.x, p.z - leaf.world.z) < (leaf.kind === 'entrance' ? 3 : 1.9);
+      const near = withinReach(player) || residents.some(withinReach);
       const target = near ? 1 : 0, before = leaf.open;
       leaf.open += Math.sign(target - leaf.open) * Math.min(Math.abs(target - leaf.open), dt * 3.2);
       if (!force && Math.abs(before - leaf.open) < 1e-5) continue;
@@ -347,7 +348,7 @@ export function createInteriors(scene, city) {
   }
 
   // While driving nothing new is built (a car can't go in); built floors age out.
-  function update(player, context, now, dt, { build = true } = {}) {
+  function update(player, context, now, dt, { build = true, residents = [] } = {}) {
     if (!build) wanted = [];
     else if (now - scanAt > .3 || (context && !active.has(context.id))) { scanAt = now; scan(player, context); }
     let madePlan = false;
@@ -381,7 +382,7 @@ export function createInteriors(scene, city) {
       }
       for (const [level, f] of b.floors) {
         if (now - f.lastWanted > 1.5) { disposeFloor(f); b.floors.delete(level); continue; }
-        animateDoors(f, player, dt);
+        animateDoors(f, player, dt, false, residents);
       }
     }
     updateClip(player, context);

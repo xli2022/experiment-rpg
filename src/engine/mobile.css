@@ -59,7 +59,7 @@ body.touch #joystick.active #joystick-thumb{background:#d9ff864d;border-color:va
 body.touch .touch-actions{
   right:var(--touch-right);bottom:var(--actions-bottom);width:auto;height:auto;transform:none;
   display:grid;grid-template-columns:48px 48px 64px;grid-template-rows:48px 48px;gap:10px;
-  grid-template-areas:'use reload fire' '. jump fire';align-items:center;z-index:2;
+  grid-template-areas:'use jump fire' '. reload fire';align-items:center;z-index:2;
 }
 body.touch .touch-actions button{
   position:static;inset:auto;transform:none;width:48px;height:48px;margin:0;padding:5px 2px;

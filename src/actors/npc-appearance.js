@@ -430,7 +430,7 @@ export function createNPC(asset, profile, clipName = 'Idle') {
     update(dt, speed) { animation.update(dt, speed); updatePresence(); ground(dt); },
     setAnimation(name) { animation.setAnimation(name); updatePresence(); ground(); }, scale, profile, wardrobeBatches: wardrobe.batches,
     setGait: name => animation.setGait(name), get gait() { return animation.gait; },
-    setRest: name => animation.setRest(name), get rest() { return animation.rest; },
+    setRest: (name, blend) => animation.setRest(name, blend), get rest() { return animation.rest; },
     dispose() {
       if (disposed) return;
       disposed = true;

@@ -124,6 +124,7 @@ const roomKind = id => typeof id === 'string' ? id.slice(id.lastIndexOf(':') + 1
 /** A pedestrian from traffic, as plain data for `residentPersona`. */
 export function walkerResident(person, district) {
   return { key: `walker:${person.id}`, species: person.species, model: person.model, district,
+    handle: { kind: 'walker', id: person.id, life: person.life }, behavior: person.residentAction?.kind ?? null,
     street: { mode: person.mode, gesture: person.gesture, jog: !!person.jog, companion: !!(person.leader || person.follower), crossing: person.edge?.kind === 'crossing', deck: person.edge?.kind === 'deck' } };
 }
 
@@ -131,6 +132,7 @@ export function walkerResident(person, district) {
 export function occupantResident(person, district) {
   const o = person.occupant;
   return { key: `occupant:${o.id}:${person.model}`, species: person.species, model: person.model, district,
+    handle: { kind: 'occupant', id: o.id, avatar: person.id, life: person.life }, behavior: o.residentAction?.kind ?? null,
     indoors: { spot: o.kind, activity: o.activity, room: roomKind(o.room), home: !!o.unit, level: o.level ?? 0, building: { name: o.plan?.name ?? null, type: o.plan?.type ?? null } } };
 }
 
@@ -152,7 +154,7 @@ export function residentPersona(resident, { time = 0 } = {}) {
     name: pick(species === 'human' ? NAMES[gender] ?? [...NAMES.woman, ...NAMES.man] : NAMES[species], 'name'),
     gender, age, voice: residentVoice({ key, species, gender, age }),
     mood: pick(MOODS[species], 'mood'), style: pick(STYLES[species], 'style'), concern: pick(CONCERNS[species], 'concern'),
-    doing: scene.doing,
+    doing: ({ follow: 'following the person you are talking to', wait: 'waiting where the person asked you to stay', move_aside: 'stepping out of the way', resume_routine: 'returning to your usual activity' })[resident.behavior] ?? scene.doing,
     where: district.description ? `${district.name} (${lowerFirst(district.description).replace(/\.$/, '')})` : district.name,
     time: `${clock.text}, ${part}`,
   };
@@ -171,8 +173,7 @@ export function systemPrompt(p) {
   ].join('\n');
 }
 
-/** Quick lines the player can say instead of typing. */
-export const TOPICS = ['What is it like around here?', 'What do you do?', 'Heard anything interesting lately?'];
+/** A short greeting starts each conversation. */
 const OPENERS = ['Hey there.', 'Hi.', 'Hello.', 'Got a minute?'];
 export const opener = persona => OPENERS[hash(`${persona.key}:opener`) % OPENERS.length];
 

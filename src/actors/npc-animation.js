@@ -15,12 +15,14 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
   }
   // The pose held while not moving: Idle, or another clip such as a seated one.
   let rest = actionFor('Idle');
+  let previousRest = null, restProgress = 1, restDuration = 0;
   let walking = actionFor(walk), gaitSpeed = walkSpeed, gait = walk, selected, walkWeight = initial === walk ? 1 : 0;
   const controller = {
     actions,
     get action() { return selected; },
     get animation() { return selected.getClip().name; },
     setAnimation(name) {
+      previousRest = null; restProgress = 1;
       const next = actionFor(name);
       for (const action of Object.values(actions)) action.setEffectiveWeight(action === next ? 1 : 0);
       next.reset().setLoop(THREE.LoopRepeat, Infinity).setEffectiveTimeScale(1).play();
@@ -30,9 +32,12 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
     },
     get gait() { return gait; },
     /** Hold `name` (for example a seated clip) while not moving; false if the rig lacks it. */
-    setRest(name) {
+    setRest(name, blend = 0) {
       if (!available.has(name)) return false;
-      rest = actionFor(name); rest.setLoop(THREE.LoopRepeat, Infinity).play();
+      const next = actionFor(name);
+      if (next === rest) return true;
+      previousRest = blend > 0 ? rest : null; restProgress = blend > 0 ? 0 : 1; restDuration = blend;
+      rest = next; rest.setLoop(THREE.LoopRepeat, Infinity).play();
       return true;
     },
     get rest() { return rest.getClip().name; },
@@ -51,7 +56,11 @@ export function createNPCAnimation(mixer, clips, { initial = 'Idle', walk = 'Wal
       const movingSpeed = Math.abs(speed), moving = movingSpeed > .04;
       walkWeight = THREE.MathUtils.damp(walkWeight, moving ? 1 : 0, 12, dt);
       for (const action of Object.values(actions)) action.setEffectiveWeight(0);
-      rest.setEffectiveWeight(1 - walkWeight).setEffectiveTimeScale(1);
+      restProgress = restDuration > 0 ? Math.min(1, restProgress + dt / restDuration) : 1;
+      const blend = restProgress * restProgress * (3 - 2 * restProgress);
+      previousRest?.setEffectiveWeight((1 - walkWeight) * (1 - blend)).setEffectiveTimeScale(1);
+      rest.setEffectiveWeight((1 - walkWeight) * blend).setEffectiveTimeScale(1);
+      if (restProgress === 1) previousRest = null;
       walking.setEffectiveWeight(walkWeight).setEffectiveTimeScale(moving ? movingSpeed / gaitSpeed : 0);
       selected = moving ? walking : rest;
       mixer.update(dt);

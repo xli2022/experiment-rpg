@@ -7,7 +7,7 @@ function controller(initial = 'Walk') {
   const model = new THREE.Group(), bone = new THREE.Bone(); bone.name = 'Hips'; model.add(bone);
   const clip = (name, angle, duration) => new THREE.AnimationClip(name, duration, [new THREE.QuaternionKeyframeTrack('Hips.quaternion',
     [0, duration / 2, duration], [0, 0, 0, 1, ...new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), angle).toArray(), 0, 0, 0, 1])]);
-  const clips = [clip('Idle', .05, 3), clip('Walk', .5, 1.3), clip('WalkFormal', .35, 1.5)];
+  const clips = [clip('Idle', .05, 3), clip('Walk', .5, 1.3), clip('WalkFormal', .35, 1.5), clip('Seated', .7, 2)];
   const mixer = new THREE.AnimationMixer(model);
   return { animation: createNPCAnimation(mixer, clips, { initial, walkSpeed: 1.4 }), mixer, bone };
 }
@@ -27,6 +27,21 @@ test('pedestrian clips follow actual travel speed and blend to a living idle whe
   animation.update(.2, -2.8);
   assert.ok(Math.abs(animation.actions.Walk.time - (walkingTime + .4) % 1.3) < 1e-6, 'reverse navigation uses forward-facing gait at the correct speed');
   assert.equal(animation.animation, 'Walk');
+});
+
+test('standing up and sitting down blend the rest poses without dropping animation weight', () => {
+  const { animation } = controller('Idle');
+  animation.setRest('Seated'); animation.update(0, 0);
+  assert.equal(animation.actions.Seated.getEffectiveWeight(), 1);
+  for (const name of ['Idle', 'Seated']) {
+    animation.setRest(name, .4);
+    animation.update(.2, 0);
+    assert.equal(animation.actions.Idle.getEffectiveWeight(), .5);
+    assert.equal(animation.actions.Seated.getEffectiveWeight(), .5);
+    animation.update(.2, 0);
+    assert.equal(animation.actions[name].getEffectiveWeight(), 1);
+    assert.equal(Object.values(animation.actions).reduce((sum, a) => sum + a.getEffectiveWeight(), 0), 1);
+  }
 });
 
 test('idle and walking blends remain normalized and consistent across frame rates', () => {
