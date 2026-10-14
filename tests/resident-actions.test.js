@@ -4,6 +4,7 @@ import * as THREE from 'three';
 import { requestResidentAction, previewResidentAction, stepResidentAction, residentActionContext } from '../src/traffic/resident-actions.js';
 import { createTraffic } from '../src/traffic/index.js';
 import { createOccupants } from '../src/traffic/occupants.js';
+import { createResidentNavigation } from '../src/traffic/resident-navigation.js';
 import { DECISION_FORMAT, decisionFormat, decisionMessages, parseDecision, preliminaryDecision } from '../src/engine/residents/decisions.js';
 import { ResidentConversation } from '../src/engine/residents/conversation.js';
 import { ResidentModel } from '../src/engine/residents/model.js';
@@ -209,6 +210,79 @@ test('followers take the recorded way round a corner and can return round it', (
   assert.equal(body.residentAction, null);
 });
 
+test('followers walk round one another and round people standing in the way instead of waiting for good', () => {
+  // The real navigation, in which nobody steps closer to anyone within 0.7 m.
+  const crowd = (followers, bystanders = []) => {
+    const bodies = followers.map(([x, z]) => ({ ...person(), x, z })), still = bystanders.map(([x, z]) => ({ ...person(), x, z }));
+    const nav = createResidentNavigation({ world: { masterPlan: { terrainHeight: () => 0 }, spatial: { near: () => [] } }, people: () => [...bodies, ...still] });
+    const at = player();
+    let closest = Infinity;
+    for (const body of bodies) assert.equal(requestResidentAction(body, 'follow', at, nav(body)).ok, true);
+    const tick = () => {
+      for (const body of bodies) stepResidentAction(body, 1 / 60, at, nav(body));
+      for (const body of bodies) for (const other of [...bodies, ...still]) if (other !== body) closest = Math.min(closest, Math.hypot(body.x - other.x, body.z - other.z));
+    };
+    return {
+      bodies, get closest() { return closest; },
+      walkTo(x, z) {
+        const from = { ...at }, frames = Math.ceil(Math.hypot(x - from.x, z - from.z) / 1.6 * 60);
+        for (let i = 1; i <= frames; i++) { at.x = from.x + (x - from.x) * i / frames; at.z = from.z + (z - from.z) * i / frames; tick(); }
+      },
+      wait(seconds) { for (let i = 0; i < seconds * 60; i++) tick(); },
+      within: reach => bodies.every(b => Math.hypot(b.x - at.x, b.z - at.z) < reach),
+    };
+  };
+  // Side by side, both make for the same footsteps and would each be the one stepping closer.
+  const pair = crowd([[-.375, 0], [.375, 0]]);
+  pair.walkTo(0, -14); pair.wait(6);
+  assert.ok(pair.within(3), 'neither waits for the other');
+  pair.walkTo(0, -4); pair.walkTo(0, 10); pair.wait(6);
+  assert.ok(pair.within(3), 'they part when the player walks back between them');
+  // The player walks through a bystander, then through a couple chatting too close together to pass between.
+  const past = crowd([[0, 0], [.75, .4]], [[.3, -6], [-.2, -10], [.5, -10.2]]);
+  past.walkTo(0, -16); past.wait(6);
+  assert.ok(past.within(3), 'they go round people the player walked through');
+  // A group following round bends settles once the player stops, rather than circling for a gap.
+  const group = crowd([[-.8, 0], [0, 0], [.8, 0], [0, 1]]);
+  group.walkTo(3, -6); group.walkTo(-3, -12); group.walkTo(3, -18); group.wait(8);
+  assert.ok(group.within(4));
+  const settled = group.bodies.map(b => [b.x, b.z]); group.wait(3);
+  assert.deepEqual(group.bodies.map(b => [b.x, b.z]), settled, 'no circling once the player stops');
+  for (const c of [pair, past, group]) assert.ok(c.closest > .69, 'nobody walks into anyone');
+});
+
+test('followers jog to keep up with a jogging player and walk again once they catch up', () => {
+  const body = person(), at = player(), nav = navigation();
+  assert.equal(requestResidentAction(body, 'follow', at, nav).ok, true);
+  // Six seconds of the player's jog (5.8 m/s) would leave a walking follower 18 m behind.
+  let farthest = 0;
+  for (let i = 0; i < 6 * 60; i++) { at.z -= 5.8 / 60; stepResidentAction(body, 1 / 60, at, nav); farthest = Math.max(farthest, Math.hypot(body.x - at.x, body.z - at.z)); }
+  assert.ok(farthest < 7, `keeps within a few metres (${farthest.toFixed(1)} m)`);
+  assert.equal(body.residentAction.jog, true);
+  for (let i = 0; i < 4 * 60; i++) { at.z -= 2.4 / 60; stepResidentAction(body, 1 / 60, at, nav); }
+  assert.equal(body.residentAction.jog, false, 'walks beside a walking player');
+  advance(body, at, nav, 3);
+  assert.ok(Math.abs(Math.hypot(body.x - at.x, body.z - at.z) - 1.65) < .1, 'stops at the usual distance');
+});
+
+test('an indoor follower changes to its jog while catching up, and back to its walk', () => {
+  const metropolis = new VerticalMetropolis();
+  const plan = metropolis.area(0, 0, 400, 400).flatMap(b => b.buildings).map(interiorPlan).filter(Boolean).find(p => floorOccupants(p, 0).some(o => o.pose === 'stand'));
+  const spot = floorOccupants(plan, 0).find(o => o.pose === 'stand'), pos = toWorld(plan, spot.x, spot.z);
+  const at = { ...pos, y: spot.y, yaw: 0, z: pos.z - 1.5 };
+  const nav = { ...navigation(), area: 'this floor', sample: (from, p) => ({ ...p, y: spot.y }) };
+  const occupants = createOccupants({ scene: new THREE.Scene(), assets: { citizen: crowdAsset(['Idle', 'Walk', 'WalkFormal', 'Jog', 'Driving']) }, residentNavigation: () => nav });
+  const floors = [{ plan, level: 0 }];
+  occupants.update(0, { player: at, floors });
+  const p = occupants.avatars.find(p => p.occupant?.id === spot.id), walk = p.avatar.gait;
+  assert.equal(occupants.command(p, 'follow', at).ok, true);
+  for (let i = 0; i < 2 * 60; i++) { at.z -= 5.8 / 60; occupants.update(1 / 60, { player: at, floors }); }
+  assert.equal(p.avatar.gait, 'Jog');
+  for (let i = 0; i < 4 * 60; i++) occupants.update(1 / 60, { player: at, floors });
+  assert.equal(p.avatar.gait, walk);
+  occupants.dispose();
+});
+
 test('paused time never moves a resident, and followers stop for cars and lost players', () => {
   const body = person(), at = player(), nav = navigation();
   requestResidentAction(body, 'follow', at, nav); at.z = -9;
@@ -237,7 +311,7 @@ test('street commands bind to a living resident, survive population recycling an
   traffic.dispose();
 });
 
-test('indoor movement updates the solid body and pinned residents survive a floor unloading', () => {
+test('indoor movement moves the resident and pinned residents survive a floor unloading', () => {
   const metropolis = new VerticalMetropolis();
   const plans = metropolis.area(0, 0, 400, 400).flatMap(b => b.buildings).map(interiorPlan).filter(Boolean);
   const plan = plans.find(p => floorOccupants(p, 0).some(o => o.pose === 'stand'));
@@ -249,11 +323,10 @@ test('indoor movement updates the solid body and pinned residents survive a floo
   const floors = [{ plan, level: 0 }];
   occupants.update(0, { player: at, floors });
   const p = occupants.avatars.find(p => p.occupant?.id === spot.id), o = p.occupant;
-  const before = { x: o.x, collider: o.collider.x };
+  const before = { x: o.x };
   assert.equal(occupants.command(p, 'move_aside', at).ok, true);
   for (let i = 0; i < 180; i++) occupants.update(1 / 60, { player: at, floors });
   assert.ok(Math.abs(o.x - before.x) > .7);
-  assert.ok(Math.abs(o.x - before.x - (o.collider.x - before.collider)) < 1e-6, 'collision box moves with the actor');
   occupants.update(1, { player: at, floors: [] });
   assert.equal(p.occupant, o); assert.equal(p.root.visible, false, 'no resident floating on an unloaded floor');
   occupants.update(1, { player: at, floors });

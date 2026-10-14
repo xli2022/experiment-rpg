@@ -252,7 +252,7 @@ export async function createGame({ canvas, modes }) {
   function scenery() { return world.spatialFor(player.interior); }
   function allCars() { return owned.concat(traffic.cars); }
   function nearbyColliders(x, z, radius = 8, exclude = null, spatial = scenery()) {
-    return spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider), traffic.occupants.colliders(x, z, radius));
+    return spatial.near(x, z, radius).concat(allCars().filter(c => c !== exclude && Math.hypot(c.x - x, c.z - z) < radius + 5).map(carCollider));
   }
   // Walls are only climbable from outside a building's outline.
   function climbColliders() { return player.interior?.inside ? nearbyColliders(player.x, player.z, 3) : nearbyColliders(player.x, player.z, 3, null, world.spatial); }

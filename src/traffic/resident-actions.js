@@ -7,6 +7,16 @@ const point = p => ({ x: p.x, y: p.y, z: p.z });
 const reached = (a, b, radius = .03) => distance(a, b) < radius && Math.abs(a.y - b.y) < .12;
 const STANDING_ACTIONS = ['follow', 'move_aside', 'dance', 'guide', 'go_to', 'get_up'];
 const FOLLOW_GAP = 1.65, TRAIL_LIMIT = 2048;
+// Followers walk, and jog to catch up once the player gets ahead: the further
+// behind along the player's footsteps, the faster, up to a little more than
+// the player's own jog. They change to a jog above JOG_FROM and back to a
+// walk below WALK_FROM, so the gait does not flicker at one speed.
+const FOLLOW_WALK = 2.6, FOLLOW_JOG = 6.2, JOG_FROM = 3.2, WALK_FROM = 2.8;
+// Turns that take a resident round someone in the way, smallest first; never
+// backwards. They look this far ahead, so they bear off before reaching
+// someone rather than walking into a gap too narrow to pass. A detour that
+// gets them no nearer for DETOUR_PATIENCE seconds is given up.
+const DETOURS = [Math.PI / 6, Math.PI / 3, Math.PI / 2], LOOKAHEAD = .6, DETOUR_PATIENCE = 1;
 
 const reverseRoute = trail => [...trail].reverse().map(node => node.kind === 'lift' ? { ...node, from: point(node.to), to: point(node.from) } : point(node));
 function breadcrumb(trail, next) {
@@ -136,6 +146,56 @@ function stepSeat(body, dt, player, navigation) {
   return moved;
 }
 
+// How far a follower still has to walk along the player's footsteps.
+function trailLength(body, state, player) {
+  let length = 0, at = body;
+  for (let i = state.routeIndex ?? 0; i < state.route.length; i++) {
+    const node = state.route[i];
+    if (node.kind === 'lift') { at = node.to; continue; }
+    length += distance(at, node); at = node;
+  }
+  return length + distance(at, player);
+}
+
+function followSpeed(body, state, player) {
+  const behind = trailLength(body, state, player) - FOLLOW_GAP;
+  const speed = clamp(FOLLOW_WALK + (behind - 1.5) * 1.6, FOLLOW_WALK, FOLLOW_JOG);
+  state.jog = speed > JOG_FROM || !!state.jog && speed > WALK_FROM;
+  return speed;
+}
+
+const crowdsPlayer = (body, next, player) => Math.abs(body.y - player.y) < 1.3 && distance(next, player) < .8 && distance(next, player) < distance(body, player);
+
+// The heading to walk: straight at the target, or, when only people are in
+// the way, the smallest turn round them, keeping to the side last taken so
+// two residents in each other's way part instead of both waiting. Someone
+// who is not getting any nearer their goal waits rather than circling.
+function heading(body, target, remaining, step, dt, state, player, navigation) {
+  const ahead = Math.atan2(-(target.x - body.x), -(target.z - body.z)), reach = Math.min(remaining, LOOKAHEAD);
+  const to = (angle, length) => ({ x: body.x - Math.sin(angle) * length, y: body.y, z: body.z - Math.cos(angle) * length });
+  const clear = (angle, length) => { const next = trace(body, to(angle, length), navigation); return next && !crowdsPlayer(body, next, player); };
+  const open = angle => clear(angle, step) && (reach <= step || clear(angle, reach));
+  if (!navigation.withoutPeople || open(ahead)) { state.detour = null; return ahead; }
+  const side = state.side ?? 1;
+  if (!trace(body, to(ahead, reach), navigation.withoutPeople)) {
+    // A wall's end or a door jamb just in the way of someone who walked round
+    // people, off their footsteps: slide past it while still getting nearer.
+    if (!clear(ahead, step)) for (const turn of DETOURS.slice(0, 2)) for (const s of [side, -side]) if (clear(ahead + s * turn, step)) return ahead + s * turn;
+    return ahead;
+  }
+  const end = state.route.at(-1), goal = end && !end.kind ? end : target, near = distance(body, goal);
+  if (state.detour?.goal !== goal) state.detour = { goal, best: near, time: 0 };
+  const detour = state.detour;
+  if (near < detour.best - .1) { detour.best = near; detour.time = 0; }
+  if ((detour.time += dt) > DETOUR_PATIENCE) return ahead;
+  // A way round that stays clear for the whole look ahead; failing that, the
+  // next step only, straight on first.
+  for (const turn of DETOURS) for (const s of [side, -side]) if (open(ahead + s * turn)) { state.side = s; return ahead + s * turn; }
+  if (clear(ahead, step)) return ahead;
+  for (const turn of DETOURS) for (const s of [side, -side]) if (clear(ahead + s * turn, step)) { state.side = s; return ahead + s * turn; }
+  return ahead;
+}
+
 /** Record a real player elevator trip; model decisions never supply trip coordinates. */
 export function queueResidentLift(body, from, to, navigation) {
   const state = body.residentAction;
@@ -185,7 +245,7 @@ export function stepResidentAction(body, dt, player, navigation) {
       state.route.push(point(player));
     }
     if (!state.transition && Math.abs(body.y - player.y) < .3 && distance(body, player) < FOLLOW_GAP && trace(body, player, navigation)) {
-      state.status = 'Following you'; state.route = [point(player)]; state.routeIndex = 0; return 0;
+      state.status = 'Following you'; state.route = [point(player)]; state.routeIndex = 0; state.jog = false; return 0;
     }
   }
   if (state.transition) return stepSeat(body, dt, player, navigation);
@@ -228,29 +288,40 @@ export function stepResidentAction(body, dt, player, navigation) {
   // Shortcuts are checked against geometry; otherwise follow the recorded
   // footsteps round the corner. Replanning is bounded and runs four times/s.
   state.repath -= dt;
-  if (!traveling && state.route.length && state.repath <= 0 && !state.shortcutBlocked) {
+  if (!traveling && state.route.length && state.repath <= 0) {
     state.repath = .25;
-    state.routeIndex = 0;
-    const lift = state.route.findIndex(node => node.kind === 'lift');
-    const end = Math.min(12, (lift < 0 ? state.route.length : lift) - 1);
-    for (let i = end; i > 0; i--) if (trace(body, state.route[i], navigation)) { state.routeIndex = i; break; }
+    // Walking round people leaves a resident beside their footsteps rather
+    // than on them: the ones they have drawn level with count as reached.
+    while (state.route.length > 1 && !state.route[0].kind && !state.route[1].kind) {
+      const [a, b] = state.route;
+      if ((body.x - a.x) * (b.x - a.x) + (body.z - a.z) * (b.z - a.z) < 0 || Math.abs(body.y - a.y) > .3 || !trace(body, b, navigation.withoutPeople ?? navigation)) break;
+      state.route.shift(); state.routeIndex = 0; state.shortcutBlocked = false;
+    }
+    if (!state.shortcutBlocked) {
+      state.routeIndex = 0;
+      const lift = state.route.findIndex(node => node.kind === 'lift');
+      const end = Math.min(12, (lift < 0 ? state.route.length : lift) - 1);
+      for (let i = end; i > 0; i--) if (trace(body, state.route[i], navigation.withoutPeople ?? navigation)) { state.routeIndex = i; break; }
+    }
   }
   const routeIndex = state.routeIndex ?? 0;
   const target = state.kind === 'move_aside' ? state.target : state.route[routeIndex] ?? (following ? player : traveling ? state.target : state.home);
   const gap = following && routeIndex >= state.route.length - 1 && Math.abs(body.y - target.y) < .3 ? FOLLOW_GAP : 0;
   const remaining = Math.max(0, distance(body, target) - gap);
   if (!remaining) return 0;
-  const angle = Math.atan2(-(target.x - body.x), -(target.z - body.z)), error = angleDelta(body.yaw, angle);
-  body.yaw += clamp(error, -2.6 * dt, 2.6 * dt);
-  const step = Math.min(remaining, (following ? 2.6 : 1.5) * dt * Math.max(0, Math.cos(error)));
+  const pace = (following ? followSpeed(body, state, player) : 1.5) * dt, turn = (state.jog ? 3.4 : 2.6) * dt;
+  const angle = heading(body, target, remaining, Math.min(remaining, pace), dt, state, player, navigation), error = angleDelta(body.yaw, angle);
+  body.yaw += clamp(error, -turn, turn);
+  const step = Math.min(remaining, pace * Math.max(0, Math.cos(error)));
   if (step < 1e-6) return 0;
-  const before = point(body), ratio = step / distance(body, target);
-  const desired = { x: body.x + (target.x - body.x) * ratio, y: body.y, z: body.z + (target.z - body.z) * ratio };
+  const before = point(body);
+  const desired = { x: body.x - Math.sin(angle) * step, y: body.y, z: body.z - Math.cos(angle) * step };
   const next = trace(body, desired, navigation);
-  if (!next || Math.abs(body.y - player.y) < 1.3 && distance(next, player) < .8 && distance(next, player) < distance(body, player)) {
+  if (!next || crowdsPlayer(body, next, player)) {
     // Keep the original footsteps until a shortcut is actually traversed.
-    // A moving obstacle or a grazing corner can invalidate it mid-step.
-    if (routeIndex > 0) { state.routeIndex = 0; state.shortcutBlocked = true; }
+    // A car or a grazing corner can invalidate it mid-step; people can move
+    // on, so shortcuts are tried again while they stand in the way.
+    if (routeIndex > 0 && !(navigation.withoutPeople && trace(body, desired, navigation.withoutPeople))) { state.routeIndex = 0; state.shortcutBlocked = true; }
     state.status = 'The way is blocked; waiting here'; return 0;
   }
   if (state.kind !== 'resume_routine') {

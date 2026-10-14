@@ -50,7 +50,7 @@ function fixture(kind, { lift = false } = {}) {
     const body = avatar.occupant, nav = navigation(body), seat = nav.seatExit(), goal = seat && clearTarget(nav, seat.path.at(-1));
     if (!seat || !goal) { occupants.dispose(); continue; }
     Object.assign(player, goal);
-    const home = { ...position(body), yaw: body.yaw, activity: body.activity, collider: body.collider, rest: avatar.avatar.rest, life: avatar.life };
+    const home = { ...position(body), yaw: body.yaw, activity: body.activity, rest: avatar.avatar.rest, life: avatar.life };
     return { plan, level, spot, body, avatar, nav, seat, home, player, world, occupants, tick,
       advance(seconds = 10) { for (let i = 0; i < seconds * 60; i++) tick(); },
       returnHome() {
@@ -69,7 +69,6 @@ function seatedAtHome(f) {
   assert.equal(f.body.pose, 'sit');
   assert.deepEqual(position(f.body), position(f.home));
   assert.equal(f.body.yaw, f.home.yaw); assert.equal(f.body.activity, f.home.activity);
-  assert.ok(f.body.collider === f.home.collider, 'restores the original seat collision shape');
   assert.equal(f.avatar.avatar.rest, f.home.rest); assert.equal(f.avatar.life, f.home.life);
 }
 
@@ -88,8 +87,6 @@ test('desk, sofa and bench residents get up only after commit, follow, then sit 
       f.body.talking = null; f.advance(12);
       assert.equal(f.body.pose, 'stand'); assert.equal(f.avatar.avatar.rest, 'Idle');
       assert.ok(distance(f.body, f.home) > 1, `${kind}: actually walks away from the seat`);
-      assert.ok(Math.abs(f.body.collider.minY - f.body.y) < 1e-6);
-      assert.ok(Math.abs(f.body.collider.maxY - f.body.y - 1.8) < 1e-6, 'standing body is solid, including desk workers');
       assert.equal(f.occupants.command(f.avatar, 'wait', f.player).ok, true);
       const waiting = position(f.body); f.advance(1); assert.deepEqual(position(f.body), waiting);
       f.returnHome(); seatedAtHome(f);
@@ -122,7 +119,6 @@ test('sit down keeps a resident in their existing seat even when the exit is blo
       assert.equal(f.body.pose, 'sit'); assert.equal(f.body.residentAction.sitProgress, 0);
       assert.equal(f.occupants.actionContext(f.avatar).posture, 'seated');
       assert.equal(f.avatar.avatar.rest, f.home.rest); assert.deepEqual(position(f.body), position(f.home));
-      assert.equal(f.body.collider, f.home.collider);
       assert.equal(f.occupants.command(f.avatar, 'resume_routine', f.player).ok, true); f.advance(1);
       seatedAtHome(f);
     } finally { f.occupants.dispose(); }
@@ -189,7 +185,6 @@ test('a seated follower takes the elevator and returns to the original seat on a
     f.advance(45);
     assert.equal(f.body.y, to.y, JSON.stringify({ body: position(f.body), player: position(f.player), from, status: f.body.residentAction?.status, route: f.body.residentAction?.route.slice(0, 4) }));
     assert.equal(f.body.pose, 'stand'); assert.ok(f.avatar.occupant === f.body);
-    assert.ok(Math.abs(f.body.collider.minY - to.y) < 1e-6);
     f.returnHome(); seatedAtHome(f);
   } finally { f.occupants.dispose(); }
 });

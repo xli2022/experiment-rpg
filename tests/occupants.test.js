@@ -7,7 +7,6 @@ import { interiorPlan, floorPlan, floorOccupants, templateSpots, levelY } from '
 import { pointInConvex } from '../src/world/building-footprints.js';
 import { floorColliders, toWorld } from '../src/world/interior-physics.js';
 import { createOccupants, glanceToward, turnBone, OCCUPANTS } from '../src/traffic/occupants.js';
-import { moveWithCollisions } from '../src/core/physics.js';
 import { crowdAsset, visitorAsset } from './helpers/street-grid.js';
 
 const metropolis = new VerticalMetropolis();
@@ -92,21 +91,6 @@ test('only the nearest people on standing floors are shown, and none outlast the
   occupants.update(.016, { player, camera: null, floors: [], time: 1 });
   assert.equal(occupants.snapshot().assigned, 0);
   assert.ok(occupants.avatars.every(a => !a.root.parent && !a.root.visible));
-  occupants.dispose();
-});
-
-test('the player walks round people standing inside rather than through them', () => {
-  const assets = { citizen: crowdAsset(['Idle', 'Walk', 'WalkFormal', 'Jog', 'Driving']) };
-  const { occupants } = scene(assets);
-  const entry = plans.flatMap(({ plan }) => [0, 1].filter(l => l < plan.levels).map(level => ({ plan, level, o: floorOccupants(plan, level).find(o => o.pose === 'stand') }))).find(e => e.o);
-  const { plan, level, o } = entry, at = toWorld(plan, o.x, o.z);
-  occupants.update(.016, { player: { x: at.x, y: levelY(plan, level), z: at.z + 2 }, camera: null, floors: [{ plan, level }], time: 0 });
-  const boxes = occupants.colliders(at.x, at.z, 3);
-  assert.ok(boxes.some(b => b.id === `occupant:${o.id}`), 'their body is solid');
-  // Walk straight at them from two metres out: the body stops short.
-  const yaw = plan.origin.yaw + o.yaw, fx = -Math.sin(yaw), fz = -Math.cos(yaw), body = { x: at.x + fx * 2, z: at.z + fz * 2, y: levelY(plan, level) };
-  for (let i = 0; i < 120; i++) moveWithCollisions(body, -fx * .03, -fz * .03, .43, boxes);
-  assert.ok(Math.hypot(body.x - at.x, body.z - at.z) > .43, 'never inside them');
   occupants.dispose();
 });
 

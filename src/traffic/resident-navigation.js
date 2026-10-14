@@ -32,6 +32,9 @@ export function createResidentNavigation({ world, people = () => [], cars = () =
         return !context?.inside || !world.interiors || world.interiors.floors().some(f => f.plan.id === context.id && f.level === context.level);
       },
       sample: (from, to, arrival = false) => sample(from, to, arrival),
+      // The same ground, walls and cars without the people: a way through
+      // that people standing in it can be walked round.
+      withoutPeople: { sample: (from, to, arrival = false) => sample(from, to, arrival, [], false) },
       // The only collision exception is the resident's own seat, on the short
       // path between its seated root and clear floor. It never applies to travel.
       sampleSeat(from, to, seat) {
@@ -64,7 +67,7 @@ export function createResidentNavigation({ world, people = () => [], cars = () =
         return null;
       },
     };
-    function sample(from, to, arrival = false, ignore = []) {
+    function sample(from, to, arrival = false, ignore = [], crowd = true) {
       if (Math.abs(to.x) > (world.limit ?? Infinity) - .4 || Math.abs(to.z) > (world.limit ?? Infinity) - .4 || world.isWater?.(to.x, to.z)) return null;
       const context = world.interiorContextAt?.(to.x, from.y, to.z);
       const spatial = world.spatialFor?.(context) ?? world.spatial;
@@ -74,7 +77,7 @@ export function createResidentNavigation({ world, people = () => [], cars = () =
       const radius = body.plan ? .28 : .32;
       if (boxes.some(b => !b.supportOnly && overlapsHeight(b, y) && circleHitsBox(to.x, to.z, radius, b))) return null;
       for (const car of cars()) if (Math.abs(car.y - y) < 2 && distance(car, to) < 6 && circleHitsBox(to.x, to.z, .5, carCollider(car))) return null;
-      for (const other of people()) if (other !== body && Math.abs(other.y - y) < 1.5) {
+      if (crowd) for (const other of people()) if (other !== body && Math.abs(other.y - y) < 1.5) {
         const gap = other.residentAction?.sitProgress ? RESIDENT_SIT.length / 2 + radius : .7;
         if (distance(other, to) < gap && (arrival || distance(other, to) < distance(other, from) - 1e-6)) return null;
       }

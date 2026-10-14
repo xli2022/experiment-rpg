@@ -173,7 +173,7 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
     if (person.group) for (const member of person.group.members) if (member !== person) { member.group = null; member.mode = member.mode === 'chat' ? 'walk' : member.mode; }
     person.mode = null; person.leader = person.follower = person.group = null; person.residentAction = null; person.talking = null;
     person.root.visible = false; if (person.root.parent) scene.remove(person.root);
-    if (person.jog) { person.avatar.setGait?.(person.gait); person.jog = false; }
+    person.avatar.setGait?.(person.gait); person.jog = false;
   }
   const occupied = (p, gap) => walkers().some(o => Math.abs(o.y - p.y) < 3 && dist(o, p) < gap);
   function candidate(focus, radius) {
@@ -414,6 +414,8 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
           if (!person.residentAction?.sitProgress) person.yaw += clamp(angleDelta(person.yaw, Math.atan2(-(player.x - person.x), -(player.z - person.z))), -2.6 * dt, 2.6 * dt);
         } else if (person.residentAction) {
           moved = stepResidentAction(person, dt, player, residentNavigation(person));
+          // Followers catching up jog where the rig has a Jog clip.
+          person.avatar.setGait?.(person.residentAction?.jog ? 'Jog' : person.gait);
           if (!person.residentAction) { person.mode = 'walk'; person.pauseIn = 15 + random() * 30; }
         } else if (person.mode === 'follow') moved = person.leader?.mode ? follow(person, dt) : (person.mode = 'walk', 0);
         else if (person.mode === 'chat') {

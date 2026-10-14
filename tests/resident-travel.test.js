@@ -171,8 +171,6 @@ test('an indoor resident follows outside and returns to their original upper-flo
   assert.equal(world.interiorContextAt(body.x, body.y, body.z)?.inside ?? false, false, 'follows out onto the street');
   assert.equal(avatar.root.visible, true); assert.equal(avatar.life, life);
   assert.ok(avatar.occupant === body); assert.ok(body.plan === plan); assert.equal(body.level, 2);
-  assert.ok(Math.abs(body.collider.minY - body.y) < 1e-6, 'collision height follows the elevator and entrance steps');
-  assert.ok(Math.abs(body.collider.maxY - body.y - 1.8) < 1e-6);
   assert.equal(occupants.command(avatar, 'resume_routine', player).ok, true);
   player.x += 100; floors = [];
   for (let i = 0; i < 60 * 180 && body.residentAction; i++) update();
