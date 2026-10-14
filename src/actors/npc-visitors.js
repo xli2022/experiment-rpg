@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import { createNPCAnimation } from './npc-animation.js';
 import { createResidentDance } from './resident-dance.js';
-import { createResidentRest } from './resident-rest.js';
+import { createResidentSit } from './resident-sit.js';
 
 // Quaternius CC0 characters, with their own rigs and authored motion.
 // Speeds describe one unscaled animation cycle at the requested game height.
@@ -48,7 +48,7 @@ export function createVisitor(asset, profile, clipName = 'Idle') {
   const animation = createNPCAnimation(mixer, [idle, walk], { initial: clipName, walkSpeed: profile.walkSpeed });
   ground();
   const dance = createResidentDance(root, model);
-  const resting = createResidentRest(root, body);
+  const sitting = createResidentSit(root, body);
   root.updateMatrixWorld(true);
   Object.assign(root.userData, { appearance: profile.id, species: profile.species, model: profile.id });
   return { root, body, mixer, scale, profile, walkSpeed: profile.walkSpeed,
@@ -57,11 +57,11 @@ export function createVisitor(asset, profile, clipName = 'Idle') {
     get animation() { return animation.animation; },
     ground,
     update(dt, speed = 0, activity = null) {
-      resting.reset(); dance.reset(); animation.update(activity?.recline === 1 ? 0 : dt, speed);
-      if (!activity?.recline) dance.apply(activity);
-      ground(dt); resting.apply(activity?.recline);
+      sitting.reset(); dance.reset(); animation.update(activity?.sitProgress === 1 ? 0 : dt, speed);
+      if (!activity?.sitProgress) dance.apply(activity);
+      ground(dt); sitting.apply(activity?.sitProgress);
     },
-    setAnimation(name) { resting.reset(true); dance.reset(); animation.setAnimation(name); ground(); },
+    setAnimation(name) { sitting.reset(true); dance.reset(); animation.setAnimation(name); ground(); },
     setGait: name => animation.setGait(name), get gait() { return animation.gait; },
     setRest: (name, blend) => animation.setRest(name, blend), get rest() { return animation.rest; },
     dispose() {

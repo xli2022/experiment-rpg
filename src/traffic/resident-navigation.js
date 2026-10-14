@@ -2,7 +2,7 @@ import { carCollider, supportHeight, overlapsHeight, circleHitsBox } from '../co
 import { levelY } from '../world/interior-plan.js';
 import { toLocal } from '../world/interior-physics.js';
 import { residentDestinations, planResidentGuide } from './resident-guides.js';
-import { RESIDENT_REST } from '../core/resident-behaviors.js';
+import { RESIDENT_SIT } from '../core/resident-behaviors.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 
@@ -75,7 +75,7 @@ export function createResidentNavigation({ world, people = () => [], cars = () =
       if (boxes.some(b => !b.supportOnly && overlapsHeight(b, y) && circleHitsBox(to.x, to.z, radius, b))) return null;
       for (const car of cars()) if (Math.abs(car.y - y) < 2 && distance(car, to) < 6 && circleHitsBox(to.x, to.z, .5, carCollider(car))) return null;
       for (const other of people()) if (other !== body && Math.abs(other.y - y) < 1.5) {
-        const gap = other.residentAction?.recline ? RESIDENT_REST.length / 2 + radius : .7;
+        const gap = other.residentAction?.sitProgress ? RESIDENT_SIT.length / 2 + radius : .7;
         if (distance(other, to) < gap && (arrival || distance(other, to) < distance(other, from) - 1e-6)) return null;
       }
       return { x: to.x, y, z: to.z };

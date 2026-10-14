@@ -111,6 +111,24 @@ test('a blocked seat exit is rejected without changing the pose or original acti
   } finally { f.occupants.dispose(); }
 });
 
+test('sit down keeps a resident in their existing seat even when the exit is blocked', () => {
+  for (const kind of ['desk', 'sofa', 'bench']) {
+    const f = fixture(kind);
+    try {
+      f.obstacles([orientedBox(f.home.x, f.home.z, 4, 4, 0, f.home.y + 2, f.home.y, { id: 'new-obstacle' })]);
+      assert.equal(previewResidentAction(f.body, 'sit_down', f.player, f.nav).ok, true);
+      assert.equal(f.body.residentAction, undefined);
+      assert.equal(f.occupants.command(f.avatar, 'sit_down', f.player).ok, true); f.advance(2);
+      assert.equal(f.body.pose, 'sit'); assert.equal(f.body.residentAction.sitProgress, 0);
+      assert.equal(f.occupants.actionContext(f.avatar).posture, 'seated');
+      assert.equal(f.avatar.avatar.rest, f.home.rest); assert.deepEqual(position(f.body), position(f.home));
+      assert.equal(f.body.collider, f.home.collider);
+      assert.equal(f.occupants.command(f.avatar, 'resume_routine', f.player).ok, true); f.advance(1);
+      seatedAtHome(f);
+    } finally { f.occupants.dispose(); }
+  }
+});
+
 test('a seated resident stands before dancing and can return to the original seat', () => {
   const f = fixture('sofa');
   try {

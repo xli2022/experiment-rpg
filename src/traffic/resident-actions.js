@@ -1,11 +1,11 @@
 import { traceResidentPath as trace } from './resident-path.js';
 import { angleDelta, clamp } from '../core/physics.js';
-import { RESIDENT_BEHAVIORS, RESIDENT_REST } from '../core/resident-behaviors.js';
+import { RESIDENT_BEHAVIORS, RESIDENT_SIT } from '../core/resident-behaviors.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const point = p => ({ x: p.x, y: p.y, z: p.z });
 const reached = (a, b, radius = .03) => distance(a, b) < radius && Math.abs(a.y - b.y) < .12;
-const STANDING_ACTIONS = ['follow', 'move_aside', 'dance', 'guide', 'go_to', 'lie_down', 'get_up'];
+const STANDING_ACTIONS = ['follow', 'move_aside', 'dance', 'guide', 'go_to', 'get_up'];
 const FOLLOW_GAP = 1.65, TRAIL_LIMIT = 2048;
 
 const reverseRoute = trail => [...trail].reverse().map(node => node.kind === 'lift' ? { ...node, from: point(node.to), to: point(node.from) } : point(node));
@@ -18,16 +18,17 @@ function breadcrumb(trail, next) {
 
 export function residentActionContext(body, navigation) {
   return { behavior: body.residentAction?.kind ?? 'routine', status: body.residentAction?.status ?? 'Going about my day',
-    posture: body.residentAction?.recline > 0 ? 'lying down' : body.pose === 'sit' ? 'seated' : 'standing',
+    posture: body.residentAction?.sitProgress > 0 || body.pose === 'sit' ? 'seated' : 'standing',
     canWalk: navigation.mobile !== false, area: navigation.area,
     destinations: (navigation.destinations?.() ?? []).map(({ id, name, type, distance }) => ({ id, name, type, distance })) };
 }
 
-function roomToLieDown(start, yaw, player, navigation) {
+function roomToSitDown(start, yaw, player, navigation) {
   const c = Math.cos(yaw), s = Math.sin(yaw);
-  // Overlapping standing-radius samples cover the full resting footprint;
+  // Overlapping standing-radius samples cover the compact seated footprint;
   // equal support at each point rules out steps and ledges beneath the body.
-  for (const across of [-.4, 0, .4]) for (let along = -1; along <= 1.01; along += .25) {
+  const acrossEdge = RESIDENT_SIT.width / 2 - .3, alongEdge = RESIDENT_SIT.length / 2 - .3;
+  for (const across of [-acrossEdge, 0, acrossEdge]) for (let along = -alongEdge; along <= alongEdge + .01; along += .25) {
     const p = { x: start.x + c * across + s * along, y: start.y, z: start.z - s * across + c * along };
     const support = navigation.sample(p, p, true);
     if (!support || Math.abs(support.y - start.y) > .08 || Math.abs(player.y - start.y) < 1.3 && distance(p, player) < .75) return false;
@@ -52,7 +53,7 @@ export function requestResidentAction(body, request, player, navigation) {
   const seat = gettingUp ? navigation.seatExit?.() : null;
   if (gettingUp && !seat) return denied('I need a little room to stand up first.');
   const start = seat?.path.at(-1) ?? body;
-  if (action === 'lie_down' && !roomToLieDown(start, body.yaw, player, navigation)) return denied('I need a clear, level space to lie down.');
+  if (action === 'sit_down' && body.pose !== 'sit' && !body.residentAction?.sitProgress && !roomToSitDown(start, body.yaw, player, navigation)) return denied('I need a clear, level space to sit down.');
   let destination = null;
   let guide = null;
   if (action === 'guide' || action === 'go_to') {
@@ -88,10 +89,10 @@ export function requestResidentAction(body, request, player, navigation) {
     destination: guide ? { id: guide.destination.id, name: guide.destination.name } : null,
     seat: seat ?? prior?.seat ?? null,
     transition: seat ? 'rise' : prior?.transition ?? null,
-    recline: prior?.recline ?? 0,
+    sitProgress: prior?.sitProgress ?? 0,
   };
   if (state.transition === 'sit' && action !== 'resume_routine') state.transition = 'rise';
-  if (body.pose === 'sit' && action === 'wait') state.transition = null;
+  if (body.pose === 'sit' && (action === 'wait' || action === 'sit_down')) state.transition = null;
   if (action === 'follow') state.route = [point(player)];
   if (action === 'resume_routine') state.route = reverseRoute(state.trail);
   body.speed = 0;
@@ -99,13 +100,13 @@ export function requestResidentAction(body, request, player, navigation) {
     follow: 'Sure. I will follow you.',
     wait: 'All right. I will wait here.', move_aside: 'Of course. I will step aside.',
     dance: 'Sure. I will dance until you ask me to stop.',
-    lie_down: 'All right. I will lie down here.', get_up: 'All right. I will stand here.',
+    sit_down: body.pose === 'sit' ? 'All right. I will stay seated here.' : 'All right. I will sit down here.', get_up: 'All right. I will stand here.',
     guide: guide && `Follow me to ${guide.destination.name}. I will wait if you fall behind.`,
     go_to: guide && `Sure. I will go to ${guide.destination.name} and wait there.`,
     resume_routine: 'All right. I will get back to what I was doing.',
   };
   state.status = { follow: 'Following you', wait: 'Waiting here', move_aside: 'Moving aside',
-    dance: 'Dancing', lie_down: 'Lying down', get_up: 'Getting up', guide: guide && `Guiding you to ${guide.destination.name}`, go_to: guide && `Going to ${guide.destination.name}`, resume_routine: 'Returning to my routine' }[action];
+    dance: 'Dancing', sit_down: body.pose === 'sit' ? 'Seated here' : 'Sitting down', get_up: 'Getting up', guide: guide && `Guiding you to ${guide.destination.name}`, go_to: guide && `Going to ${guide.destination.name}`, resume_routine: 'Returning to my routine' }[action];
   return { ok: true, reply: replies[action], status: state.status };
 }
 
@@ -151,14 +152,15 @@ export function stepResidentAction(body, dt, player, navigation) {
   if (!state || dt <= 0) return 0;
   body.speed = 0;
   if (body.talking) return 0;
-  if (!state.transition && state.kind === 'lie_down') {
-    if (state.recline === 0 && !roomToLieDown(body, body.yaw, player, navigation)) { state.status = 'Waiting for space to lie down'; return 0; }
-    state.recline = Math.min(1, state.recline + dt / RESIDENT_REST.duration);
-    state.status = state.recline === 1 ? 'Resting here' : 'Lying down'; return 0;
+  if (!state.transition && state.kind === 'sit_down') {
+    if (body.pose === 'sit') { state.status = 'Seated here'; return 0; }
+    if (state.sitProgress === 0 && !roomToSitDown(body, body.yaw, player, navigation)) { state.status = 'Waiting for space to sit down'; return 0; }
+    state.sitProgress = Math.min(1, state.sitProgress + dt / RESIDENT_SIT.duration);
+    state.status = state.sitProgress === 1 ? 'Seated here' : 'Sitting down'; return 0;
   }
-  if (state.recline > 0) {
-    if (state.kind === 'wait') { state.recline = Math.min(1, state.recline + dt / RESIDENT_REST.duration); state.status = 'Resting here'; return 0; }
-    state.recline = Math.max(0, state.recline - dt / RESIDENT_REST.duration);
+  if (state.sitProgress > 0) {
+    if (state.kind === 'wait') { state.sitProgress = Math.min(1, state.sitProgress + dt / RESIDENT_SIT.duration); state.status = 'Seated here'; return 0; }
+    state.sitProgress = Math.max(0, state.sitProgress - dt / RESIDENT_SIT.duration);
     state.status = 'Getting up'; return 0;
   }
   const following = state.kind === 'follow';

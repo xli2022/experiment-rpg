@@ -18,17 +18,18 @@ export function decisionFormat(context = {}) {
 export function decisionMessages(line, context) {
   return [{ role: 'system', content: [
     'Classify the latest player message to a resident in a game. Return ONLY JSON with BOTH fields: {"action":"...","destination":"..."}. Do not roleplay or write dialogue.',
-    'Select the requested activity: follow = accompany the player; wait = stop and stay here; move_aside = get out of the way; dance = keep dancing; guide = lead the player to a nearby destination; go_to = go to a destination alone and wait there; lie_down = lie down and rest here; get_up = stand up from lying or sitting; resume_routine = return to normal activity; none = no supported request.',
+    'Select the requested activity: follow = accompany the player; wait = stop and stay here; move_aside = get out of the way; dance = keep dancing; guide = lead the player to a nearby destination; go_to = go to a destination alone and wait there; sit_down = sit down and rest here; get_up = stand up from sitting; resume_routine = return to normal activity; none = no supported request.',
     'Polite questions such as "could you walk with me?" ARE requests. Choose follow. "Come with me" and "keep me company while I walk" also mean follow.',
     '"Dance", "can you dance for me?", and "show me your moves" mean dance.',
-    '"Lie down", "lay down", "lie on the ground", and "stretch out here" mean lie_down. "Get up", "stand up", "on your feet", and "stop lying down" mean get_up. "Do not lie down" means wait; "do not get up" and "stay lying down" mean wait and preserve the current posture.',
+    '"Sit down", "take a seat", "sit on the ground", and "have a seat" mean sit_down. "Get up", "stand up", "on your feet", and "stop sitting down" mean get_up. "Do not sit down" means wait; "do not get up" and "stay seated" mean wait and preserve the current posture.',
     '"Guide me to a shop", "show me the way to the station", and "take me to the elevator" mean guide. "Go to the shop", "head to the station", and "meet me at the elevator" mean go_to: the resident goes alone. Only guide waits for the player to follow.',
     'For guide and go_to, "destination" is the matching ID from destinations below. Match the place name or type; choose the nearest matching place. If none matches or no place is specified, use "destination":"". For EVERY other action also use "destination":"". Always include both fields. Never invent a destination or coordinates.',
     '"Wait here", "stay put", "stop following me", "do not follow me", "stop dancing", "stop guiding me", and "do not dance" mean wait. A request to stop an activity must never start it.',
+    'To STOP SITTING, choose get_up: "stop sitting", "stop sitting down", and "get off the ground" mean get_up, not wait. Waiting would leave the resident seated. This rule also applies when the current posture is standing.',
     '"Can I get past?", "make room", and "please step aside" mean move_aside.',
     '"Carry on with what you were doing", "back to work", and "go back to your routine" mean resume_routine.',
-    'Choose none for greetings, small talk, quoted commands, stories, hypothetical questions, or questions ABOUT an action. "What happens if I say follow me?", "What happens if I say lay down?", "Tell me a story about dancing", and "What is your favorite dance?" mean none. These discuss actions without asking you to perform them.',
-    'Waving, cheering, coming here, and facing the player are unsupported: "wave at me", "cheer for me", "come here", and "face me" mean none. Never substitute another activity for an unsupported request.',
+    'Choose none for greetings, small talk, quoted commands, stories, hypothetical questions, or questions ABOUT an action. "What happens if I say follow me?", "What happens if I say sit down?", "Tell me a story about dancing", and "What is your favorite dance?" mean none. These discuss actions without asking you to perform them.',
+    'Lying down, waving, cheering, coming here, and facing the player are unsupported: "lie down", "lay down", "wave at me", "cheer for me", "come here", and "face me" mean none. Never substitute another activity for an unsupported request.',
     'Only classify the player\'s latest request to THIS resident. Do not repeat any earlier command. Never invent another action or arguments. The game checks whether the request is possible.',
     `Current resident state: ${JSON.stringify(context)}.`,
   ].join('\n') }, { role: 'user', content: line }];
@@ -40,7 +41,7 @@ export function decisionMessages(line, context) {
 export function preliminaryDecision(line) {
   const phrase = String(line).trim().toLowerCase().replace(/[.!?]+$/, '').trim()
     .replace(/^(?:(?:can|could|would|will) you(?: please)?|please)\s+/, '').replace(/,?\s+please$/, '');
-  if (/^(?:come (?:over )?here|face me|wave(?: at me)?|cheer(?: for me)?)$/.test(phrase)) return { action: 'none' };
+  if (/^(?:lie down|lay down|lie on the ground|stretch out here|come (?:over )?here|face me|wave(?: at me)?|cheer(?: for me)?)$/.test(phrase)) return { action: 'none' };
   if (/^(?:guide me(?: somewhere| someplace)?|take me somewhere|show me the way)$/.test(phrase)) return { action: 'guide', destination: '' };
   if (/^(?:go to a place|go somewhere|head somewhere)$/.test(phrase)) return { action: 'go_to', destination: '' };
   return null;

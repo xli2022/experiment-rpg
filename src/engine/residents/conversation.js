@@ -164,7 +164,7 @@ export function settingsNote({ status, progress, message }, touch = false) {
     case 'idle': return 'On. The resident model loads when you start playing.';
     case 'checking': return 'Checking your graphics card…';
     case 'loading': return `${message || 'Downloading'}… ${Math.round(progress * 100)}%. You can keep playing.`;
-    case 'ready': return `Ready. Face a resident and ${touch ? 'tap USE' : 'press E'} to talk. Ask them to dance, lie down, get up, follow, wait, move aside, guide you somewhere, go to a place, or return to their routine. Agreed actions start after Bye. Replies stay on this device.`;
+    case 'ready': return `Ready. Face a resident and ${touch ? 'tap USE' : 'press E'} to talk. Ask them to dance, sit down, get up, follow, wait, move aside, guide you somewhere, go to a place, or return to their routine. Agreed actions start after Bye. Replies stay on this device.`;
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
     case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
   }

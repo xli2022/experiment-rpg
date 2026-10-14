@@ -47,7 +47,7 @@ async function loadVisitor(id) {
 
 const loaded = new Map(await Promise.all(VISITOR_PROFILES.map(async profile => [profile.id, await loadVisitor(profile.id)])));
 
-test('every robot and alien can dance, lie down and get up using its native rig', () => {
+test('every robot and alien can dance, sit down and get up using its native rig', () => {
   for (const profile of VISITOR_PROFILES) {
     const actor = createVisitor(loaded.get(profile.id).asset, profile);
     try { checkResidentPoses(actor); } finally { actor.dispose(); }

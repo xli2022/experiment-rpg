@@ -4,7 +4,7 @@ import { floorOccupants } from '../world/interior-plan.js';
 import { toWorld } from '../world/interior-physics.js';
 import { orientedBox, seededRandom } from '../core/physics.js';
 import { requestResidentAction, stepResidentAction, residentActionContext } from './resident-actions.js';
-import { RESIDENT_REST } from '../core/resident-behaviors.js';
+import { RESIDENT_SIT } from '../core/resident-behaviors.js';
 
 // People inside buildings. Each floor's plan says who is where (see
 // floorOccupants): someone on the sofa or at the counter in a lit flat, a
@@ -192,11 +192,11 @@ export function createOccupants({ scene, assets, residentNavigation = null, rand
       for (const person of shown) {
         const o = person.occupant;
         if (o.residentAction) {
-          const before = { x: o.x, y: o.y, z: o.z, pose: o.pose, lying: !!o.residentAction.recline };
+          const before = { x: o.x, y: o.y, z: o.z, pose: o.pose, sitting: !!o.residentAction.sitProgress };
           stepResidentAction(o, dt, player, residentNavigation(o));
-          if (before.pose !== o.pose || before.lying !== !!o.residentAction?.recline) {
-            const lying = !!o.residentAction?.recline;
-            o.collider = o.pose === 'sit' ? o.seatCollider : orientedBox(o.x, o.z, lying ? RESIDENT_REST.width : .56, lying ? RESIDENT_REST.length : .56, o.yaw, o.y + 1.8, o.y, { id: `occupant:${o.id}`, occupant: true, climbable: false });
+          if (before.pose !== o.pose || before.sitting !== !!o.residentAction?.sitProgress) {
+            const sitting = !!o.residentAction?.sitProgress;
+            o.collider = o.pose === 'sit' ? o.seatCollider : orientedBox(o.x, o.z, sitting ? RESIDENT_SIT.width : .56, sitting ? RESIDENT_SIT.length : .56, o.yaw, o.y + 1.8, o.y, { id: `occupant:${o.id}`, occupant: true, climbable: false });
             person.avatar.setRest?.(o.pose === 'sit' ? o.chair ? 'Driving' : 'Seated' : 'Idle', .4);
           } else if (o.collider) {
             const dx = o.x - before.x, dy = o.y - before.y, dz = o.z - before.z;
@@ -204,7 +204,7 @@ export function createOccupants({ scene, assets, residentNavigation = null, rand
             for (const key of ['z', 'minZ', 'maxZ']) o.collider[key] += dz;
             for (const key of ['minY', 'maxY']) o.collider[key] += dy;
           }
-          if (o.collider && o.pose !== 'sit') o.collider.maxY = o.y + (o.residentAction?.recline === 1 ? RESIDENT_REST.height : 1.8);
+          if (o.collider && o.pose !== 'sit') o.collider.maxY = o.y + (o.residentAction?.sitProgress === 1 ? RESIDENT_SIT.height : 1.8);
           person.root.position.set(o.x, o.y, o.z); person.root.rotation.y = o.yaw;
         }
         sphere.center.set(o.x, o.y + .9, o.z);
@@ -217,7 +217,7 @@ export function createOccupants({ scene, assets, residentNavigation = null, rand
         person.elapsed += dt;
         if (dist(o, player) > 14 && person.elapsed < .12) continue;
         person.step = person.elapsed; person.elapsed = 0;
-        person.avatar.update(person.step, o.residentAction ? o.speed ?? 0 : 0, o.residentAction?.transition || o.talking && !o.residentAction?.recline ? null : o.residentAction);
+        person.avatar.update(person.step, o.residentAction ? o.speed ?? 0 : 0, o.residentAction?.transition || o.talking && !o.residentAction?.sitProgress ? null : o.residentAction);
         gesture(person, time, player);
       }
     },

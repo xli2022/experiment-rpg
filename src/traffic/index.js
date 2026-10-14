@@ -7,6 +7,7 @@ import { createOccupants } from './occupants.js';
 import { populationFor } from './population.js';
 import { previewResidentAction, queueResidentLift } from './resident-actions.js';
 import { createResidentNavigation } from './resident-navigation.js';
+import { RESIDENT_SIT } from '../core/resident-behaviors.js';
 import { carCollider, clamp, seededRandom } from '../core/physics.js';
 
 export { buildNetwork } from './network.js';
@@ -94,7 +95,7 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
     // People waiting at the kerb, or held back and walking up to it (and a
     // companion with them), hold back for cars.
     const holds = p => p.mode === 'wait' || p.mode === 'walk' && p.holding;
-    const list = pedestrians.walkers.map(p => ({ x: p.x, y: p.y, z: p.z, r: p.residentAction?.recline ? 1.4 : p.claim ? 1 : .35, size: p.residentAction?.recline ? 1.4 : .35, kind: 'walker',
+    const list = pedestrians.walkers.map(p => ({ x: p.x, y: p.y, z: p.z, r: p.residentAction?.sitProgress ? RESIDENT_SIT.length / 2 : p.claim ? 1 : .35, size: p.residentAction?.sitProgress ? RESIDENT_SIT.length / 2 : .35, kind: 'walker',
       waiting: holds(p) || p.mode === 'follow' && !!p.leader && holds(p.leader) }));
     if (!vehicle) list.push({ x: player.x, y: player.y, z: player.z, r: .45, size: .45, kind: 'player' });
     return list;
@@ -117,8 +118,8 @@ export function createTraffic({ scene, world, assets, quality = 'high' }) {
       const target = residentTarget(handle);
       if (!target) return null;
       const { x, y, z, pose } = target.body;
-      const recline = target.body.residentAction?.recline ?? 0;
-      return { x, y, z, head: recline ? 1.95 - recline * 1.3 : pose === 'sit' ? 1.35 : 1.95, visible: target.person.root.visible };
+      const sitProgress = target.body.residentAction?.sitProgress ?? 0;
+      return { x, y, z, head: sitProgress ? 1.95 - sitProgress * .8 : pose === 'sit' ? 1.35 : 1.95, visible: target.person.root.visible };
     },
     talkToResident(handle, talking) {
       const target = residentTarget(handle);

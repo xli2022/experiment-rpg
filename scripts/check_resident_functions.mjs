@@ -13,7 +13,7 @@ const browser = await chromium.launchPersistentContext(new URL('browser-real/', 
   executablePath: process.env.CHROME_PATH, headless: true, viewport: { width: 1600, height: 1000 },
   args: ['--no-sandbox', '--enable-unsafe-webgpu', '--ignore-gpu-blocklist', '--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface'],
 });
-const page = await browser.newPage(), results = { errors: [], decisions: [] };
+const page = await browser.newPage(), results = { errors: [], poses: {}, decisions: [] };
 page.on('pageerror', error => results.errors.push(error.message));
 await page.route(`${origin}/resident-functions-check`, route => route.fulfill({ contentType: 'text/html',
   body: '<html><body style="margin:0;background:#263b43"><div id="label" style="position:absolute;color:white;font:24px sans-serif;left:25px;top:20px"></div></body></html>' }));
@@ -44,17 +44,21 @@ try {
       document.querySelector('#label').textContent = `${kind} — four human bases, eight visitor designs`;
       actors.forEach(actor => {
         actor.setAnimation('Idle');
-        for (let frame = 0; frame < 80; frame++) actor.update(1 / 60, 0, { kind, elapsed, recline: kind === 'lie_down' ? Math.min(1, (frame + 1) / 72) : 0 });
+        for (let frame = 0; frame < 80; frame++) actor.update(1 / 60, 0, { kind, elapsed, sitProgress: kind === 'sit_down' ? Math.min(1, (frame + 1) / 72) : 0 });
       });
       renderer.render(scene, camera);
+      return actors.map(actor => {
+        const bounds = new THREE.Box3().setFromObject(actor.root, true), size = bounds.getSize(new THREE.Vector3());
+        return { id: actor.profile.id, width: size.x, height: size.y, length: size.z, ground: bounds.min.y };
+      });
     };
     window.preview('dance');
   });
-  for (const kind of ['dance', 'lie_down', 'get_up']) {
-    await page.evaluate(kind => window.preview(kind), kind);
+  for (const kind of ['dance', 'sit_down', 'get_up']) {
+    results.poses[kind] = await page.evaluate(kind => window.preview(kind), kind);
     await page.screenshot({ path: new URL(`functions-${kind}.png`, output).pathname });
   }
-  console.log('Rendered dance, lie-down and get-up poses for all 12 body designs.');
+  console.log('Rendered dance, sit-down and get-up poses for all 12 body designs.');
   if (process.env.RESIDENT_REAL === '1') {
     const modelState = await page.evaluate(async () => {
       const { ResidentModel } = await import('/src/engine/residents/model.js');
@@ -68,11 +72,11 @@ try {
       ['Guide me to the station.', 'guide', 'station'], ['Show me the way to the station.', 'guide', 'station'], ['Take me to the ramen bar.', 'guide', 'ramen'],
       ['Go to the station.', 'go_to', 'station'], ['Head to KŌJI.', 'go_to', 'ramen'], ['Meet me at the ramen bar.', 'go_to', 'ramen'],
       ['Go to the moon.', 'go_to', ''], ['Guide me somewhere.', 'guide', ''],
-      ['Lie down.', 'lie_down'], ['Lay down.', 'lie_down'], ['Lie on the ground.', 'lie_down'], ['Stretch out here.', 'lie_down'],
-      ['Get up.', 'get_up'], ['Stand up.', 'get_up'], ['On your feet.', 'get_up'], ['Stop lying down.', 'get_up'],
-      ['Do not lie down.', 'wait'], ['Do not get up.', 'wait'], ['Stay lying down.', 'wait'],
-      ['What happens if I say lay down?', 'none'], ['Tell me a story about dancing.', 'none'], ['Hello.', 'none'],
-      ['Wave at me.', 'none'], ['Cheer for me.', 'none'], ['Face me.', 'none'], ['Come here.', 'none'],
+      ['Sit down.', 'sit_down'], ['Take a seat.', 'sit_down'], ['Sit on the ground.', 'sit_down'], ['Have a seat.', 'sit_down'],
+      ['Get up.', 'get_up'], ['Stand up.', 'get_up'], ['On your feet.', 'get_up'], ['Stop sitting down.', 'get_up'],
+      ['Do not sit down.', 'wait'], ['Do not get up.', 'wait'], ['Stay seated.', 'wait'],
+      ['What happens if I say sit down?', 'none'], ['Tell me a story about dancing.', 'none'], ['Hello.', 'none'],
+      ['Lie down.', 'none'], ['Lay down.', 'none'], ['Wave at me.', 'none'], ['Cheer for me.', 'none'], ['Face me.', 'none'], ['Come here.', 'none'],
       ['Come with me.', 'follow'], ['Can I get past?', 'move_aside'], ['Carry on with your day.', 'resume_routine'],
       ['Could you walk with me?', 'follow'], ['Stop following me.', 'wait'], ['Do not follow me.', 'wait'],
       ['What happens if I say follow me?', 'none'], ['Tell me a story about someone saying "wait here".', 'none'],

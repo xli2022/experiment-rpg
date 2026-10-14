@@ -31,7 +31,7 @@ const nativeAssets = Object.fromEntries(await Promise.all(HUMAN_BASE_MODELS.map(
 const baseFor = profile => profile.baseModel === 'citizen' ? asset : nativeAssets[profile.baseModel];
 const meshes = root => {const m=[];root.traverse(o=>{if(o.isMesh)m.push(o);});return m;};
 
-test('all four human bases dance, recline on the floor, and get up without pose drift', () => {
+test('all four human bases dance, sit on the floor, and get up without pose drift', () => {
   const profiles = [...new Map(CROWD_PROFILES.map(profile => [profile.baseModel, profile])).values()];
   for (const profile of profiles) {
     const actor = createNPC(baseFor(profile), profile);
