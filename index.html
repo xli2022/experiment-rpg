@@ -19,7 +19,7 @@
   </head>
   <body>
     <main id="game" aria-label="Afterlight third-person city game">
-      <canvas id="world" aria-label="Interactive 3D city. Use WASD to move, mouse to look, Shift to sprint, Space to jump, click to fire, and E to interact or climb walls."></canvas>
+      <canvas id="world" aria-label="Interactive 3D city. Use WASD to move, mouse or arrow keys to look, Shift to sprint, Space to jump, click to fire, and E to interact or climb walls."></canvas>
       <div class="vignette" aria-hidden="true"></div>
       <div id="damage-flash" aria-hidden="true"></div>
       <div id="hud">
@@ -63,7 +63,7 @@
         <p class="welcome-kicker">AFTERLIGHT CITY</p>
         <h2>Thirteen districts.<br>Play it your way<span>.</span></h2>
         <div id="mode-cards" class="mode-cards" aria-label="Game modes"></div>
-        <p class="start-hint"><span class="desktop-only">WASD to move · Mouse to look</span><span class="touch-only">Left stick to move · Drag the right side to look</span></p>
+        <p class="start-hint"><span class="desktop-only">WASD to move · Mouse or arrow keys to look</span><span class="touch-only">Left stick to move · Drag the right side to look</span></p>
       </div>
       <div id="touch-controls" class="touch-controls hidden">
         <div id="look-zone" aria-label="Drag to look around"></div>
@@ -88,7 +88,7 @@
           <p id="resident-chat-note" class="menu-note resident-note"></p>
           <button id="resident-chat-forget" class="text-button hidden" type="button">Delete the downloaded resident model</button>
           <div id="mode-settings"></div>
-          <p class="menu-note">W/S — climb up/down · A/D — move along wall.<br>Space — jump, grab a wall, or jump away. Keep climbing to pull onto a clear roof.<br>Your parachute opens automatically during long falls. WASD / stick to steer; land to pack it away.<br>E — grab or let go of a wall, open the elevator, enter a stopped car or take over one waiting at a red light.<br>Progress saves automatically in this browser. Touch controls appear on mobile; landscape gives you the best view.</p>
+          <p class="menu-note">WASD — move or drive · Mouse — look.<br>←/→ — turn left/right · ↑/↓ — look up/down. Hold to look; adjust Look sensitivity above.<br>W/S — climb up/down · A/D — move along wall.<br>Space — jump, grab a wall, or jump away. Keep climbing to pull onto a clear roof.<br>Your parachute opens automatically during long falls. WASD / stick to steer; land to pack it away.<br>E — grab or let go of a wall, open the elevator, enter a stopped car or take over one waiting at a red light.<br>Progress saves automatically in this browser. Touch controls appear on mobile; landscape gives you the best view.</p>
           <button id="resume-button" class="primary-button">BACK TO THE STREETS <span>↗</span></button>
           <div id="mode-menu" class="mode-menu"></div>
           <button id="change-mode-button" class="text-button">Change game mode…</button>

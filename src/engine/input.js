@@ -121,13 +121,16 @@ export class Input {
     if (!enabled && document.pointerLockElement) document.exitPointerLock();
   }
   axes() {
-    const x = (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0) + this.joyX;
-    const y = (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) - (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) + this.joyY;
+    const x = (this.keys.has('KeyD') ? 1 : 0) - (this.keys.has('KeyA') ? 1 : 0) + this.joyX;
+    const y = (this.keys.has('KeyW') ? 1 : 0) - (this.keys.has('KeyS') ? 1 : 0) + this.joyY;
     const length = Math.max(1, Math.hypot(x, y)); return { x: x / length, y: y / length };
   }
-  look() {
-    const result = { x: clamp(this.lookX, -350, 350) * .0024 * this.sensitivity,
-      y: clamp(this.lookY, -350, 350) * .002 * this.sensitivity };
+  look(dt = 0) {
+    // Held arrows turn at a rate in radians per second, independent of key repeat.
+    const x = (this.keys.has('ArrowRight') ? 1 : 0) - (this.keys.has('ArrowLeft') ? 1 : 0);
+    const y = (this.keys.has('ArrowDown') ? 1 : 0) - (this.keys.has('ArrowUp') ? 1 : 0);
+    const result = { x: (clamp(this.lookX, -350, 350) * .0024 + x * 1.8 * dt) * this.sensitivity,
+      y: (clamp(this.lookY, -350, 350) * .002 + y * 1.5 * dt) * this.sensitivity };
     this.lookX = this.lookY = 0; return result;
   }
 }

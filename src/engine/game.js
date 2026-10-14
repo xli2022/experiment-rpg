@@ -462,7 +462,7 @@ export async function createGame({ canvas, modes }) {
 
   // --- Per-frame simulation ------------------------------------------------------
   function updatePlayer(dt) {
-    const axes = input.axes(), look = input.look();
+    const axes = input.axes(), look = input.look(dt);
     updateInterior();
     const indoors = !!player.interior?.inside;
     cameraYaw -= look.x; cameraPitch = clamp(cameraPitch + look.y, -.65, indoors ? .6 : 1.03);

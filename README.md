@@ -64,8 +64,10 @@ Explore a **5.5 × 5.5 kilometre city across thirteen districts**, from western 
 
 | Desktop | Action |
 | --- | --- |
-| WASD / arrow keys | Move; accelerate, reverse, and steer in a car |
+| WASD | Move; accelerate, reverse, and steer in a car |
 | Mouse | Look while captured; click and drag if pointer capture is unavailable |
+| ← / → | Hold to turn the view left / right, including without a mouse |
+| ↑ / ↓ | Hold to look up / down; Look sensitivity adjusts both mouse and keyboard look |
 | Left mouse | Fire (story); hold for automatic fire |
 | Right mouse | Aim; can be held together with left mouse |
 | Shift / Alt | Sprint / walk; default movement is a brisk jog |

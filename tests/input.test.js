@@ -82,6 +82,84 @@ test('a denied mouse capture still restores focus and supports drag look', async
   assert.ok(input.look().x > 0);
 });
 
+test('arrow keys look in all four directions without mouse capture or moving the player', t => {
+  const { input, canvas, window, document, lockRequests } = harness(t);
+  canvas.requestPointerLock = undefined;
+  input.setEnabled(true);
+  assert.equal(document.pointerLockElement, null); assert.equal(lockRequests(), 0);
+  for (const [code, axis, sign] of [['ArrowLeft', 'x', -1], ['ArrowRight', 'x', 1], ['ArrowUp', 'y', -1], ['ArrowDown', 'y', 1]]) {
+    let prevented = false;
+    window.dispatch('keydown', { code, preventDefault() { prevented = true; } });
+    assert.equal(prevented, true, 'look keys do not scroll the page during play');
+    const look = input.look(1 / 60);
+    assert.equal(Math.sign(look[axis]), sign);
+    assert.equal(look[axis === 'x' ? 'y' : 'x'], 0);
+    assert.deepEqual(input.axes(), { x: 0, y: 0 });
+    assert.deepEqual(input.look(1 / 60), look, 'a held key keeps turning without key repeat');
+    window.dispatch('keyup', { code });
+    assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 }, 'releasing the key stops turning');
+  }
+});
+
+test('keyboard look is consistent across frame rates and combines with WASD movement', t => {
+  const { input, window } = harness(t); input.setEnabled(true);
+  for (const code of ['KeyW', 'KeyD', 'ArrowLeft', 'ArrowUp']) window.dispatch('keydown', { code });
+  const axes = input.axes();
+  assert.ok(axes.x > 0 && axes.y > 0); assert.ok(Math.abs(Math.hypot(axes.x, axes.y) - 1) < 1e-10);
+  const totals = [30, 60, 120].map(fps => {
+    const total = { x: 0, y: 0 };
+    for (let frame = 0; frame < fps; frame++) {
+      if (frame % 10 === 0) window.dispatch('keydown', { code: 'ArrowLeft', repeat: true });
+      const look = input.look(1 / fps); total.x += look.x; total.y += look.y;
+    }
+    return total;
+  });
+  assert.ok(totals[0].x < 0 && totals[0].y < 0);
+  for (const total of totals.slice(1)) {
+    assert.ok(Math.abs(total.x - totals[0].x) < 1e-10);
+    assert.ok(Math.abs(total.y - totals[0].y) < 1e-10);
+  }
+  window.dispatch('keydown', { code: 'ArrowRight' }); window.dispatch('keydown', { code: 'ArrowDown' });
+  assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 }, 'opposite look keys cancel');
+  assert.deepEqual(input.axes(), axes, 'looking does not change movement input');
+});
+
+test('keyboard look combines with mouse motion and shares look sensitivity', t => {
+  const { input, window } = harness(t); input.setEnabled(true);
+  window.dispatch('keydown', { code: 'ArrowRight' }); window.dispatch('keydown', { code: 'ArrowDown' });
+  const keyboard = input.look(1 / 60);
+  window.dispatch('pointermove', { pointerType: 'mouse', movementX: 10, movementY: 5 });
+  const mouse = input.look(0);
+  window.dispatch('pointermove', { pointerType: 'mouse', movementX: 10, movementY: 5 });
+  assert.deepEqual(input.look(1 / 60), { x: keyboard.x + mouse.x, y: keyboard.y + mouse.y });
+  assert.deepEqual(input.look(1 / 60), keyboard, 'mouse motion is consumed only once');
+  input.sensitivity = .5;
+  assert.deepEqual(input.look(1 / 60), { x: keyboard.x / 2, y: keyboard.y / 2 });
+});
+
+test('keyboard look resets on menus and focus loss and leaves form controls alone', t => {
+  const { input, window, document, element } = harness(t, { callbacks: { blur() {} } });
+  for (const reset of [() => input.setEnabled(false), () => window.dispatch('blur'), () => {
+    document.hidden = true; document.dispatch('visibilitychange'); document.hidden = false;
+  }]) {
+    input.setEnabled(true);
+    window.dispatch('keydown', { code: 'ArrowRight' }); window.dispatch('keydown', { code: 'ArrowUp' });
+    assert.ok(input.look(1 / 60).x > 0);
+    reset();
+    assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 });
+    input.setEnabled(true);
+    assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 }, 'resuming does not restore a stuck turn');
+  }
+  for (const target of ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON'].map(element)) {
+    let prevented = false;
+    window.dispatch('keydown', { target, code: 'ArrowLeft', preventDefault() { prevented = true; } });
+    assert.equal(prevented, false); assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 });
+  }
+  input.setEnabled(false);
+  window.dispatch('keydown', { code: 'ArrowRight' });
+  assert.deepEqual(input.look(1 / 60), { x: 0, y: 0 }, 'disabled gameplay ignores look keys');
+});
+
 test('holding Escape opens or closes a menu only once', t => {
   let pauses = 0;
   const { input, window } = harness(t, { callbacks: { pause() { pauses++; } } });
