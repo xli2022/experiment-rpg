@@ -16,11 +16,12 @@ export function residentDestinations(world, body) {
       ...toWorld(plan, door.x - door.nx, door.z - door.nz), y });
     const template = plan.templates[Math.min(level, plan.templates.length - 1)];
     for (const door of template.doors) if (door.kind === 'lift') {
-      const landing = plan.core?.landing;
-      const dx = landing ? (landing.x0 + landing.x1) / 2 - door.x : Math.cos(door.yaw);
-      const dz = landing ? (landing.z0 + landing.z1) / 2 - door.z : -Math.sin(door.yaw);
-      const length = Math.hypot(dx, dz) || 1;
-      places.push({ id: 'lift', name: 'Elevator', type: 'elevator', ...toWorld(plan, door.x + dx / length, door.z + dz / length), y });
+      // A metre in front of the lift doors, on the side away from the car: a
+      // place to meet or wait, not inside the car, where only a doorway leads.
+      const lift = plan.core?.lift;
+      let nx = Math.cos(door.yaw), nz = -Math.sin(door.yaw);
+      if (lift && (door.x - (lift.x0 + lift.x1) / 2) * nx + (door.z - (lift.z0 + lift.z1) / 2) * nz < 0) { nx = -nx; nz = -nz; }
+      places.push({ id: 'lift', name: 'Elevator', type: 'elevator', ...toWorld(plan, door.x + nx, door.z + nz), y });
     }
   } else {
     for (const building of world.buildingsNear?.(body.x, body.z, GUIDE_RANGE) ?? []) {
@@ -46,8 +47,16 @@ export function residentDestinations(world, body) {
   return selected;
 }
 
-/** Bounded A* over walkable floor; every edge is swept through the live collision sampler. */
-export function planResidentGuide(start, goal, navigation, { step = .75, budget = 5000 } = {}) {
+/**
+ * Bounded A* over walkable floor; every edge is swept through the live
+ * collision sampler. The 0.75 m grid can miss a gap a resident fits through,
+ * such as the way out from behind a shop counter, so a failed search tries
+ * again on a finer one, unless the caller chose its own grid.
+ */
+export function planResidentGuide(start, goal, navigation, options = {}) {
+  return searchGuide(start, goal, navigation, options) ?? (options.step ? null : searchGuide(start, goal, navigation, { step: .4, budget: 8000 }));
+}
+function searchGuide(start, goal, navigation, { step = .75, budget = 5000 } = {}) {
   if (distance(start, goal) > GUIDE_RANGE || Math.abs(start.y - goal.y) > 1.3) return null;
   const straight = distance(start, goal) <= 25 && trace(start, goal, navigation);
   if (straight) return [point(start), straight];

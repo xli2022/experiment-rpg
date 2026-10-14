@@ -6,7 +6,8 @@ import { WorldStream } from '../src/world/world-stream.js';
 import { AFTERLIGHT_LANDMARKS } from '../src/world/landmarks.js';
 import { MASTER_DISTRICTS } from '../src/world/master-plan.js';
 import { cachedInteriorPlan, levelY, floorOccupants } from '../src/world/interior-plan.js';
-import { toWorld } from '../src/world/interior-physics.js';
+import { toWorld, toLocal } from '../src/world/interior-physics.js';
+import { residentDestinations, planResidentGuide } from '../src/traffic/resident-guides.js';
 import { createResidentNavigation } from '../src/traffic/resident-navigation.js';
 import { requestResidentAction, queueResidentLift, stepResidentAction } from '../src/traffic/resident-actions.js';
 import { createOccupants } from '../src/traffic/occupants.js';
@@ -17,10 +18,11 @@ import { circleHitsBox, overlapsHeight } from '../src/core/physics.js';
 const scene = new THREE.Scene(), stream = new WorldStream(scene), world = createVerticalCity(scene, stream, AFTERLIGHT_LANDMARKS);
 world.landmarks = AFTERLIGHT_LANDMARKS; world.districts = MASTER_DISTRICTS;
 world.buildingsNear = (x, z, radius) => world.metropolis.buildingsNear(x, z, radius);
-const plans = new Map();
+const plans = new Map(), shops = [];
 for (const d of MASTER_DISTRICTS) for (const block of world.metropolis.area(d.x - 90, d.z - 90, d.x + 90, d.z + 90)) for (const building of block.buildings) {
   const plan = cachedInteriorPlan(building);
   if (plan?.core && plan.levels >= 3 && !plans.has(`${plan.layout}/${plan.footprint}`)) plans.set(`${plan.layout}/${plan.footprint}`, plan);
+  if (plan?.core?.lift && plan.id.startsWith('frontage:') && plan.entrances.length && shops.length < 8 && !shops.includes(plan)) shops.push(plan);
 }
 const at = (plan, x, z, level = 0) => ({ ...toWorld(plan, x, z), y: levelY(plan, level) });
 const settle = (body, player, nav, seconds = 30) => {
@@ -55,6 +57,32 @@ test('local destinations resolve real storefronts and indoor elevators with supp
   const inside = nav.destinations(); assert.ok(inside.some(p => p.id === 'lift'));
   assert.ok(inside.every(p => Math.abs(p.y - body.y) < .1));
   assert.ok(!inside.some(p => p.type === 'exit'), 'upper floors do not invent a ground-floor exit on this floor');
+});
+
+test('residents walk between a shop floor\'s exit and elevator both ways, and out from behind its counters', () => {
+  let floors = 0, counters = 0;
+  for (const plan of shops) {
+    const e = plan.entrances[0], inside = { ...at(plan, e.x - e.nx * 1.5, e.z - e.nz * 1.5), plan };
+    const places = residentDestinations(world, inside), exit = places.find(p => p.type === 'exit'), lift = places.find(p => p.type === 'elevator');
+    if (!exit || !lift) continue;
+    // The elevator is met in front of its doors: inside the car, only a doorway leads anywhere.
+    const local = toLocal(plan, lift.x, lift.z), car = plan.core.lift;
+    assert.ok(!(local.x > car.x0 && local.x < car.x1 && local.z > car.z0 && local.z < car.z1), `${plan.id}: the elevator is met outside the car`);
+    const navigationAt = p => createResidentNavigation({ world })({ ...p, plan });
+    const spatial = world.spatialFor(world.interiorContextAt(exit.x, exit.y, exit.z)), walkable = (a, b) => findPath(spatial, plan, a, b, a.y);
+    if (walkable(exit, lift)) {
+      assert.ok(planResidentGuide({ ...exit, plan }, lift, navigationAt(exit)), `${plan.id}: exit to elevator`);
+      assert.ok(planResidentGuide({ ...lift, plan }, exit, navigationAt(lift)), `${plan.id}: elevator to exit`);
+      floors++;
+    }
+    for (const o of floorOccupants(plan, 0).filter(o => o.kind === 'clerk' || o.kind === 'counter')) {
+      const spot = at(plan, o.x, o.z);
+      if (!walkable(spot, exit)) continue;
+      assert.ok(planResidentGuide({ ...spot, plan }, exit, navigationAt(spot)), `${plan.id}: ${o.kind} at (${o.x.toFixed(1)}, ${o.z.toFixed(1)}) to the exit`);
+      counters++;
+    }
+  }
+  assert.ok(floors >= 3 && counters >= 3, `checked ${floors} shop floors and ${counters} counters`);
 });
 
 test('residents enter buildings, climb two switchback storeys, then retrace the whole route home', () => {
