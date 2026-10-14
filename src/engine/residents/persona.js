@@ -154,7 +154,8 @@ export function residentPersona(resident, { time = 0 } = {}) {
     name: pick(species === 'human' ? NAMES[gender] ?? [...NAMES.woman, ...NAMES.man] : NAMES[species], 'name'),
     gender, age, voice: residentVoice({ key, species, gender, age }),
     mood: pick(MOODS[species], 'mood'), style: pick(STYLES[species], 'style'), concern: pick(CONCERNS[species], 'concern'),
-    doing: ({ follow: 'following the person you are talking to', wait: 'waiting where the person asked you to stay', move_aside: 'stepping out of the way', resume_routine: 'returning to your usual activity' })[resident.behavior] ?? scene.doing,
+    doing: ({ follow: 'following the person you are talking to', wait: 'waiting where the person asked you to stay', move_aside: 'stepping out of the way',
+      dance: 'dancing at the passer-by’s request', lie_down: 'lying down to rest', get_up: 'getting to your feet', guide: 'guiding the passer-by to a nearby place', go_to: 'going to a place the passer-by asked you to visit', resume_routine: 'returning to your usual activity' })[resident.behavior] ?? scene.doing,
     where: district.description ? `${district.name} (${lowerFirst(district.description).replace(/\.$/, '')})` : district.name,
     time: `${clock.text}, ${part}`,
   };
@@ -173,14 +174,12 @@ export function systemPrompt(p) {
   ].join('\n');
 }
 
-/** A short greeting starts each conversation. */
-const OPENERS = ['Hey there.', 'Hi.', 'Hello.', 'Got a minute?'];
-export const opener = persona => OPENERS[hash(`${persona.key}:opener`) % OPENERS.length];
-
 /** Exchanges the model sees: older ones fall away to keep replies quick. */
 export const HISTORY_TURNS = 3;
-export function chatMessages(persona, history, line) {
-  return [{ role: 'system', content: systemPrompt(persona) }, ...history.slice(-HISTORY_TURNS * 2), { role: 'user', content: line }];
+export function chatMessages(persona, history, line, context = null) {
+  const places = context?.destinations?.map(place => `${place.name} (${place.type}, ${place.distance} m away)`).join('; ');
+  const local = places ? `\nNearby places you know: ${places}. For directions, only name these places. The passer-by can ask you to guide them to one; the game checks the route.` : '';
+  return [{ role: 'system', content: systemPrompt(persona) + local }, ...history.slice(-HISTORY_TURNS * 2), { role: 'user', content: line }];
 }
 
 const NOT_IN_WORLD = /\b(?:language model|as an ai|ai assistant|virtual assistant|i(?:'|’)?m an ai|i am an ai|chatgpt|openai|qwen|alibaba)\b/i;

@@ -7,6 +7,8 @@ import { npcClothMaterial, npcSkinMaterial } from './npc-materials.js';
 import { npcSurfaceMaterial } from './npc-surfaces.js';
 import { createNPCAnimation } from './npc-animation.js';
 import { createNPCGrounding } from './npc-grounding.js';
+import { createResidentDance } from './resident-dance.js';
+import { createResidentRest } from './resident-rest.js';
 
 const shapeCache = new WeakMap();
 const gaussian = (v, center, spread) => Math.exp(-(((v - center) / spread) ** 2));
@@ -424,11 +426,17 @@ export function createNPC(asset, profile, clipName = 'Idle') {
     mixer.update(0);
   };
   let disposed = false;
+  const dance = createResidentDance(root, body);
+  const resting = createResidentRest(root, body);
   root.userData.appearance = profile.id;
   return { root, body, bones, mixer, get action() { return animation.action; }, actions: animation.actions,
     ground,
-    update(dt, speed) { animation.update(dt, speed); updatePresence(); ground(dt); },
-    setAnimation(name) { animation.setAnimation(name); updatePresence(); ground(); }, scale, profile, wardrobeBatches: wardrobe.batches,
+    update(dt, speed, activity = null) {
+      resting.reset(); dance.reset(); animation.update(activity?.recline === 1 ? 0 : dt, speed); updatePresence();
+      if (!activity?.recline) dance.apply(activity);
+      ground(dt); resting.apply(activity?.recline);
+    },
+    setAnimation(name) { resting.reset(true); dance.reset(); animation.setAnimation(name); updatePresence(); ground(); }, scale, profile, wardrobeBatches: wardrobe.batches,
     setGait: name => animation.setGait(name), get gait() { return animation.gait; },
     setRest: (name, blend) => animation.setRest(name, blend), get rest() { return animation.rest; },
     dispose() {

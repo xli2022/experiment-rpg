@@ -1,9 +1,11 @@
+import { traceResidentPath as trace } from './resident-path.js';
 import { angleDelta, clamp } from '../core/physics.js';
+import { RESIDENT_BEHAVIORS, RESIDENT_REST } from '../core/resident-behaviors.js';
 
 const distance = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const point = p => ({ x: p.x, y: p.y, z: p.z });
 const reached = (a, b, radius = .03) => distance(a, b) < radius && Math.abs(a.y - b.y) < .12;
-const ACTIONS = ['follow', 'wait', 'move_aside', 'resume_routine'];
+const STANDING_ACTIONS = ['follow', 'move_aside', 'dance', 'guide', 'go_to', 'lie_down', 'get_up'];
 const FOLLOW_GAP = 1.65, TRAIL_LIMIT = 2048;
 
 const reverseRoute = trail => [...trail].reverse().map(node => node.kind === 'lift' ? { ...node, from: point(node.to), to: point(node.from) } : point(node));
@@ -14,24 +16,23 @@ function breadcrumb(trail, next) {
   return distance(last, next) > .18 || Math.abs(last.y - next.y) > .1 || turn && distance(last, next) > .04;
 }
 
-// Check the whole swept path, including support at every step. Navigation
-// supplies the real world's walls, furniture, cars and floor boundaries.
-function trace(from, to, navigation) {
-  const length = distance(from, to);
-  if (length > 25) return null;
-  let at = point(from);
-  const steps = Math.max(1, Math.ceil(length / .18));
-  for (let i = 1; i <= steps; i++) {
-    const next = navigation.sample(at, { x: from.x + (to.x - from.x) * i / steps, y: at.y, z: from.z + (to.z - from.z) * i / steps });
-    if (!next || !Number.isFinite(next.y) || Math.abs(next.y - at.y) > .35) return null;
-    at = next;
-  }
-  return Math.abs(at.y - to.y) < .5 ? at : null;
-}
-
 export function residentActionContext(body, navigation) {
   return { behavior: body.residentAction?.kind ?? 'routine', status: body.residentAction?.status ?? 'Going about my day',
-    canWalk: navigation.mobile !== false, area: navigation.area };
+    posture: body.residentAction?.recline > 0 ? 'lying down' : body.pose === 'sit' ? 'seated' : 'standing',
+    canWalk: navigation.mobile !== false, area: navigation.area,
+    destinations: (navigation.destinations?.() ?? []).map(({ id, name, type, distance }) => ({ id, name, type, distance })) };
+}
+
+function roomToLieDown(start, yaw, player, navigation) {
+  const c = Math.cos(yaw), s = Math.sin(yaw);
+  // Overlapping standing-radius samples cover the full resting footprint;
+  // equal support at each point rules out steps and ledges beneath the body.
+  for (const across of [-.4, 0, .4]) for (let along = -1; along <= 1.01; along += .25) {
+    const p = { x: start.x + c * across + s * along, y: start.y, z: start.z - s * across + c * along };
+    const support = navigation.sample(p, p, true);
+    if (!support || Math.abs(support.y - start.y) > .08 || Math.abs(player.y - start.y) < 1.3 && distance(p, player) < .75) return false;
+  }
+  return true;
 }
 
 /** Check an intention without changing the resident's current activity. */
@@ -39,18 +40,30 @@ export function previewResidentAction(body, action, player, navigation) {
   return requestResidentAction({ ...body }, action, player, navigation);
 }
 
-export function requestResidentAction(body, action, player, navigation) {
+export function requestResidentAction(body, request, player, navigation) {
+  const action = typeof request === 'string' ? request : request?.action;
   const denied = reply => ({ ok: false, reply });
-  if (!ACTIONS.includes(action)) return denied('I cannot do that.');
+  if (!RESIDENT_BEHAVIORS.includes(action)) return denied('I cannot do that.');
   // A conversation can finish as the player walks away (at 4.5 m).
   if (!player || distance(body, player) > 6 || Math.abs(body.y - player.y) > 1.3) return denied('Come a little closer first.');
-  if (navigation.mobile === false && ['follow', 'move_aside'].includes(action)) return denied('I need to stay seated here for now.');
+  if (navigation.mobile === false && STANDING_ACTIONS.includes(action)) return denied('I need to stay seated here for now.');
   if (navigation.crossing && !body.residentAction) return denied('Let me finish crossing the street first.');
-  const gettingUp = body.pose === 'sit' && ['follow', 'move_aside'].includes(action);
+  const gettingUp = body.pose === 'sit' && STANDING_ACTIONS.includes(action);
   const seat = gettingUp ? navigation.seatExit?.() : null;
   if (gettingUp && !seat) return denied('I need a little room to stand up first.');
   const start = seat?.path.at(-1) ?? body;
+  if (action === 'lie_down' && !roomToLieDown(start, body.yaw, player, navigation)) return denied('I need a clear, level space to lie down.');
   let destination = null;
+  let guide = null;
+  if (action === 'guide' || action === 'go_to') {
+    const places = navigation.destinations?.() ?? [];
+    if (!places.some(place => place.id === request.destination)) {
+      return denied(places.length ? `I can try to show you ${places.slice(0, 3).map(p => p.name).join(', ')}. Which one?` : 'I do not know a nearby place I can guide you to from here.');
+    }
+    guide = navigation.guide?.(start, request.destination);
+    if (!guide?.route?.length) return denied('I cannot find a clear walking route there from here.');
+    destination = point(guide.route.at(-1));
+  }
   if (action === 'move_aside') {
     // Prefer a step perpendicular to the player's facing, away from their
     // walking line. Try both sides and diagonals, never through an obstacle.
@@ -71,9 +84,11 @@ export function requestResidentAction(body, action, player, navigation) {
     // When interrupted on the way home, retain only the untraversed return
     // route. Reusing the old outbound endpoint could cross a wall or floor.
     trail: seat ? [point(start)] : prior?.kind === 'resume_routine' ? reverseRoute(prior.route) : prior?.trail ?? [point(body)],
-    route: [], target: destination, repath: 0, status: '', followAt: point(player),
+    route: guide?.route.map(point) ?? [], target: destination, repath: 0, status: '', followAt: point(player), elapsed: 0,
+    destination: guide ? { id: guide.destination.id, name: guide.destination.name } : null,
     seat: seat ?? prior?.seat ?? null,
     transition: seat ? 'rise' : prior?.transition ?? null,
+    recline: prior?.recline ?? 0,
   };
   if (state.transition === 'sit' && action !== 'resume_routine') state.transition = 'rise';
   if (body.pose === 'sit' && action === 'wait') state.transition = null;
@@ -83,9 +98,14 @@ export function requestResidentAction(body, action, player, navigation) {
   const replies = {
     follow: 'Sure. I will follow you.',
     wait: 'All right. I will wait here.', move_aside: 'Of course. I will step aside.',
+    dance: 'Sure. I will dance until you ask me to stop.',
+    lie_down: 'All right. I will lie down here.', get_up: 'All right. I will stand here.',
+    guide: guide && `Follow me to ${guide.destination.name}. I will wait if you fall behind.`,
+    go_to: guide && `Sure. I will go to ${guide.destination.name} and wait there.`,
     resume_routine: 'All right. I will get back to what I was doing.',
   };
-  state.status = { follow: 'Following you', wait: 'Waiting here', move_aside: 'Moving aside', resume_routine: 'Returning to my routine' }[action];
+  state.status = { follow: 'Following you', wait: 'Waiting here', move_aside: 'Moving aside',
+    dance: 'Dancing', lie_down: 'Lying down', get_up: 'Getting up', guide: guide && `Guiding you to ${guide.destination.name}`, go_to: guide && `Going to ${guide.destination.name}`, resume_routine: 'Returning to my routine' }[action];
   return { ok: true, reply: replies[action], status: state.status };
 }
 
@@ -115,7 +135,7 @@ function stepSeat(body, dt, player, navigation) {
   return moved;
 }
 
-/** Record a real player elevator trip; JSON decisions never supply destinations. */
+/** Record a real player elevator trip; model decisions never supply trip coordinates. */
 export function queueResidentLift(body, from, to, navigation) {
   const state = body.residentAction;
   if (state?.kind !== 'follow' || distance(body, from) > 24 || Math.abs(state.followAt.y - from.y) > .6 || !navigation.liftValid?.(from, to)) return false;
@@ -131,7 +151,24 @@ export function stepResidentAction(body, dt, player, navigation) {
   if (!state || dt <= 0) return 0;
   body.speed = 0;
   if (body.talking) return 0;
+  if (!state.transition && state.kind === 'lie_down') {
+    if (state.recline === 0 && !roomToLieDown(body, body.yaw, player, navigation)) { state.status = 'Waiting for space to lie down'; return 0; }
+    state.recline = Math.min(1, state.recline + dt / RESIDENT_REST.duration);
+    state.status = state.recline === 1 ? 'Resting here' : 'Lying down'; return 0;
+  }
+  if (state.recline > 0) {
+    if (state.kind === 'wait') { state.recline = Math.min(1, state.recline + dt / RESIDENT_REST.duration); state.status = 'Resting here'; return 0; }
+    state.recline = Math.max(0, state.recline - dt / RESIDENT_REST.duration);
+    state.status = 'Getting up'; return 0;
+  }
   const following = state.kind === 'follow';
+  const guiding = state.kind === 'guide';
+  const traveling = guiding || state.kind === 'go_to';
+  if (guiding) {
+    const gap = distance(body, player);
+    state.waitingForPlayer = navigation.onFoot === false || Math.abs(body.y - player.y) > 1.3 || gap > (state.waitingForPlayer ? 4 : 7);
+    if (state.waitingForPlayer) { state.status = 'Waiting for you to catch up'; return 0; }
+  }
   if (following) {
     // Stairs supply continuous footsteps, even while the follower is floors
     // behind. Only an explicitly recorded elevator trip bridges a height jump.
@@ -150,7 +187,12 @@ export function stepResidentAction(body, dt, player, navigation) {
     }
   }
   if (state.transition) return stepSeat(body, dt, player, navigation);
+  if (state.kind === 'get_up') { state.kind = 'wait'; state.status = 'Standing here'; return 0; }
   if (state.kind === 'wait') return 0;
+  if (state.kind === 'dance') { state.elapsed += dt; state.status = 'Dancing'; return 0; }
+  if (traveling && reached(body, state.target, .35)) {
+    state.kind = 'wait'; state.status = `Arrived at ${state.destination.name}`; state.route = []; return 0;
+  }
   if (state.kind === 'resume_routine' && body.pose === 'sit') { body.residentAction = null; return 0; }
   if (state.kind === 'move_aside' && distance(body, state.target) < .06) {
     state.kind = 'wait'; state.status = 'Waiting out of your way'; return 0;
@@ -184,7 +226,7 @@ export function stepResidentAction(body, dt, player, navigation) {
   // Shortcuts are checked against geometry; otherwise follow the recorded
   // footsteps round the corner. Replanning is bounded and runs four times/s.
   state.repath -= dt;
-  if (state.route.length && state.repath <= 0 && !state.shortcutBlocked) {
+  if (!traveling && state.route.length && state.repath <= 0 && !state.shortcutBlocked) {
     state.repath = .25;
     state.routeIndex = 0;
     const lift = state.route.findIndex(node => node.kind === 'lift');
@@ -192,7 +234,7 @@ export function stepResidentAction(body, dt, player, navigation) {
     for (let i = end; i > 0; i--) if (trace(body, state.route[i], navigation)) { state.routeIndex = i; break; }
   }
   const routeIndex = state.routeIndex ?? 0;
-  const target = state.kind === 'move_aside' ? state.target : state.route[routeIndex] ?? (following ? player : state.home);
+  const target = state.kind === 'move_aside' ? state.target : state.route[routeIndex] ?? (following ? player : traveling ? state.target : state.home);
   const gap = following && routeIndex >= state.route.length - 1 && Math.abs(body.y - target.y) < .3 ? FOLLOW_GAP : 0;
   const remaining = Math.max(0, distance(body, target) - gap);
   if (!remaining) return 0;
@@ -219,6 +261,6 @@ export function stepResidentAction(body, dt, player, navigation) {
   }
   Object.assign(body, next); body.speed = distance(before, body) / dt;
   if (state.route.length && reached(body, target)) { state.route.splice(0, routeIndex + 1); state.routeIndex = 0; state.shortcutBlocked = false; state.repath = 0; }
-  state.status = following ? 'Following you' : state.kind === 'move_aside' ? 'Moving aside' : 'Returning to my routine';
+  state.status = following ? 'Following you' : traveling ? `${guiding ? 'Guiding you to' : 'Going to'} ${state.destination.name}` : state.kind === 'move_aside' ? 'Moving aside' : 'Returning to my routine';
   return distance(before, body);
 }

@@ -111,6 +111,30 @@ test('a blocked seat exit is rejected without changing the pose or original acti
   } finally { f.occupants.dispose(); }
 });
 
+test('a seated resident stands before dancing and can return to the original seat', () => {
+  const f = fixture('sofa');
+  try {
+    assert.equal(previewResidentAction(f.body, 'dance', f.player, f.nav).ok, true);
+    assert.equal(f.body.pose, 'sit');
+    assert.equal(f.occupants.command(f.avatar, 'dance', f.player).ok, true);
+    f.advance(6);
+    assert.equal(f.body.pose, 'stand'); assert.equal(f.avatar.avatar.rest, 'Idle');
+    assert.equal(f.body.residentAction.kind, 'dance'); assert.ok(f.body.residentAction.elapsed > 0);
+    f.returnHome(); seatedAtHome(f);
+  } finally { f.occupants.dispose(); }
+});
+
+test('get up leaves a seat, waits in place and preserves the original seat', () => {
+  const f = fixture('sofa');
+  try {
+    assert.equal(f.occupants.command(f.avatar, 'get_up', f.player).ok, true); f.advance(5);
+    assert.equal(f.body.pose, 'stand'); assert.equal(f.body.residentAction.kind, 'wait');
+    const standing = position(f.body); f.advance(3);
+    assert.deepEqual(position(f.body), standing);
+    f.returnHome(); seatedAtHome(f);
+  } finally { f.occupants.dispose(); }
+});
+
 test('returning to a seat waits for people and walls; its collision exception never applies elsewhere', () => {
   const f = fixture('sofa');
   try {

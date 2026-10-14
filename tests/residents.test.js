@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, opener, HISTORY_TURNS } from '../src/engine/residents/persona.js';
+import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, HISTORY_TURNS } from '../src/engine/residents/persona.js';
 import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODEL } from '../src/engine/residents/model.js';
 import { ResidentConversation, facingResident, settingsNote, MAX_LINE } from '../src/engine/residents/conversation.js';
 import { createStorage } from '../src/engine/save.js';
@@ -108,7 +108,6 @@ test('the brief is short, concrete and keeps the model in the city', () => {
   assert.deepEqual(messages.map(m => m.role), ['system', ...history.slice(-HISTORY_TURNS * 2).map(m => m.role), 'user']);
   assert.equal(messages[1].content, 'line 4', 'only the latest exchanges');
   assert.equal(messages.at(-1).content, 'What do you do?');
-  assert.ok(['Hey there.', 'Hi.', 'Hello.', 'Got a minute?'].includes(opener(person)));
 });
 
 test('replies are cleaned into a few spoken sentences, or rejected', () => {
@@ -285,7 +284,10 @@ test('residents speak each finished reply and fall silent when interrupted or le
   const model = { generate: (messages, { onText }) => new Promise(resolve => { release = text => { onText(text); resolve(text); }; }), interrupt() {} };
   const conversation = new ResidentConversation({ model, view: { show() {}, reply() {} }, voice });
   const persona = residentPersona(walker(8, 'resident-8'));
-  const greeting = conversation.open(persona);
+  conversation.open(persona);
+  assert.deepEqual(spoken, [], 'opening chat does not make the resident speak');
+  assert.equal(release, undefined, 'opening chat does not request a reply');
+  const greeting = conversation.say('Hello.');
   release('Evening. Rain again.'); await greeting;
   assert.deepEqual(spoken, [['Evening. Rain again.', persona.key]], 'spoken once, when finished, in their voice');
   const before = stops.length, next = conversation.say('What do you do?');
@@ -295,7 +297,8 @@ test('residents speak each finished reply and fall silent when interrupted or le
   release('I fix trams.'); await next;
   assert.equal(spoken.length, 1, 'nothing is spoken after leaving');
   const failing = new ResidentConversation({ model: { generate: async () => { throw new Error('Device was lost.'); }, interrupt() {} }, view: { show() {}, reply() {} }, voice });
-  await failing.open(persona);
+  failing.open(persona);
+  await failing.say('Hello.');
   assert.deepEqual(spoken.at(-1), [fallbackReply(persona, 0), persona.key], 'fallback lines are spoken as well');
 });
 
@@ -306,7 +309,7 @@ function harness(generate) {
   return { conversation: new ResidentConversation({ model, view }), calls, interrupts };
 }
 
-test('a conversation greets, streams each reply and remembers the last few lines', async () => {
+test('a conversation waits for the player, streams each reply and remembers the last few lines', async () => {
   const sent = [];
   const { conversation, calls } = harness(async (messages, { onText }) => {
     sent.push(messages);
@@ -314,37 +317,53 @@ test('a conversation greets, streams each reply and remembers the last few lines
     return `Hey. Rain again. ${messages.at(-1).content === 'What do you do?' ? 'I fix trams.' : ''}`;
   });
   const persona = residentPersona(walker(5, 'resident-5'));
-  assert.equal(await conversation.open(persona), 'Hey. Rain again.');
-  assert.deepEqual(calls, [['show', persona.name], ['reply', '', true], ['reply', 'Hey', true], ['reply', 'Hey. Rain again.', true], ['reply', 'Hey. Rain again.', false]]);
+  conversation.open(persona);
+  assert.deepEqual(sent, [], 'opening chat does not send an invented player greeting');
+  assert.equal(conversation.snapshot().busy, false);
+  assert.equal(conversation.snapshot().turns, 0);
+  assert.deepEqual(conversation.snapshot().history, []);
+  assert.deepEqual(calls, [['show', persona.name], ['reply', '', false]]);
+  assert.equal(await conversation.say('   '), null, 'blank input cannot start a conversation');
+  assert.deepEqual(sent, []);
+  assert.equal(await conversation.say('Hello.'), 'Hey. Rain again.');
+  assert.deepEqual(calls.slice(2), [['reply', '', true], ['reply', 'Hey', true], ['reply', 'Hey. Rain again.', true], ['reply', 'Hey. Rain again.', false]]);
   assert.deepEqual(sent[0].map(m => m.role), ['system', 'user']);
+  assert.equal(sent[0].at(-1).content, 'Hello.', 'the first model request uses the player’s message');
   assert.equal(await conversation.say('What do you do?'), 'Hey. Rain again. I fix trams.');
-  assert.deepEqual(sent[1].map(m => m.role), ['system', 'user', 'assistant', 'user'], 'the greeting is remembered');
+  assert.deepEqual(sent[1].map(m => m.role), ['system', 'user', 'assistant', 'user'], 'the player’s opening exchange is remembered');
   assert.equal(await conversation.say('   '), null, 'nothing to say');
   await conversation.say('x'.repeat(400));
   assert.equal(sent.at(-1).at(-1).content.length, MAX_LINE);
   assert.equal(conversation.snapshot().turns, 3);
 });
 
-test('a reply in progress blocks another; closing stops it and drops late text', async () => {
+test('a reply in progress blocks another; reopening clears it and drops late text', async () => {
   let release;
   const { conversation, calls, interrupts } = harness((messages, { onText }) => new Promise(resolve => { release = text => { onText(text); resolve(text); }; }));
   const persona = residentPersona(walker(6, 'resident-6'));
-  const greeting = conversation.open(persona);
+  conversation.open(persona);
+  const greeting = conversation.say('Hello.');
   assert.equal(await conversation.say('Anyone home?'), null, 'one reply at a time');
   conversation.close();
   assert.equal(interrupts.length, 1);
+  assert.equal(conversation.snapshot().open, false);
+  conversation.open(residentPersona(walker(7, 'resident-7')));
+  assert.equal(conversation.snapshot().busy, false, 'the new conversation is ready for the player');
+  assert.deepEqual(calls.at(-1), ['reply', '', false], 'stale speech and the pending state are cleared');
   const shown = calls.length;
   release('Too late.');
   assert.equal(await greeting, null);
-  assert.equal(calls.length, shown, 'nothing reaches a closed panel');
-  assert.equal(conversation.snapshot().open, false);
+  assert.equal(calls.length, shown, 'nothing reaches the new conversation');
+  assert.deepEqual(conversation.snapshot().history, []);
+  assert.equal(conversation.snapshot().turns, 0);
 });
 
 test('a failed or unusable reply becomes a fallback line in the resident’s voice', async () => {
   const replies = [Promise.reject(new Error('Device was lost.')), Promise.resolve('As an AI language model, I cannot chat.')];
   const { conversation } = harness(() => replies.shift());
   const persona = residentPersona(walker(41, 'alien-resident', 'alien'));
-  const first = await conversation.open(persona), second = await conversation.say('Hello?');
+  conversation.open(persona);
+  const first = await conversation.say('Hello.'), second = await conversation.say('Hello?');
   assert.equal(first, fallbackReply(persona, 0));
   assert.equal(second, fallbackReply(persona, 1));
   assert.match(first, /words|word/);

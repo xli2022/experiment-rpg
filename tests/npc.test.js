@@ -9,6 +9,7 @@ import { npcSurfaceTextures } from '../src/actors/npc-surfaces.js';
 import { npcClothMaterial, npcSkinMaterial } from '../src/actors/npc-materials.js';
 import { CONTACTS, ENDINGS, QUESTS } from '../src/modes/story/content.js';
 import { Campaign } from '../src/modes/story/campaign.js';
+import { checkResidentPoses } from './helpers/resident-poses.js';
 import { dialogueFor, acceptanceReply, offerScene, replyScene } from '../src/modes/story/dialogue.js';
 
 // Load the actual exported mesh, skin and animations with the actual GLTF
@@ -29,6 +30,14 @@ asset.userData.baseModel = 'citizen';
 const nativeAssets = Object.fromEntries(await Promise.all(HUMAN_BASE_MODELS.map(async base => [base.id, await citizenAsset(`humans/${base.id}`)])));
 const baseFor = profile => profile.baseModel === 'citizen' ? asset : nativeAssets[profile.baseModel];
 const meshes = root => {const m=[];root.traverse(o=>{if(o.isMesh)m.push(o);});return m;};
+
+test('all four human bases dance, recline on the floor, and get up without pose drift', () => {
+  const profiles = [...new Map(CROWD_PROFILES.map(profile => [profile.baseModel, profile])).values()];
+  for (const profile of profiles) {
+    const actor = createNPC(baseFor(profile), profile);
+    try { checkResidentPoses(actor); } finally { actor.dispose(); }
+  }
+});
 
 test('the cast includes women, men and a nonbinary contact with individual personalities and voice profiles', () => {
   const humans = CONTACTS.filter(c=>!c.terminal);

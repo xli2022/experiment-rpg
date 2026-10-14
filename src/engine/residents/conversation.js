@@ -1,7 +1,7 @@
-import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply, opener } from './persona.js';
+import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply } from './persona.js';
 import { Vector3 } from 'three';
 import { ResidentModel, RESIDENT_MODEL } from './model.js';
-import { DECISION_FORMAT, decisionMessages, parseDecision } from './decisions.js';
+import { decisionFormat, decisionMessages, parseDecision, preliminaryDecision } from './decisions.js';
 
 const $ = id => document.getElementById(id);
 export const MAX_LINE = 140;
@@ -27,11 +27,11 @@ export function facingResident(player, people, visible = () => true) {
 }
 
 /**
- * One conversation at a time. Replies stream in from the model and are
- * cleaned up before they stay on screen and are spoken; a failed or unusable
- * reply becomes a short fallback line in the resident's voice. Saying
- * something new or leaving stops the speech and the reply being written, and
- * nothing late reaches the next conversation.
+ * One conversation at a time, starting with the player's first message.
+ * Replies stream in from the model and are cleaned up before they stay on
+ * screen and are spoken; a failed or unusable reply becomes a short fallback
+ * line in the resident's voice. Saying something new or leaving stops the
+ * speech and the reply being written. Nothing late reaches the next conversation.
  */
 export class ResidentConversation {
   constructor({ model, view, voice = null }) {
@@ -42,7 +42,7 @@ export class ResidentConversation {
     this.close();
     this.persona = persona; this.actions = actions; this.lastAction = null; this.pendingAction = null;
     this.view.show(persona);
-    return this.say(opener(persona));
+    this.view.reply('', false);
   }
   async say(line) {
     const text = String(line ?? '').replace(/\s+/g, ' ').trim().slice(0, MAX_LINE), persona = this.persona;
@@ -53,15 +53,17 @@ export class ResidentConversation {
     const structured = !!(this.actions && this.model.supportsActions);
     let reply = null, decision = null;
     try {
-      const messages = structured ? decisionMessages(text, this.actions.context()) : chatMessages(persona, this.history, text);
-      const raw = await this.model.generate(messages, {
-        ...(structured ? { responseFormat: DECISION_FORMAT } : {}),
+      const context = structured ? this.actions.context() : null;
+      const messages = structured ? decisionMessages(text, context) : chatMessages(persona, this.history, text);
+      decision = structured ? preliminaryDecision(text) : null;
+      const raw = decision ? null : await this.model.generate(messages, {
+        ...(structured ? { responseFormat: decisionFormat(context) } : {}),
         onText: partial => { if (current() && !structured) this.view.reply(previewReply(partial, persona), true); },
       });
       if (structured) {
-        decision = parseDecision(raw);
+        decision ??= parseDecision(raw);
         if (decision?.action === 'none' && current()) {
-          const speech = await this.model.generate(chatMessages(persona, this.history, text), { onText: partial => { if (current()) this.view.reply(previewReply(partial, persona), true); } });
+          const speech = await this.model.generate(chatMessages(persona, this.history, text, context), { onText: partial => { if (current()) this.view.reply(previewReply(partial, persona), true); } });
           reply = cleanReply(speech, persona);
         }
       }
@@ -72,11 +74,12 @@ export class ResidentConversation {
       // Validate without moving. Only the latest accepted request is queued;
       // a completed conversation rechecks it against the live world.
       let result;
-      try { result = this.actions.prepare(decision.action); }
+      const request = ['guide', 'go_to'].includes(decision.action) ? decision : decision.action;
+      try { result = this.actions.prepare(request); }
       catch { result = { ok: false, reply: 'I cannot do that right now.' }; }
       reply = result.reply;
       this.lastAction = { action: decision.action, ok: result.ok };
-      if (result.ok) this.pendingAction = decision.action;
+      if (result.ok) this.pendingAction = request;
     }
     reply ??= structured ? 'I did not catch that. Could you say it another way?' : fallbackReply(persona, this.turns);
     this.history.push({ role: 'user', content: text }, { role: 'assistant', content: reply });
@@ -134,6 +137,7 @@ function createView({ touch, onSay, onClose, onFocus }) {
     hide() { root.classList.add('hidden'); document.body.classList.remove('resident-chatting'); bubble.style.visibility = 'hidden'; },
     focused: () => root.contains(document.activeElement),
     anchor(x, y, visible) {
+      visible = visible && !!text.textContent;
       bubble.style.visibility = visible ? 'visible' : 'hidden';
       if (!visible) return;
       const half = bubble.offsetWidth / 2, left = Math.max(half + 12, Math.min(innerWidth - half - 12, x));
@@ -160,7 +164,7 @@ export function settingsNote({ status, progress, message }, touch = false) {
     case 'idle': return 'On. The resident model loads when you start playing.';
     case 'checking': return 'Checking your graphics card…';
     case 'loading': return `${message || 'Downloading'}… ${Math.round(progress * 100)}%. You can keep playing.`;
-    case 'ready': return 'Ready. Face someone on the street or indoors and press E to talk. Ask them to follow, wait, move aside or return to their routine. The city keeps moving; agreed actions start after Bye. Replies stay on this device.';
+    case 'ready': return `Ready. Face a resident and ${touch ? 'tap USE' : 'press E'} to talk. Ask them to dance, lie down, get up, follow, wait, move aside, guide you somewhere, go to a place, or return to their routine. Agreed actions start after Bye. Replies stay on this device.`;
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
     case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
   }

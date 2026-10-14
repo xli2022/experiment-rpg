@@ -92,12 +92,25 @@ try {
   });
   const idle = () => page.waitForFunction(() => !window.__AFTERLIGHT__.residents.conversation.busy, null, { timeout: 60000 });
   await idle();
+  async function awaitingPlayer() {
+    const conversation = await page.evaluate(() => window.__AFTERLIGHT__.residents.conversation.snapshot());
+    assert.equal(conversation.open, true);
+    assert.equal(conversation.busy, false);
+    assert.equal(conversation.turns, 0);
+    assert.deepEqual(conversation.history, []);
+    assert.equal(conversation.pendingAction, null);
+    assert.equal(await page.locator('#resident-text').textContent(), '');
+    assert.equal(await page.locator('#resident-bubble').isVisible(), false, 'no speech bubble before the player speaks');
+    assert.equal(await page.locator('#resident-send').isEnabled(), true, 'the player can send the first message immediately');
+  }
+  await awaitingPlayer();
   assert.equal(await page.locator('#resident-chat').getAttribute('aria-modal'), null);
   assert.equal(await page.locator('#resident-chat-model').count(), 0, 'no 0.8B selector');
   const liveStart = await page.evaluate(() => window.__AFTERLIGHT__.snapshot());
   assert.equal(liveStart.paused, false); assert.equal(liveStart.modal, null);
   await page.waitForTimeout(1000);
   const liveAfter = await page.evaluate(() => window.__AFTERLIGHT__.snapshot());
+  await awaitingPlayer();
   assert.ok(liveAfter.time > liveStart.time + .4, 'city time advances during chat');
   const beforeTyping = liveAfter.position;
   await page.locator('#resident-input').focus(); await page.keyboard.type('wasd');
@@ -166,6 +179,7 @@ try {
       game.residents.open(resident.resident, snap.time);
     }, resident);
     await idle();
+    await awaitingPlayer();
   }
   await reopen(); await request('Wait here.', 'wait');
   await page.evaluate(id => {

@@ -4,9 +4,10 @@ import * as THREE from 'three';
 import { requestResidentAction, previewResidentAction, stepResidentAction } from '../src/traffic/resident-actions.js';
 import { createTraffic } from '../src/traffic/index.js';
 import { createOccupants } from '../src/traffic/occupants.js';
-import { DECISION_FORMAT, decisionMessages, parseDecision } from '../src/engine/residents/decisions.js';
+import { DECISION_FORMAT, decisionFormat, decisionMessages, parseDecision, preliminaryDecision } from '../src/engine/residents/decisions.js';
 import { ResidentConversation } from '../src/engine/residents/conversation.js';
 import { ResidentModel } from '../src/engine/residents/model.js';
+import { planResidentGuide, residentDestinations } from '../src/traffic/resident-guides.js';
 import { residentPersona, walkerResident, occupantResident } from '../src/engine/residents/persona.js';
 import { gridPlan, crowdAsset } from './helpers/street-grid.js';
 import { orientedBox, circleHitsBox } from '../src/core/physics.js';
@@ -19,6 +20,128 @@ const person = () => ({ x: 0, y: 0, z: 0, yaw: 0, speed: 0 });
 const player = () => ({ x: 0, y: 0, z: -2, yaw: 0 });
 const navigation = (boxes = []) => ({ mobile: true, area: 'outside', sample: (from, p) => boxes.some(b => circleHitsBox(p.x, p.z, .32, b)) ? null : { ...p, y: 0 } });
 const advance = (body, at, nav, seconds = 2) => { for (let i = 0; i < seconds * 60; i++) stepResidentAction(body, 1 / 60, at, nav); };
+
+test('request checks exclude removed commands and ask for an unspecified destination without capturing discussion', () => {
+  for (const line of ['Come here.', 'Could you please face me?', 'Wave at me!', 'Please cheer for me.']) assert.deepEqual(preliminaryDecision(line), { action: 'none' });
+  assert.deepEqual(preliminaryDecision('Guide me somewhere.'), { action: 'guide', destination: '' });
+  assert.deepEqual(preliminaryDecision('Go somewhere, please.'), { action: 'go_to', destination: '' });
+  for (const line of ['Come with me.', 'What happens if I say come here?', 'Tell me a story about waving.', 'Come here and dance.', 'Guide me to the station.']) assert.equal(preliminaryDecision(line), null);
+});
+
+test('lie down and get up preserve position, stay put, and stand before other activities', () => {
+  const body = person(), at = player(), nav = navigation();
+  assert.equal(previewResidentAction(body, 'lie_down', at, nav).ok, true);
+  assert.equal(body.residentAction, undefined);
+  requestResidentAction(body, 'lie_down', at, nav);
+  stepResidentAction(body, 0, at, nav); assert.equal(body.residentAction.recline, 0);
+  advance(body, at, nav, .3); assert.ok(body.residentAction.recline > 0 && body.residentAction.recline < 1);
+  requestResidentAction(body, 'wait', at, nav); advance(body, at, nav);
+  assert.equal(body.residentAction.recline, 1, 'waiting finishes lying down instead of holding a half pose');
+  body.talking = { yaw: 0 }; advance(body, at, nav); assert.equal(body.residentAction.recline, 1);
+  body.talking = null;
+  requestResidentAction(body, 'get_up', at, nav); advance(body, at, nav);
+  assert.equal(body.residentAction.kind, 'wait'); assert.equal(body.residentAction.recline, 0);
+  assert.deepEqual([body.x, body.y, body.z], [0, 0, 0]);
+  requestResidentAction(body, 'lie_down', at, nav); advance(body, at, nav);
+  requestResidentAction(body, 'follow', at, nav); at.z = -5;
+  advance(body, at, nav, .6); assert.equal(body.z, 0, 'never slides along the floor while getting up');
+  advance(body, at, nav, 6); assert.ok(body.z < -3); assert.equal(body.residentAction.recline, 0);
+});
+
+test('lying down checks the whole body footprint, level floor, people and commit-time obstacles', () => {
+  const at = player();
+  for (const nav of [
+    navigation([orientedBox(0, .95, 1, .1, 0, 2, 0)]),
+    { ...navigation(), sample: (from, p) => ({ ...p, y: p.z > .5 ? -.2 : 0 }) },
+    { ...navigation(), sample: (from, p) => Math.abs(p.x - .4) < .1 && p.z > .8 ? null : { ...p } },
+  ]) {
+    const body = person(); assert.equal(requestResidentAction(body, 'lie_down', at, nav).ok, false);
+    assert.equal(body.residentAction, undefined);
+  }
+  assert.equal(requestResidentAction(person(), 'lie_down', { ...at, z: -1.3 }, navigation()).ok, false);
+  const body = person(); requestResidentAction(body, 'lie_down', at, navigation());
+  advance(body, at, navigation([orientedBox(0, .95, 1, .1, 0, 2, 0)]));
+  assert.equal(body.residentAction.recline, 0); assert.match(body.residentAction.status, /space/);
+});
+
+test('dance starts only on commit, pauses during chat, and stops on a new request', () => {
+  const body = person(), at = player(), nav = navigation(), home = { ...body };
+  assert.equal(previewResidentAction(body, 'dance', at, nav).ok, true);
+  assert.deepEqual(body, home);
+  assert.equal(requestResidentAction(body, 'dance', at, nav).ok, true);
+  stepResidentAction(body, 0, at, nav); assert.equal(body.residentAction.elapsed, 0);
+  body.talking = { yaw: 0 }; advance(body, at, nav); assert.equal(body.residentAction.elapsed, 0);
+  body.talking = null; advance(body, at, nav, 20);
+  assert.equal(body.residentAction.kind, 'dance'); assert.ok(body.residentAction.elapsed > 19);
+  assert.deepEqual([body.x, body.y, body.z], [0, 0, 0], 'dance stays on the same floor spot');
+  requestResidentAction(body, 'wait', at, nav); advance(body, at, nav);
+  assert.equal(body.residentAction.kind, 'wait');
+  requestResidentAction(body, 'resume_routine', at, nav); advance(body, at, nav);
+  assert.equal(body.residentAction, null);
+});
+
+test('guides use known destinations, lead around walls, wait for the player and can return home', () => {
+  const body = person(), at = player(), wall = orientedBox(0, -5, 5, .2, 0, 3, 0), nav = navigation([wall]);
+  const destination = { id: 'shop', name: 'KŌJI', type: 'ramen bar', x: 0, y: 0, z: -14 };
+  nav.destinations = () => [destination];
+  nav.guide = start => ({ destination, route: planResidentGuide(start, destination, nav) });
+  const request = { action: 'guide', destination: 'shop' };
+  assert.equal(requestResidentAction(body, { ...request, destination: 'invented' }, at, nav).ok, false);
+  assert.equal(previewResidentAction(body, request, at, nav).ok, true); assert.equal(body.residentAction, undefined);
+  assert.equal(requestResidentAction(body, request, at, nav).ok, true);
+  at.z = 20; advance(body, at, nav);
+  assert.equal(body.z, 0); assert.match(body.residentAction.status, /catch up/);
+  for (let frame = 0; frame < 1800 && body.residentAction.kind === 'guide'; frame++) {
+    // Follow the guide without standing in their path.
+    at.x = body.x; at.y = body.y; at.z = body.z + 2;
+    stepResidentAction(body, 1 / 60, at, nav);
+    assert.equal(circleHitsBox(body.x, body.z, .32, wall), false);
+  }
+  assert.equal(body.residentAction.kind, 'wait'); assert.match(body.residentAction.status, /Arrived at KŌJI/);
+  assert.ok(Math.hypot(body.x - destination.x, body.z - destination.z) < .4);
+  requestResidentAction(body, 'resume_routine', at, nav); at.x = 30; advance(body, at, nav, 30);
+  assert.equal(body.residentAction, null); assert.ok(Math.hypot(body.x, body.z) < .06);
+});
+
+test('guide routes reject blocked goals, floor jumps and searches outside their bounded neighborhood', () => {
+  const start = person(), goal = { x: 6, y: 0, z: 0 };
+  assert.equal(planResidentGuide(start, goal, navigation([orientedBox(6, 0, 4, 4, 0, 3, 0)]), { budget: 200 }), null);
+  assert.equal(planResidentGuide(start, { ...goal, y: 4 }, navigation()), null);
+  assert.equal(planResidentGuide(start, { ...goal, x: 300 }, navigation()), null);
+  assert.equal(planResidentGuide(start, goal, { ...navigation(), sample: () => null }, { budget: 100 }), null);
+  const world = { masterPlan: { terrainHeight: () => 0 }, landmarks: [
+    { id: 'near', station: true, x: 10, y: 0, z: 0 }, { id: 'far', station: true, x: 500, y: 0, z: 0 },
+  ] };
+  assert.deepEqual(residentDestinations(world, start).map(p => p.id), ['station:near']);
+});
+
+test('go to walks independently, waits at the destination, and stops for a new obstacle', () => {
+  const body = person(), at = player(), nav = navigation(), destination = { id: 'station', name: 'Local station', x: 8, y: 0, z: 0 };
+  nav.destinations = () => [destination];
+  nav.guide = start => ({ destination, route: planResidentGuide(start, destination, nav) });
+  assert.equal(requestResidentAction(body, { action: 'go_to', destination: 'station' }, at, nav).ok, true);
+  at.x = -100; advance(body, at, nav, 12);
+  assert.equal(body.residentAction.kind, 'wait'); assert.match(body.residentAction.status, /Arrived at Local station/);
+  assert.ok(Math.abs(body.x - 8) < .35, 'does not wait for the player to follow');
+  const blocked = person();
+  assert.equal(requestResidentAction(blocked, { action: 'go_to', destination: 'station' }, player(), nav).ok, true);
+  const wall = orientedBox(4, 0, .2, 10, 0, 3, 0);
+  advance(blocked, at, { ...nav, ...navigation([wall]) }, 12);
+  assert.ok(blocked.x < 3.7); assert.match(blocked.residentAction.status, /blocked/);
+});
+
+test('destination decisions bind IDs and reject coordinates, missing destinations and dropped actions', () => {
+  const context = { destinations: [{ id: 'shop', name: 'KŌJI', type: 'ramen bar', distance: 15 }] };
+  assert.deepEqual(JSON.parse(decisionFormat(context).schema).properties.destination.enum, ['', 'shop']);
+  for (const action of ['guide', 'go_to']) {
+    assert.deepEqual(parseDecision(JSON.stringify({ action, destination: 'shop' })), { action, destination: 'shop' });
+    assert.equal(parseDecision(JSON.stringify({ action })), null);
+    assert.equal(parseDecision(JSON.stringify({ action, destination: { x: 0, z: 0 } })), null);
+    assert.equal(parseDecision(JSON.stringify({ action, destination: 'shop', x: 5 })), null);
+  }
+  for (const action of ['wave', 'cheer', 'come_here', 'face_me']) assert.equal(parseDecision(JSON.stringify({ action })), null);
+  assert.deepEqual(parseDecision('{"action":"dance"}'), { action: 'dance' });
+});
 
 test('follow, wait, move aside and resume are physical, interruptible behaviors', () => {
   const body = person(), at = player(), nav = navigation();
@@ -183,11 +306,15 @@ function conversationHarness(generate, execute = () => ({ ok: true, reply: 'I wi
 
 test('valid decisions queue until the conversation finishes, and speech reflects validation', async () => {
   const h = conversationHarness(async (messages, options) => {
+    assert.equal(messages.at(-1).content, 'Follow me.');
     assert.deepEqual(options.responseFormat, DECISION_FORMAT);
     options.onText('{"action":"follow"');
     return '{"action":"follow"}';
   });
-  await h.conversation.open(persona, h.actions);
+  h.conversation.open(persona, h.actions);
+  assert.equal(h.conversation.snapshot().pendingAction, null, 'opening chat cannot queue an action');
+  assert.deepEqual(h.spoken, [], 'residents wait for the player to speak');
+  await h.conversation.say('Follow me.');
   assert.deepEqual(h.calls, [], 'no action starts while talking');
   assert.equal(h.conversation.snapshot().pendingAction, 'follow');
   assert.equal(h.conversation.finish().ok, true);
@@ -196,19 +323,51 @@ test('valid decisions queue until the conversation finishes, and speech reflects
   assert.deepEqual(h.spoken, ['I will follow you.']);
   assert.ok(h.shown.every(({ text }) => !text.includes('"action"')), 'JSON is never displayed or spoken');
   const rejected = conversationHarness(async () => '{"action":"move_aside"}', () => ({ ok: false, reply: 'There is no room here.' }));
-  assert.equal(await rejected.conversation.open(persona, rejected.actions), 'There is no room here.');
+  rejected.conversation.open(persona, rejected.actions);
+  assert.equal(await rejected.conversation.say('Please move aside.'), 'There is no room here.');
   assert.equal(rejected.conversation.snapshot().lastAction.ok, false);
+});
+
+test('destination arguments survive conversation queuing and are revalidated on finish', async () => {
+  for (const action of ['guide', 'go_to']) {
+    const request = { action, destination: 'station' }, checked = [];
+    const h = conversationHarness(async (messages, options) => {
+      assert.deepEqual(JSON.parse(options.responseFormat.schema).properties.destination.enum, ['', 'station']);
+      return JSON.stringify(request);
+    }, command => { checked.push(command); return { ok: true, reply: 'Sure.', status: 'Going to the station' }; });
+    h.actions.context = () => ({ destinations: [{ id: 'station', name: 'Station', type: 'station', distance: 20 }] });
+    h.conversation.open(persona, h.actions); await h.conversation.say('To the station, please.');
+    assert.deepEqual(h.calls, []); assert.deepEqual(h.conversation.snapshot().pendingAction, request);
+    assert.deepEqual(checked, [request]);
+    h.conversation.finish(); assert.deepEqual(h.calls, [request]); assert.deepEqual(checked, [request, request]);
+  }
+});
+
+test('removed commands and missing destinations cannot replace a queued activity', async () => {
+  const formats = [];
+  const h = conversationHarness(async (messages, options) => {
+    formats.push(!!options.responseFormat);
+    return options.responseFormat ? '{"action":"dance","destination":""}' : 'Evening.';
+  }, command => typeof command === 'object' && !command.destination ? { ok: false, reply: 'Which place?' } : { ok: true, reply: 'Sure.' });
+  h.conversation.open(persona, h.actions);
+  await h.conversation.say('Dance.'); await h.conversation.say('Come here.');
+  assert.deepEqual(formats, [true, false], 'removed requests become dialogue without asking the model to select an activity');
+  assert.equal(await h.conversation.say('Guide me somewhere.'), 'Which place?');
+  assert.equal(h.conversation.snapshot().pendingAction, 'dance');
+  assert.deepEqual(h.calls, []); h.conversation.finish(); assert.deepEqual(h.calls, ['dance']);
 });
 
 test('late, interrupted, malformed, no-action and failed generations never change the simulation', async () => {
   let finish;
   const h = conversationHarness(() => new Promise(resolve => { finish = resolve; }));
-  const pending = h.conversation.open(persona, h.actions);
+  h.conversation.open(persona, h.actions);
+  const pending = h.conversation.say('Follow me.');
   h.conversation.close(); finish('{"action":"follow"}');
   assert.equal(await pending, null); assert.deepEqual(h.calls, []);
   for (const response of ['{"action":"follow"', '{"action":"none"}', new Error('Device lost')]) {
     const next = conversationHarness(async (messages, options) => { if (response instanceof Error) throw response; return options.responseFormat ? response : "Evening."; });
-    await next.conversation.open(persona, next.actions); assert.deepEqual(next.calls, []);
+    next.conversation.open(persona, next.actions);
+    await next.conversation.say('Hello.'); assert.deepEqual(next.calls, []);
   }
 });
 
@@ -258,13 +417,15 @@ test('talking holds one resident while the city advances, and ending releases th
 test('latest accepted action replaces the queue, small talk preserves it, and resets cancel it', async () => {
   let action = 'follow';
   const h = conversationHarness(async (messages, options) => options.responseFormat ? JSON.stringify({ action }) : 'Evening.');
-  await h.conversation.open(persona, h.actions);
+  h.conversation.open(persona, h.actions);
+  await h.conversation.say('Follow me.');
   action = 'wait'; await h.conversation.say('Wait here instead.');
   action = 'none'; await h.conversation.say('Thanks.');
   assert.equal(h.conversation.snapshot().pendingAction, 'wait');
   assert.deepEqual(h.calls, []);
   h.conversation.finish(); assert.deepEqual(h.calls, ['wait']);
-  action = 'follow'; await h.conversation.open(persona, h.actions);
+  action = 'follow'; h.conversation.open(persona, h.actions);
+  await h.conversation.say('Follow me.');
   h.conversation.close(); h.conversation.finish();
   assert.deepEqual(h.calls, ['wait'], 'reset cancels the queued action');
 });
@@ -272,11 +433,13 @@ test('latest accepted action replaces the queue, small talk preserves it, and re
 test('finishing revalidates a queued request against the world and cancels in-flight JSON', async () => {
   let release;
   const h = conversationHarness(async () => '{"action":"follow"}');
-  await h.conversation.open(persona, h.actions);
+  h.conversation.open(persona, h.actions);
+  await h.conversation.say('Follow me.');
   h.actions.execute = () => ({ ok: false, reply: 'That resident has moved on.' });
   assert.equal(h.conversation.finish().ok, false);
   h.conversation.model.generate = () => new Promise(resolve => { release = resolve; });
-  const pending = h.conversation.open(persona, h.actions);
+  h.conversation.open(persona, h.actions);
+  const pending = h.conversation.say('Wait here.');
   h.conversation.finish(); release('{"action":"wait"}');
   assert.equal(await pending, null); assert.deepEqual(h.calls, []);
 });

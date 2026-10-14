@@ -15,6 +15,8 @@ import { findPath, walk } from './helpers/interior-walk.js';
 import { circleHitsBox, overlapsHeight } from '../src/core/physics.js';
 
 const scene = new THREE.Scene(), stream = new WorldStream(scene), world = createVerticalCity(scene, stream, AFTERLIGHT_LANDMARKS);
+world.landmarks = AFTERLIGHT_LANDMARKS; world.districts = MASTER_DISTRICTS;
+world.buildingsNear = (x, z, radius) => world.metropolis.buildingsNear(x, z, radius);
 const plans = new Map();
 for (const d of MASTER_DISTRICTS) for (const block of world.metropolis.area(d.x - 90, d.z - 90, d.x + 90, d.z + 90)) for (const building of block.buildings) {
   const plan = cachedInteriorPlan(building);
@@ -33,6 +35,27 @@ function replay(body, player, nav, segment) {
     assert.ok(nav.sample(body, body), `resident stays supported and clear of walls at ${JSON.stringify({ x: body.x, y: body.y, z: body.z })}`);
   }
 }
+
+test('local destinations resolve real storefronts and indoor elevators with supported arrival heights', () => {
+  const plan = [...plans.values()].find(p => p.core.lift), door = plan.entrances[0];
+  const outside = toWorld(plan, door.x + door.nx * 5, door.z + door.nz * 5);
+  const body = { ...outside, y: world.terrainHeight(outside.x, outside.z), yaw: 0 };
+  const nav = createResidentNavigation({ world })(body);
+  const support = nav.sample(body, body); assert.ok(support); Object.assign(body, support);
+  const destinations = nav.destinations(); assert.ok(destinations.some(p => p.id === `building:${plan.id}`));
+  const nearest = destinations.find(p => nav.guide(body, p.id)); assert.ok(nearest, 'at least one real nearby entrance is reachable');
+  const player = { ...body, x: body.x + 2, yaw: 0 };
+  assert.equal(requestResidentAction(body, { action: 'go_to', destination: nearest.id }, player, nav).ok, true);
+  player.x += 100;
+  for (let frame = 0; frame < 60 * 120 && body.residentAction.kind === 'go_to'; frame++) stepResidentAction(body, 1 / 60, player, nav);
+  assert.equal(body.residentAction.kind, 'wait'); assert.match(body.residentAction.status, /Arrived at/);
+  assert.ok(nav.sample(body, body));
+  const landing = plan.core.landing;
+  Object.assign(body, at(plan, (landing.x0 + landing.x1) / 2, (landing.z0 + landing.z1) / 2, 1));
+  const inside = nav.destinations(); assert.ok(inside.some(p => p.id === 'lift'));
+  assert.ok(inside.every(p => Math.abs(p.y - body.y) < .1));
+  assert.ok(!inside.some(p => p.type === 'exit'), 'upper floors do not invent a ground-floor exit on this floor');
+});
 
 test('residents enter buildings, climb two switchback storeys, then retrace the whole route home', () => {
   assert.ok(plans.size >= 3);

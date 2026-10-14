@@ -5,6 +5,7 @@ import { createVisitor, VISITOR_PROFILES } from '../actors/npc-visitors.js';
 import { samplePath, projectOnPath } from './network.js';
 import { walkState } from './signals.js';
 import { requestResidentAction, stepResidentAction, residentActionContext } from './resident-actions.js';
+import { RESIDENT_REST } from '../core/resident-behaviors.js';
 import { angleDelta, circleHitsBox, clamp, overlapsHeight, seededRandom } from '../core/physics.js';
 
 // Walkers on the sidewalk graph: they follow sidewalks around corners, wait
@@ -263,6 +264,8 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
     const room = edge.kind === 'sidewalk' || edge.kind === 'deck' ? 1.1 : edge.kind === 'crossing' ? .6 : .25;
     person.offset += clamp(laneOffset(edge, person.forward, person.s, clamp(lateral, -room, room)) - person.offset, -.9 * dt, .9 * dt);
     person.speed += clamp(want - person.speed, -2.6 * dt, 1.3 * dt);
+    if (list.some(other => other !== person && other.residentAction?.recline && Math.abs(other.y - person.y) < 1.5 &&
+      dist(other, { x: person.x + fx * person.speed * dt, z: person.z + fz * person.speed * dt }) < RESIDENT_REST.length / 2 + .32 && inPath(person, other))) person.speed = 0;
     if (gated && L - person.s < .35 && person.speed < .15) {
       person.mode = 'wait'; person.speed = 0;
       // Face across the street while waiting.
@@ -332,7 +335,7 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
   function animate(person, near, time) {
     if (!near && person.elapsed <= .1) return;
     const speed = person.elapsed > 0 ? person.travelled / person.elapsed : 0;
-    person.avatar.update(person.elapsed, speed);
+    person.avatar.update(person.elapsed, speed, person.residentAction?.transition || person.talking && !person.residentAction?.recline ? null : person.residentAction);
     gesture(person, time);
     person.elapsed = person.travelled = 0;
   }
@@ -408,7 +411,7 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
         let moved = 0;
         if (person.talking && person.edge?.kind !== 'crossing') {
           person.speed = 0;
-          person.yaw += clamp(angleDelta(person.yaw, Math.atan2(-(player.x - person.x), -(player.z - person.z))), -2.6 * dt, 2.6 * dt);
+          if (!person.residentAction?.recline) person.yaw += clamp(angleDelta(person.yaw, Math.atan2(-(player.x - person.x), -(player.z - person.z))), -2.6 * dt, 2.6 * dt);
         } else if (person.residentAction) {
           moved = stepResidentAction(person, dt, player, residentNavigation(person));
           if (!person.residentAction) { person.mode = 'walk'; person.pauseIn = 15 + random() * 30; }

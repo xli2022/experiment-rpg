@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createVisitor, VISITOR_PROFILES } from '../src/actors/npc-visitors.js';
+import { checkResidentPoses } from './helpers/resident-poses.js';
 
 // Retain the actual geometry, skin and animation data. Browser image decoding is
 // unavailable in Node, so remove only image references from the loader fixture.
@@ -45,6 +46,13 @@ async function loadVisitor(id) {
 }
 
 const loaded = new Map(await Promise.all(VISITOR_PROFILES.map(async profile => [profile.id, await loadVisitor(profile.id)])));
+
+test('every robot and alien can dance, lie down and get up using its native rig', () => {
+  for (const profile of VISITOR_PROFILES) {
+    const actor = createVisitor(loaded.get(profile.id).asset, profile);
+    try { checkResidentPoses(actor); } finally { actor.dispose(); }
+  }
+});
 const objects = (root, predicate) => {
   const result = []; root.traverse(object => { if (predicate(object)) result.push(object); }); return result;
 };
