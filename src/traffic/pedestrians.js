@@ -64,6 +64,10 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
   const inView = p => { sphere.center.set(p.x, (p.y ?? 0) + 1, p.z); return frustum.intersectsSphere(sphere); };
   let list = [];
   const walkers = () => people.filter(p => p.mode);
+  // A conversation holds its walker still, except while finishing a crossing.
+  const listening = p => p.talking && p.edge?.kind !== 'crossing';
+  // Nobody is retired mid-conversation or mid-errand, nor the companion they walk with.
+  const engaged = p => p.residentAction || p.talking || p.follower?.talking;
 
   // --- Graph helpers ------------------------------------------------------------
   const endOf = (edge, forward) => forward ? edge.b : edge.a;
@@ -387,11 +391,11 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
         target = Math.min(people.length, population.pedestrians, Math.floor(length / spacing));
       }
       const safe = p => !camera || !inView(p) || dist(p, player) > radius + SHOW_MARGIN;
-      for (const person of walkers()) if (!person.residentAction && !person.talking && !person.leader && dist(person, player) > reach + 40 && safe(person)) retire(person);
+      for (const person of walkers()) if (!engaged(person) && !person.leader && dist(person, player) > reach + 40 && safe(person)) retire(person);
       let count = walkers().length;
       for (const person of walkers().sort((a, b) => dist(b, player) - dist(a, player))) {
         if (count <= target) break;
-        if (!person.residentAction && !person.talking && !person.leader && !person.group && safe(person)) { count -= person.follower ? 2 : 1; retire(person); }
+        if (!engaged(person) && !person.leader && !person.group && safe(person)) { count -= person.follower ? 2 : 1; retire(person); }
       }
       // A first placement fills at once; later arrivals trickle in out of sight.
       if (spawnTime <= 0) {
@@ -409,9 +413,13 @@ export function createPedestrians({ scene, network, plan, spatial = null, assets
       visibleCount = 0; list = walkers();
       for (const person of list) {
         let moved = 0;
-        if (person.talking && person.edge?.kind !== 'crossing') {
+        if (listening(person)) {
           person.speed = 0;
           if (!person.residentAction?.sitProgress) person.yaw += clamp(angleDelta(person.yaw, Math.atan2(-(player.x - person.x), -(player.z - person.z))), -2.6 * dt, 2.6 * dt);
+        } else if (person.follower && listening(person.follower)) {
+          // Someone walking with a friend waits while the friend talks; had they
+          // walked on, the friend would rejoin them from far off in one leap.
+          person.speed = 0; person.claim = false; person.holding = true;
         } else if (person.residentAction) {
           moved = stepResidentAction(person, dt, player, residentNavigation(person));
           // Followers catching up jog where the rig has a Jog clip.

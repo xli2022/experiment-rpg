@@ -691,6 +691,32 @@ test('talking holds one resident while the city advances, and ending releases th
   traffic.dispose();
 });
 
+test('a companion waits while their friend talks, so the pair walk on together without a leap', () => {
+  const traffic = createTraffic({ scene: new THREE.Scene(), world: { masterPlan: gridPlan(), spatial: null }, assets: { citizen: crowdAsset() } });
+  const at = { x: 30, y: 0, z: 30, yaw: 0 };
+  traffic.update(0, { player: at });
+  const p = traffic.pedestrians.walkers.find(p => p.mode === 'follow' && p.edge.kind !== 'crossing'), leader = p.leader, handle = walkerResident(p).handle;
+  Object.assign(at, { x: p.x + 1.5, z: p.z });
+  assert.equal(traffic.talkToResident(handle, true), true);
+  for (let i = 0; i < 30 * 60; i++) traffic.update(1 / 60, { player: at });
+  assert.ok(Math.hypot(leader.x - p.x, leader.z - p.z) < 1.5, 'the companion waited');
+  // A street over its budget keeps both of them, or the conversation would vanish.
+  traffic.pedestrians.setQuality('high');
+  traffic.pedestrians.update(1 / 60, { player: at, time: traffic.time, population: { pedestrians: 0, pedestrianSpacing: 7, district: 'core' } });
+  assert.ok(leader.mode && leader.follower === p && p.leader === leader, 'the pair stays while they talk');
+  traffic.pedestrians.setQuality('high');
+  assert.equal(traffic.talkToResident(handle, false), true);
+  let fastest = 0;
+  for (let i = 0; i < 120; i++) {
+    const before = { x: p.x, z: p.z };
+    traffic.update(1 / 60, { player: at });
+    fastest = Math.max(fastest, Math.hypot(p.x - before.x, p.z - before.z) * 60);
+  }
+  assert.ok(fastest < 3, `rejoined at ${fastest.toFixed(1)} m/s`);
+  assert.ok(p.leader === leader, 'still walking together');
+  traffic.dispose();
+});
+
 test('latest accepted action replaces the queue, small talk preserves it, and resets cancel it', async () => {
   let action = 'follow';
   const h = conversationHarness(async (messages, options) => options.responseFormat ? JSON.stringify({ action }) : 'Evening.');
