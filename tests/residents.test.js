@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { residentPersona, residentVoice, walkerResident, occupantResident, systemPrompt, chatMessages, cleanReply, previewReply, fallbackReply, HISTORY_TURNS } from '../src/engine/residents/persona.js';
-import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODEL, RETIRED_MODELS } from '../src/engine/residents/model.js';
-import { ResidentConversation, facingResident, settingsNote, MAX_LINE } from '../src/engine/residents/conversation.js';
+import { ResidentModel, detectGPU, passesSelfCheck, RESIDENT_CHAT_KEY, RESIDENT_MODELS, RETIRED_MODELS } from '../src/engine/residents/model.js';
+import { ResidentConversation, facingResident, settingsNote, modelLabel, MAX_LINE } from '../src/engine/residents/conversation.js';
 import { createStorage } from '../src/engine/save.js';
 import { gameClock } from '../src/engine/clock.js';
 import { CROWD_PROFILES } from '../src/actors/npc-profiles.js';
@@ -167,9 +167,9 @@ test('resident chat stays off until the player turns it on, then remembers', asy
   assert.equal(engines.length, 0);
   assert.equal(await model.setEnabled(true), true);
   assert.equal(model.status, 'ready');
-  assert.equal(engines[0].model, 'Qwen3.5-0.8B-q4f32_1-MLC', '0.8B supports conversations and actions by default');
+  assert.equal(engines[0].model, 'Qwen3.5-0.8B-q4f32_1-MLC', '0.8B unless the player picks a larger size');
   assert.deepEqual(seen, ['off', 'checking', 'loading:Starting', 'loading:Downloading', 'loading:Preparing the graphics card', 'ready']);
-  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true });
+  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true, size: '0.8B' });
   // The next visit loads it again when play starts.
   const later = new ResidentModel({ storage, gpu: gpu(), backend });
   assert.equal(later.status, 'idle');
@@ -199,8 +199,45 @@ test('without WebGPU, or when loading fails, the setting explains and the game p
   assert.match(settingsNote(failing.snapshot()), /stopped: Network error Turn it off and on/);
 });
 
-test('legacy model choices migrate to the only resident model, Qwen 0.8B, and retire 2B', async () => {
-  assert.ok(RETIRED_MODELS.includes('Qwen3.5-2B-q4f32_1-MLC'), '2B downloads are removed on load');
+test('the player picks 0.8B, 2B or 4B, and a loaded or loading model gives way to the new pick', async () => {
+  assert.deepEqual(Object.values(RESIDENT_MODELS).map(m => m.id), ['Qwen3.5-0.8B-q4f32_1-MLC', 'Qwen3.5-2B-q4f32_1-MLC', 'Qwen3.5-4B-q4f32_1-MLC']);
+  for (const { id } of Object.values(RESIDENT_MODELS)) assert.ok(!RETIRED_MODELS.includes(id), `${id} stays in the cache`);
+  const storage = memoryStorage(), { backend, engines } = fakeBackend();
+  const model = new ResidentModel({ storage, gpu: gpu(), backend });
+  assert.equal(model.snapshot().size, '0.8B');
+  assert.equal(await model.setSize('4B'), false, 'while off the choice is only remembered');
+  assert.equal(engines.length, 0);
+  assert.equal(new ResidentModel({ storage }).size, '4B', 'and kept for the next visit');
+  assert.equal(await model.setEnabled(true), true);
+  assert.equal(engines[0].model, RESIDENT_MODELS['4B'].id);
+  assert.equal(await model.setSize('2B'), true);
+  assert.equal(engines[0].unloads, 1, 'the other size is released');
+  assert.deepEqual([engines[1].model, model.status, model.snapshot().size], [RESIDENT_MODELS['2B'].id, 'ready', '2B']);
+  assert.equal(await model.setSize('huge'), true, 'an unknown size changes nothing');
+  assert.deepEqual([model.size, engines.length], ['2B', 2]);
+  // Picking again mid-download stops that download and fetches the new pick.
+  const loads = [], idle = new ResidentModel({ storage: memoryStorage(), gpu: gpu(), backend: (id, progress, signal) => new Promise((resolve, reject) => {
+    // As WebLLM's worker does, an aborted download ends in an error.
+    signal.addEventListener('abort', () => reject(new Error('the model was unloaded.')));
+    loads.push({ id, signal, done: () => resolve({ async unload() {} }) });
+  }) });
+  const first = idle.setEnabled(true);
+  await tick(); await tick();
+  const second = idle.setSize('4B');
+  await tick(); await tick();
+  assert.deepEqual(loads.map(l => [l.id, l.signal.aborted]), [[RESIDENT_MODELS['0.8B'].id, true], [RESIDENT_MODELS['4B'].id, false]]);
+  loads[1].done();
+  assert.deepEqual([await first, await second, idle.status, idle.model], [false, true, 'ready', RESIDENT_MODELS['4B'].id]);
+  // After a failed load, such as 4B running out of graphics memory, a smaller pick tries again.
+  const failing = new ResidentModel({ storage: memoryStorage(), gpu: gpu(), backend: fakeBackend({ fail: 'Out of memory' }).backend });
+  await failing.setSize('4B'); await failing.setEnabled(true);
+  assert.equal(failing.status, 'error');
+  assert.match(settingsNote(failing.snapshot()), /Turn it off and on, or pick a smaller model, to try again\.$/);
+  failing.backend = backend;
+  assert.equal(await failing.setSize('0.8B'), true);
+});
+
+test('old size names from the first picker load the default, Qwen 0.8B', async () => {
   for (const size of ['small', 'large', 'unknown']) {
     const storage = memoryStorage(), { backend, engines } = fakeBackend();
     storage.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled: true, downloaded: true, size }));
@@ -208,9 +245,9 @@ test('legacy model choices migrate to the only resident model, Qwen 0.8B, and re
     assert.equal(model.status, 'idle');
     assert.equal(model.downloaded, true, 'old downloads can still be deleted');
     assert.equal(await model.load(), true);
-    assert.equal(engines[0].model, RESIDENT_MODEL.id);
+    assert.equal(engines[0].model, RESIDENT_MODELS['0.8B'].id);
     assert.equal(model.supportsActions, true);
-    assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true });
+    assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: true, downloaded: true, size: '0.8B' });
     model.dispose();
   }
 });
@@ -257,7 +294,7 @@ test('deleting the download turns the setting off', async () => {
   await model.setEnabled(true);
   await model.forget();
   assert.deepEqual([deleted.length, model.enabled, model.downloaded, model.status], [1, false, false, 'off']);
-  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: false, downloaded: false });
+  assert.deepEqual(JSON.parse(storage.getItem(RESIDENT_CHAT_KEY)), { enabled: false, downloaded: false, size: '0.8B' });
   assert.match(settingsNote(model.snapshot()), /^The downloaded model was deleted\. Chat with people/);
 });
 
@@ -371,7 +408,9 @@ test('a failed or unusable reply becomes a fallback line in the resident’s voi
 });
 
 test('the setting note says what turning it on costs and what it is doing', () => {
-  assert.match(settingsNote({ status: 'off' }), /written live by Qwen3\.5 0\.8B .*downloads about 450 MB once\. Story contacts keep their own dialogue\./);
+  assert.match(settingsNote({ status: 'off' }), /written live by Qwen3\.5 0\.8B .*downloads about 450 MB once and needs about 1\.9 GB of graphics memory\. Story contacts keep their own dialogue\./);
+  assert.match(settingsNote({ status: 'off', size: '4B' }), /written live by Qwen3\.5 4B .*downloads about 2\.4 GB once and needs about 4\.7 GB of graphics memory\./, 'the size the player picked');
+  assert.equal(modelLabel(RESIDENT_MODELS['2B']), 'Qwen3.5 2B · balanced · 1.1 GB');
   assert.doesNotMatch(settingsNote({ status: 'off' }), /phones/);
   assert.match(settingsNote({ status: 'off' }, true), /phones and tablets may run out of memory/);
   assert.equal(settingsNote({ status: 'loading', progress: .42, message: 'Downloading' }), 'Downloading… 42%. You can keep playing.');

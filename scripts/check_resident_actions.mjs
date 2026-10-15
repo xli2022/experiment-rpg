@@ -108,7 +108,7 @@ try {
   }
   await awaitingPlayer();
   assert.equal(await page.locator('#resident-chat').getAttribute('aria-modal'), null);
-  assert.equal(await page.locator('#resident-chat-model').count(), 0, 'no model selector');
+  assert.equal(await page.locator('#resident-chat #resident-chat-model').count(), 0, 'the model is picked in the pause menu, not the conversation');
   const liveStart = await page.evaluate(() => window.__AFTERLIGHT__.snapshot());
   assert.equal(liveStart.paused, false); assert.equal(liveStart.modal, null);
   await page.waitForTimeout(1000);

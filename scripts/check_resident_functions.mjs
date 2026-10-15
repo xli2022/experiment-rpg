@@ -60,12 +60,17 @@ try {
   }
   console.log('Rendered dance, sit-down and get-up poses for all 12 body designs.');
   if (process.env.RESIDENT_REAL === '1') {
-    const modelState = await page.evaluate(async () => {
+    // RESIDENT_SIZE picks the model size (0.8B, 2B or 4B; 0.8B by default).
+    const modelState = await page.evaluate(async size => {
       const { ResidentModel } = await import('/src/engine/residents/model.js');
       window.intentModel = new ResidentModel();
-      await window.intentModel.setEnabled(true); return window.intentModel.snapshot();
-    });
+      await window.intentModel.setSize(size);
+      const start = performance.now();
+      await window.intentModel.setEnabled(true); return { ...window.intentModel.snapshot(), loadMs: Math.round(performance.now() - start) };
+    }, process.env.RESIDENT_SIZE || '0.8B');
     assert.equal(modelState.status, 'ready', modelState.message);
+    Object.assign(results, { model: modelState.model, loadMs: modelState.loadMs });
+    console.log(`Loaded ${modelState.model} in ${(modelState.loadMs / 1000).toFixed(1)} s.`);
     // Each case is a line and its expected plan: steps as [action, destination,
     // until, seconds], read the way parseDecision normalises them.
     const PLACES = ['guide', 'go_to'];

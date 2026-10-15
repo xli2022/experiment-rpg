@@ -1,15 +1,26 @@
 // A small language model for background residents, run in the player's own
 // browser on the graphics card (WebGPU). It stays off until the player turns
-// it on in the pause menu; the 0.8B weights (about 450 MB) then download once
-// from Hugging Face into the browser's cache.
-// Story contacts never use it.
+// it on in the pause menu; the weights of the size they pick (about 450 MB,
+// 1.1 GB or 2.4 GB) then download once from Hugging Face into the browser's
+// cache. Story contacts never use it.
 
 export const RESIDENT_CHAT_KEY = 'afterlight.resident-chat.v1';
-// Qwen3.5 0.8B in 4 bits, computing in 32-bit floats on every graphics card
-// (about 1.9 GB of graphics memory). It answers much sooner than 2B, whose
-// downloads, like those of 0.8B's f16 build, are removed on load.
-export const RESIDENT_MODEL = Object.freeze({ id: 'Qwen3.5-0.8B-q4f32_1-MLC', name: 'Qwen3.5 0.8B', download: '450 MB' });
-export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC', 'Qwen3.5-2B-q4f32_1-MLC']);
+// Qwen3.5 in 4 bits, computing in 32-bit floats on every graphics card, in
+// three sizes the player picks between. 0.8B answers soonest; each larger size
+// roughly doubles the download and keeps to the topic and in character better,
+// but answers more slowly and needs more graphics memory. Each size stays in
+// the cache, so switching back takes seconds. Downloads of 0.8B's f16 build
+// are removed on load.
+export const RESIDENT_MODELS = Object.freeze({
+  '0.8B': Object.freeze({ id: 'Qwen3.5-0.8B-q4f32_1-MLC', name: 'Qwen3.5 0.8B', trait: 'fastest', download: '450 MB', memory: '1.9 GB' }),
+  '2B': Object.freeze({ id: 'Qwen3.5-2B-q4f32_1-MLC', name: 'Qwen3.5 2B', trait: 'balanced', download: '1.1 GB', memory: '2.6 GB' }),
+  '4B': Object.freeze({ id: 'Qwen3.5-4B-q4f32_1-MLC', name: 'Qwen3.5 4B', trait: 'sharpest', download: '2.4 GB', memory: '4.7 GB' }),
+});
+export const DEFAULT_SIZE = '0.8B';
+const knownSize = size => Object.hasOwn(RESIDENT_MODELS, size ?? '');
+/** The model of a size; anything unknown, such as an old `small` or `large`, gets the default. */
+export const residentModel = size => RESIDENT_MODELS[knownSize(size) ? size : DEFAULT_SIZE];
+export const RETIRED_MODELS = Object.freeze(['Qwen3.5-0.8B-q4f16_1-MLC']);
 // Short, fairly focused replies: a person talking, not an essay.
 export const SAMPLING = Object.freeze({ max_tokens: 80, temperature: .7, top_p: .8, presence_penalty: 1.5, frequency_penalty: 0 });
 // Once loaded, the model must repeat a plain sentence. A model that computes
@@ -33,8 +44,8 @@ export async function detectGPU(gpu, { allowSoftware = false } = {}) {
 function readSettings(storage) {
   try {
     const saved = JSON.parse(storage?.getItem(RESIDENT_CHAT_KEY) ?? 'null');
-    return { enabled: saved?.enabled === true, downloaded: saved?.downloaded === true, allowSoftwareGpu: saved?.allowSoftwareGpu === true };
-  } catch { return { enabled: false, downloaded: false, allowSoftwareGpu: false }; }
+    return { enabled: saved?.enabled === true, downloaded: saved?.downloaded === true, size: knownSize(saved?.size) ? saved.size : DEFAULT_SIZE, allowSoftwareGpu: saved?.allowSoftwareGpu === true };
+  } catch { return { enabled: false, downloaded: false, size: DEFAULT_SIZE, allowSoftwareGpu: false }; }
 }
 
 // What WebLLM is doing, from its progress text.
@@ -89,7 +100,7 @@ async function webLLM(model, onProgress, signal) {
 }
 async function forgetWebLLM() {
   const worker = modelWorker();
-  try { await worker.request('forget', { models: [RESIDENT_MODEL.id, ...RETIRED_MODELS] }); } finally { worker.terminate(); }
+  try { await worker.request('forget', { models: [...Object.values(RESIDENT_MODELS).map(m => m.id), ...RETIRED_MODELS] }); } finally { worker.terminate(); }
 }
 
 /**
@@ -107,18 +118,27 @@ export class ResidentModel {
   }
   get ready() { return this.status === 'ready'; }
   get supportsActions() { return true; }
-  snapshot() { const { enabled, downloaded, status, progress, message, model } = this; return { enabled, downloaded, status, progress, message, model }; }
+  snapshot() { const { enabled, downloaded, size, status, progress, message, model } = this; return { enabled, downloaded, size, status, progress, message, model }; }
   subscribe(listener) { this.listeners.add(listener); listener(this.snapshot()); return () => this.listeners.delete(listener); }
   update(changes) { Object.assign(this, changes); for (const listener of this.listeners) listener(this.snapshot()); }
   save() {
-    const { enabled, downloaded, allowSoftwareGpu } = this;
-    try { this.storage?.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled, downloaded, ...(allowSoftwareGpu ? { allowSoftwareGpu } : {}) })); }
+    const { enabled, downloaded, size, allowSoftwareGpu } = this;
+    try { this.storage?.setItem(RESIDENT_CHAT_KEY, JSON.stringify({ enabled, downloaded, size, ...(allowSoftwareGpu ? { allowSoftwareGpu } : {}) })); }
     catch { /* The choice lasts for this session. */ }
   }
   setEnabled(enabled) {
     this.enabled = !!enabled; this.save();
     if (this.enabled) return this.load();
     this.unload(); return Promise.resolve(false);
+  }
+  /** Pick the model size (a key of RESIDENT_MODELS). A model loaded, loading or failed gives way to the new one. */
+  setSize(size) {
+    if (!knownSize(size) || size === this.size) return Promise.resolve(this.ready);
+    const active = !!(this.engine || this.loading) || this.status === 'error';
+    this.size = size; this.save();
+    if (!active) { this.update({}); return Promise.resolve(false); }
+    this.unload();
+    return this.load();
   }
   /** Load the model if the player turned it on. Safe to call again while loading or loaded. */
   load() {
@@ -133,7 +153,7 @@ export class ResidentModel {
     const gpu = await detectGPU(this.gpu, { allowSoftware: this.allowSoftwareGpu });
     if (!current()) return false;
     if (!gpu.supported) { this.enabled = false; this.save(); this.update({ status: 'unsupported', message: gpu.reason }); return false; }
-    const model = RESIDENT_MODEL.id;
+    const model = residentModel(this.size).id;
     this.update({ status: 'loading', model, message: 'Starting' });
     const cancel = this.cancel = new AbortController();
     try {

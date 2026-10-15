@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { inflateSync } from 'node:zlib';
-import { RESIDENT_MODEL } from '../src/engine/residents/model.js';
+import { RESIDENT_MODELS } from '../src/engine/residents/model.js';
+import { modelLabel } from '../src/engine/residents/conversation.js';
 
 const root = new URL('../', import.meta.url);
 const html = readFileSync(new URL('index.html', root), 'utf8');
@@ -63,7 +64,8 @@ test('Android and Apple installation icons link to real PNGs at their advertised
   assert.match(html, /<meta\s+name="apple-mobile-web-app-capable"\s+content="yes"/);
 });
 
-test('the pause menu names the resident model actually loaded', () => {
-  const label = html.match(/<span id="resident-model-name">([^<]*)<\/span>/)?.[1];
-  assert.equal(label, `${RESIDENT_MODEL.name} · ${RESIDENT_MODEL.download}`);
+test('the pause menu offers each resident model size', () => {
+  const select = html.match(/<select id="resident-chat-model">(.*?)<\/select>/)?.[1] ?? '';
+  const options = [...select.matchAll(/<option value="([^"]*)">([^<]*)<\/option>/g)].map(([, value, label]) => [value, label]);
+  assert.deepEqual(options, Object.entries(RESIDENT_MODELS).map(([size, model]) => [size, modelLabel(model)]));
 });

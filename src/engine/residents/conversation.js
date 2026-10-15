@@ -1,6 +1,6 @@
 import { residentPersona, chatMessages, cleanReply, previewReply, fallbackReply } from './persona.js';
 import { Vector3 } from 'three';
-import { ResidentModel, RESIDENT_MODEL } from './model.js';
+import { ResidentModel, RESIDENT_MODELS, DEFAULT_SIZE, residentModel } from './model.js';
 import { decisionFormat, decisionMessages, parseDecision, planSummary, preliminaryDecision, readRequest } from './decisions.js';
 
 const $ = id => document.getElementById(id);
@@ -158,24 +158,28 @@ function createView({ touch, onSay, onClose, onFocus }) {
 }
 
 /** The pause-menu note for the resident-chat setting. */
-export function settingsNote({ status, progress, message }, touch = false) {
+export function settingsNote({ status, progress, message, size }, touch = false) {
+  const model = residentModel(size);
   switch (status) {
     case 'idle': return 'On. The resident model loads when you start playing.';
     case 'checking': return 'Checking your graphics card…';
     case 'loading': return `${message || 'Downloading'}… ${Math.round(progress * 100)}%. You can keep playing.`;
     case 'ready': return `Ready. Face a resident and ${touch ? 'tap USE' : 'press E'} to talk. Ask them to dance, sit down, get up, follow, wait, guide you somewhere, go to a place, or return to their routine, or chain them: “go to the station, wait until I come back, then go back to your routine.” Agreed actions start after Bye. Replies stay on this device.`;
     case 'unsupported': return `Not available here: ${message} It needs WebGPU on a graphics card, as in current desktop Chrome or Edge.`;
-    case 'error': return `The resident model stopped: ${message} Turn it off and on to try again.`;
+    case 'error': return `The resident model stopped: ${message} Turn it off and on${model === residentModel(DEFAULT_SIZE) ? '' : ', or pick a smaller model,'} to try again.`;
   }
-  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by ${RESIDENT_MODEL.name} on your graphics card. Turning this on downloads about ${RESIDENT_MODEL.download} once${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
+  return `${message ? `${message} ` : ''}Chat with people on the street and indoors, written live by ${model.name} on your graphics card. Turning this on downloads about ${model.download} once and needs about ${model.memory} of graphics memory${touch ? '; phones and tablets may run out of memory' : ''}. Story contacts keep their own dialogue.`;
 }
+/** The pause-menu choice for a model size. */
+export const modelLabel = ({ name, trait, download }) => `${name} · ${trait} · ${download}`;
 function bindSettings(model, touch) {
-  const toggle = $('resident-chat-toggle'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
-  $('resident-model-name').textContent = `${RESIDENT_MODEL.name} · ${RESIDENT_MODEL.download}`;
+  const toggle = $('resident-chat-toggle'), size = $('resident-chat-model'), note = $('resident-chat-note'), forget = $('resident-chat-forget');
+  size.replaceChildren(...Object.entries(RESIDENT_MODELS).map(([key, choice]) => new Option(modelLabel(choice), key)));
   toggle.addEventListener('change', () => model.setEnabled(toggle.checked));
+  size.addEventListener('change', () => model.setSize(size.value));
   forget.addEventListener('click', () => model.forget());
   model.subscribe(state => {
-    toggle.checked = state.enabled; note.textContent = settingsNote(state, touch);
+    toggle.checked = state.enabled; size.value = state.size; note.textContent = settingsNote(state, touch);
     forget.classList.toggle('hidden', !state.downloaded || ['checking', 'loading'].includes(state.status));
   });
 }
